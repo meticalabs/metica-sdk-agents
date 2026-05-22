@@ -83,7 +83,7 @@ Defined in `metica-versions.yaml` (single source of truth):
 | MeticaSDK | Unity | Java | MAX | Android API |
 |---|---|---|---|---|
 | 2.4.0 (latest) | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23 |
-| 2.2.2 | ≥ 2021.3 | ≥ 11 | ≥ 8.0.0 | ≥ 23 |
+| 2.2.7 | ≥ 2021.3 | ≥ 11 | ≥ 8.0.0 | ≥ 23 |
 
 The compat-checker reads this file. To add a new SDK version, add an entry and bump `latest:`.
 

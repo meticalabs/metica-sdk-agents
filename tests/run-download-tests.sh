@@ -191,7 +191,7 @@ rm -rf "$proj" "$PATCHED_PLUGIN" "$BAD_YAML"
 
 # 10. Existing install refused without --force
 proj=$(make_temp_project)
-touch "$proj/Assets/MeticaSDK-2.2.2.unitypackage"
+touch "$proj/Assets/MeticaSdk-2.2.7.unitypackage"
 logf="$(log_for existing-no-force)"
 if METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" >"$logf" 2>&1; then
     printf "  FAIL  existing install should refuse without --force\n"; fail=$((fail+1))
@@ -204,7 +204,7 @@ rm -rf "$proj"
 
 # 11. Existing install installs with --force
 proj=$(make_temp_project)
-touch "$proj/Assets/MeticaSDK-2.2.2.unitypackage"
+touch "$proj/Assets/MeticaSdk-2.2.7.unitypackage"
 assert_pass "existing install + --force overwrites" \
     env METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --force
 rm -rf "$proj"
