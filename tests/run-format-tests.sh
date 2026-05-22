@@ -143,15 +143,27 @@ assert_contains "long-detected truncated with > sentinel" "$out" \
 REAL_PROJECT="$(cd "$SCRIPT_DIR/../../max-agent-test/DemoApp" 2>/dev/null && pwd)"
 if [ -d "$REAL_PROJECT" ]; then
     out=$(bash "$DETECT" --project="$REAL_PROJECT" 2>/dev/null | bash "$FORMAT")
-    # DemoApp: Android API bumped to 23; MeticaSDK 2.4.0 imported. Full PASS.
-    assert_contains "real-project: full pipeline" "$out" \
-        "COMPAT REPORT — target MeticaSDK 2.4.0" \
-        "Unity         2022.3.62f2" \
-        "MaxSDK        8.6.3" \
-        "Backend       Mono" \
-        "Android API   23" \
-        "MeticaSDK     2.4.0" \
-        "Overall: PASS"
+    # DemoApp: assert the non-volatile rows; the metica_sdk row varies depending
+    # on whether the user has imported the .unitypackage yet.
+    if [ -f "$REAL_PROJECT/Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs" ]; then
+        assert_contains "real-project: full pipeline (MeticaSDK installed)" "$out" \
+            "COMPAT REPORT — target MeticaSDK 2.4.0" \
+            "Unity         2022.3.62f2" \
+            "MaxSDK        8.6.3" \
+            "Backend       Mono" \
+            "Android API   23" \
+            "MeticaSDK     2.4.0" \
+            "Overall: PASS"
+    else
+        assert_contains "real-project: full pipeline (MeticaSDK not installed)" "$out" \
+            "COMPAT REPORT — target MeticaSDK 2.4.0" \
+            "Unity         2022.3.62f2" \
+            "MaxSDK        8.6.3" \
+            "Backend       Mono" \
+            "Android API   23" \
+            "MeticaSDK     n/a" \
+            "Overall: BLOCK"
+    fi
     assert_structure "real-project: 7 rows + 1 Overall" "$out" 7
 fi
 

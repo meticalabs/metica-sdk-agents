@@ -123,9 +123,16 @@ assert_case missing-max   "BLOCK" "java"        "MOCK_JAVA_VERSION=1.8.0_362"
 # Real project — locked expected per-check levels
 REAL_PROJECT="$(cd "$SCRIPT_DIR/../../max-agent-test/DemoApp" 2>/dev/null && pwd)"
 if [ -d "$REAL_PROJECT" ]; then
-    # Real DemoApp: Android API bumped 19→23; MeticaSDK 2.4.0 imported. All PASS.
-    assert_check_levels "real-project" "$REAL_PROJECT" "PASS" \
-        "unity:PASS" "java:PASS" "max:PASS" "android_api:PASS" "scripting_backend:PASS" "gradle:UNKNOWN" "metica_sdk:PASS"
+    # Real DemoApp: Android API bumped 19→23. Whether MeticaSDK is imported
+    # depends on whether the user has opened Unity and imported the .unitypackage.
+    # The test asserts only the non-volatile rows; metica_sdk varies with demo state.
+    if [ -f "$REAL_PROJECT/Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs" ]; then
+        assert_check_levels "real-project (MeticaSDK installed)" "$REAL_PROJECT" "PASS" \
+            "unity:PASS" "java:PASS" "max:PASS" "android_api:PASS" "scripting_backend:PASS" "gradle:UNKNOWN" "metica_sdk:PASS"
+    else
+        assert_check_levels "real-project (MeticaSDK not installed)" "$REAL_PROJECT" "BLOCK" \
+            "unity:PASS" "java:PASS" "max:PASS" "android_api:PASS" "scripting_backend:PASS" "gradle:UNKNOWN" "metica_sdk:FAIL"
+    fi
 fi
 
 echo "----"
