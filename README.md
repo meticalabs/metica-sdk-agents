@@ -2,61 +2,44 @@
 
 Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX.
 
-The plugin ships three subagents:
+## Use it
 
-| Agent | Role |
-|---|---|
-| `@agent-metica-unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint. |
-| `@agent-metica-unity-integrator` | Orchestrator. Mode-detects (fresh vs side-by-side), presents a plan, snapshots git, generates code, invokes the validator. |
-| `@agent-metica-unity-validator` | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
-
-## Install
-
-The repo is currently private; you'll need access to `meticalabs/metica-sdk-agents` on GitHub. Claude Code discovers subagents from `.claude/agents/`. Most Claude Code versions also recurse into subdirectories, but the safest portable pattern is per-file symlinks. Pick one:
-
-**Project-local** (recommended for first try):
-
-```bash
-git clone https://github.com/meticalabs/metica-sdk-agents.git ~/dev/metica-sdk-agents
-cd /path/to/your/unity/project
-mkdir -p .claude/agents
-for f in ~/dev/metica-sdk-agents/agents/unity/*.md; do
-    ln -s "$f" .claude/agents/
-done
-```
-
-**Global** (every project sees the agents):
-
-```bash
-git clone https://github.com/meticalabs/metica-sdk-agents.git ~/dev/metica-sdk-agents
-mkdir -p ~/.claude/agents
-for f in ~/dev/metica-sdk-agents/agents/unity/*.md; do
-    ln -s "$f" ~/.claude/agents/
-done
-```
-
-Verify by launching Claude Code from the project directory and typing `/agents` — you should see `metica-unity-compat-checker`, `metica-unity-integrator`, and `metica-unity-validator`.
-
-## Quick start
-
-In Claude Code, from your Unity project's root:
+From your Unity project's root in Claude Code:
 
 ```
 @agent-metica-unity-integrator
 
 PROJECT=/absolute/path/to/your/unity/project
-PLUGIN_DIR=/absolute/path/to/metica-sdk-agents
 ```
 
-Optional inputs:
+That's the whole invocation. Missing keys are filled with placeholders you swap in later; you'll be shown a plan and asked to approve before any file is written.
 
-| Name | Default | Notes |
-|---|---|---|
-| `API_KEY` | `YOUR_METICA_API_KEY` | Metica API key |
-| `APP_ID` | `YOUR_METICA_APP_ID` | Metica App ID |
-| `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
-| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
-| `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
+## Install
+
+**Via Claude Code marketplace (recommended):**
+
+```
+/plugin marketplace add meticalabs/metica-sdk-agents
+/plugin install metica-sdk-agents@metica-sdk-agents
+```
+
+That's it. Claude Code clones the repo, registers the three agents, and sets `$CLAUDE_PLUGIN_ROOT` for you.
+
+**Via one-line installer** (no marketplace needed):
+
+```bash
+# Project-local (only the current Unity project sees the agents):
+curl -fsSL https://raw.githubusercontent.com/meticalabs/metica-sdk-agents/main/install.sh | bash
+
+# User-wide (every project sees the agents):
+curl -fsSL https://raw.githubusercontent.com/meticalabs/metica-sdk-agents/main/install.sh | bash -s -- --global
+```
+
+The script clones into `~/.metica-sdk-agents` and symlinks each agent into `.claude/agents/`.
+
+**Verify:** launch Claude Code in your project and type `/agents` — you should see `metica-unity-compat-checker`, `metica-unity-integrator`, and `metica-unity-validator`.
+
+## What it does
 
 The integrator runs in 7 steps:
 
@@ -67,6 +50,28 @@ The integrator runs in 7 steps:
 5. **Codegen** — fresh mode writes `Assets/Scripts/MeticaBootstrap.cs`; side-by-side writes 4 files under `Assets/Scripts/Metica/` (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified.
 6. **Validator** — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `ad_service_router_present` (side-by-side), etc.
 7. **Final report** — mode, SDK version, files changed, validator summary, rollback command (if anything failed), placeholder reminders, and (side-by-side only) a Max-callsite inventory with proposed rewrites you can ask the agent to apply.
+
+## Optional inputs
+
+Tune behavior by passing any of these after `PROJECT=...`:
+
+| Name | Default | Notes |
+|---|---|---|
+| `API_KEY` | `YOUR_METICA_API_KEY` | Metica API key |
+| `APP_ID` | `YOUR_METICA_APP_ID` | Metica App ID |
+| `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
+| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
+| `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
+
+## The three agents
+
+| Agent | Role |
+|---|---|
+| `@agent-metica-unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint. |
+| `@agent-metica-unity-integrator` | Orchestrator. Mode-detects (fresh vs side-by-side), presents a plan, snapshots git, generates code, invokes the validator. |
+| `@agent-metica-unity-validator` | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
+
+Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration).
 
 ## What the side-by-side codegen does *not* do automatically
 
@@ -90,7 +95,7 @@ The compat-checker reads this file. To add a new SDK version, add an entry and b
 ## Running the tests
 
 ```bash
-cd ~/dev/metica-sdk-agents
+cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
@@ -102,15 +107,18 @@ A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real
 
 ```
 metica-sdk-agents/
-├── plugin.json
-├── metica-versions.yaml             # compat matrix
+├── .claude-plugin/marketplace.json    # Claude Code marketplace manifest
+├── plugin.json                        # plugin manifest
+├── install.sh                         # one-line installer
+├── metica-versions.yaml               # compat matrix
 ├── agents/
-│   ├── contracts.md                 # JSON schemas for sub-agent outputs
+│   ├── contracts.md                   # JSON schemas for sub-agent outputs
 │   └── unity/
 │       ├── metica-unity-compat-checker.md
 │       ├── metica-unity-integrator.md
 │       └── metica-unity-validator.md
 ├── scripts/
+│   ├── resolve-plugin-dir.sh          # auto-detects plugin root for the agents
 │   ├── detect-compat.sh
 │   ├── detect-mode.sh
 │   ├── format-compat-report.sh
@@ -118,15 +126,15 @@ metica-sdk-agents/
 │   ├── scan-max-callsites.sh
 │   ├── codegen-fresh.sh
 │   ├── codegen-sidebyside.sh
-│   ├── download-metica-sdk.sh       # opt-in; not used by the default flow
+│   ├── download-metica-sdk.sh         # opt-in; not used by the default flow
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
-│   └── templates/sidebyside/        # the 4 .cs.tmpl files
+│   └── templates/sidebyside/          # the 4 .cs.tmpl files
 ├── references/
-│   ├── migrate-ab-testing.md        # the side-by-side codegen's source-of-truth
+│   ├── migrate-ab-testing.md          # the side-by-side codegen's source-of-truth
 │   ├── max-vs-metica-2.4.0-api.md
 │   └── unity-sdk-api.md
-└── tests/                           # 7 test scripts + fixtures + goldens
+└── tests/                             # 7 test scripts + fixtures + goldens
 ```
 
 ## Rollback

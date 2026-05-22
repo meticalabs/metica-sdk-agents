@@ -27,13 +27,16 @@ Optional:
 
 ## Setup — establish `PLUGIN_DIR`
 
-This agent file lives at `<plugin_root>/agents/unity/metica-unity-integrator.md`. Before running any script, set:
+Resolve the plugin root automatically; do **not** ask the user for it. The first bash command of every run is:
 
 ```bash
-PLUGIN_DIR="<absolute_path_to_plugin_root>"   # the directory containing plugin.json
+PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$(pwd)/.claude/agents/../../scripts/resolve-plugin-dir.sh" 2>/dev/null)"
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Reinstall with the marketplace install (preferred) or set METICA_SDK_AGENTS_DIR." >&2; exit 1; }
 ```
 
-If the caller didn't pass one in, derive it: the plugin root is two levels up from this `.md` file's location. If you cannot determine the absolute path, abort with a clear error rather than running with an empty `$PLUGIN_DIR` (which would silently look for scripts at `/scripts/...`).
+`scripts/resolve-plugin-dir.sh` checks `$CLAUDE_PLUGIN_ROOT` (set by Claude Code for marketplace-installed plugins), `$METICA_SDK_AGENTS_DIR`, symlink targets under `.claude/agents/`, and known install paths. If it fails, abort — do not run scripts with relative paths.
 
 ## Sub-agent output parsing
 
@@ -297,7 +300,7 @@ In **side-by-side mode**, the PASS summary must also include:
 - Privacy calls (`SetHasUserConsent`, `SetDoNotSell`) **must** precede `MeticaSdk.Initialize` and live in the **same file**.
 - Reuse the existing Max ad unit IDs for MeticaSDK (per migration guide).
 - Sub-agent invocations (compat-checker, validator) **must** be in fresh subagent contexts — never share your reasoning context with them.
-- If `$PLUGIN_DIR` is empty, abort. Do not run scripts with relative paths.
+- If `$PLUGIN_DIR` is empty after running `resolve-plugin-dir.sh`, abort. Never run scripts with relative paths.
 
 ## References
 

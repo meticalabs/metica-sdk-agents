@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "metica-sdk-agents",
+  "owner": {
+    "name": "Metica",
+    "email": "dev@metica.com",
+    "url": "https://www.metica.com"
+  },
+  "metadata": {
+    "description": "Subagents that integrate MeticaSDK into Unity projects in one pass — including projects that already use AppLovin MAX.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "metica-sdk-agents",
+      "source": "./",
+      "description": "Three Claude Code subagents (compat-checker, integrator, validator) for MeticaSDK Unity integration.",
+      "homepage": "https://github.com/meticalabs/metica-sdk-agents",
+      "license": "Apache-2.0",
+      "category": "unity",
+      "keywords": ["unity", "metica", "sdk", "applovin", "max", "ads"]
+    }
+  ]
+}
