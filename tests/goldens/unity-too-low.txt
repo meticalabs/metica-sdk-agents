@@ -5,5 +5,6 @@ COMPAT REPORT — target MeticaSDK 2.4.0
   Android API   n/a                    [UNKNOWN] Android minSdk not detected; using Unity built-in default
   Gradle        n/a                    [UNKNOWN] Gradle version not read (no reliable source in current Unity project layout)
   Backend       n/a                    [UNKNOWN] Could not detect scripting backend
+  MeticaSDK     n/a                    [FAIL   ] Install MeticaSDK 2.4.0: download https://github.com/meticalabs/metica-unity-package/releases/download/v2.4.0/MeticaSdk-2.4.0.unitypackage and double-click in Unity to import.
 ----
 Overall: BLOCK

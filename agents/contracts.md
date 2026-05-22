@@ -22,7 +22,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 **Allowed values:**
 - `status`: `PASS`, `BLOCK`
-- `checks[].id`: `unity`, `java`, `max`, `android_api`, `gradle`, `scripting_backend`
+- `checks[].id`: `unity`, `java`, `max`, `android_api`, `gradle`, `scripting_backend`, `metica_sdk`
 - `checks[].level`: `PASS`, `WARN`, `FAIL`, `UNKNOWN`
 - `target_sdk`: SDK version string from `metica-versions.yaml`
 - `detected`: detected version/value string, or `null` if detection failed (then `level: UNKNOWN`).

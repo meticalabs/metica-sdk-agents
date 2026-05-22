@@ -74,7 +74,7 @@ assert_contains "unity-too-low: header + unity FAIL + Overall BLOCK" "$out" \
     "Unity         2020.3.24f1" \
     "[FAIL   ] Install Unity 2021.3 LTS via Unity Hub, then switch the project's editor version." \
     "Overall: BLOCK"
-assert_structure "unity-too-low: 6 rows + 1 Overall" "$out" 6
+assert_structure "unity-too-low: 7 rows + 1 Overall" "$out" 7
 assert_golden    "unity-too-low: byte-exact golden" "$out" "$GOLDENS/unity-too-low.txt"
 
 out=$(run_pipeline "$FIX/api-ok")
@@ -83,7 +83,7 @@ assert_contains "api-ok: header + Overall PASS" "$out" \
     "Android API   24" \
     "[PASS   ]" \
     "Overall: PASS"
-assert_structure "api-ok: 6 rows" "$out" 6
+assert_structure "api-ok: 7 rows" "$out" 7
 
 out=$(run_pipeline "$FIX/max-too-low")
 assert_contains "max-too-low: max FAIL hint" "$out" \
@@ -143,15 +143,16 @@ assert_contains "long-detected truncated with > sentinel" "$out" \
 REAL_PROJECT="$(cd "$SCRIPT_DIR/../../max-agent-test/DemoApp" 2>/dev/null && pwd)"
 if [ -d "$REAL_PROJECT" ]; then
     out=$(bash "$DETECT" --project="$REAL_PROJECT" 2>/dev/null | bash "$FORMAT")
+    # DemoApp: Android API bumped to 23; MeticaSDK 2.4.0 imported. Full PASS.
     assert_contains "real-project: full pipeline" "$out" \
         "COMPAT REPORT — target MeticaSDK 2.4.0" \
         "Unity         2022.3.62f2" \
         "MaxSDK        8.6.3" \
         "Backend       Mono" \
-        "Android API   19" \
-        "[FAIL   ] Set AndroidMinSdkVersion: 23 in ProjectSettings/ProjectSettings.asset, or Edit > Project Settings > Player > Android > Minimum API Level." \
-        "Overall: BLOCK"
-    assert_structure "real-project: 6 rows + 1 Overall" "$out" 6
+        "Android API   23" \
+        "MeticaSDK     2.4.0" \
+        "Overall: PASS"
+    assert_structure "real-project: 7 rows + 1 Overall" "$out" 7
 fi
 
 echo "----"

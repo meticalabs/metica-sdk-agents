@@ -12,6 +12,7 @@ BEGIN {
     labels["android_api"]       = "Android API"
     labels["gradle"]            = "Gradle"
     labels["scripting_backend"] = "Backend"
+    labels["metica_sdk"]        = "MeticaSDK"
 }
 
 /"target_sdk":/ { target_sdk = extract($0, "\"target_sdk\":") }

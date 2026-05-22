@@ -123,8 +123,9 @@ assert_case missing-max   "BLOCK" "java"        "MOCK_JAVA_VERSION=1.8.0_362"
 # Real project — locked expected per-check levels
 REAL_PROJECT="$(cd "$SCRIPT_DIR/../../max-agent-test/DemoApp" 2>/dev/null && pwd)"
 if [ -d "$REAL_PROJECT" ]; then
-    assert_check_levels "real-project" "$REAL_PROJECT" "BLOCK" \
-        "unity:PASS" "java:PASS" "max:PASS" "android_api:FAIL" "scripting_backend:PASS" "gradle:UNKNOWN"
+    # Real DemoApp: Android API bumped 19→23; MeticaSDK 2.4.0 imported. All PASS.
+    assert_check_levels "real-project" "$REAL_PROJECT" "PASS" \
+        "unity:PASS" "java:PASS" "max:PASS" "android_api:PASS" "scripting_backend:PASS" "gradle:UNKNOWN" "metica_sdk:PASS"
 fi
 
 echo "----"

@@ -111,8 +111,9 @@ UNITY_MIN=$(yaml_version_field "$VERSION" unity_min)
 JAVA_MIN=$(yaml_version_field "$VERSION" java_min)
 MAX_MIN=$(yaml_version_field "$VERSION" max_min)
 API_MIN=$(yaml_version_field "$VERSION" android_api_min)
+URL=$(yaml_version_field "$VERSION" download_url)
 
-for pair in "unity_min:$UNITY_MIN" "java_min:$JAVA_MIN" "max_min:$MAX_MIN" "android_api_min:$API_MIN"; do
+for pair in "unity_min:$UNITY_MIN" "java_min:$JAVA_MIN" "max_min:$MAX_MIN" "android_api_min:$API_MIN" "download_url:$URL"; do
     val="${pair#*:}"
     [ -n "$val" ] || die_json "Matrix incomplete for version $VERSION (missing ${pair%:*}). Reformat-tolerance: yaml_version_field requires the canonical 2/4-space indent."
 done
@@ -201,6 +202,14 @@ detect_backend() {
     ' "$s"
 }
 
+# Detect whether MeticaSDK is already imported. Returns the installed Version
+# string (e.g. "2.4.0") or empty if not installed.
+detect_metica() {
+    local f="$PROJECT/Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs"
+    [ -f "$f" ] || return
+    grep -E 'public static string Version' "$f" | head -1 | awk -F\" '{ print $2 }'
+}
+
 # gradle: deliberately not detected from gradleTemplate.properties (that file
 # does not contain the Gradle version). Report UNKNOWN until we have a real source.
 detect_gradle() { return; }
@@ -264,6 +273,15 @@ ev_backend() {
     echo "PASS|"
 }
 
+ev_metica() {
+    if [ -z "$METICA" ]; then
+        echo "FAIL|Install MeticaSDK $VERSION: download $URL and double-click in Unity to import."
+        return
+    fi
+    ver_ge "$METICA" "$VERSION" && echo "PASS|" \
+        || echo "FAIL|MeticaSDK $METICA installed; need $VERSION or newer. Download $URL and re-import."
+}
+
 # ---- run detectors once -----------------------------------------------------
 
 UNITY=$(detect_unity)
@@ -272,6 +290,7 @@ MAX=$(detect_max)
 API=$(detect_android_api)
 GRADLE=$(detect_gradle)
 BACKEND=$(detect_backend)
+METICA=$(detect_metica)
 
 R_UNITY=$(ev_unity)
 R_JAVA=$(ev_java)
@@ -279,11 +298,12 @@ R_MAX=$(ev_max)
 R_API=$(ev_api)
 R_GRADLE=$(ev_gradle)
 R_BACKEND=$(ev_backend)
+R_METICA=$(ev_metica)
 
 # ---- emit JSON --------------------------------------------------------------
 
 STATUS="PASS"
-for r in "$R_UNITY" "$R_JAVA" "$R_MAX" "$R_API" "$R_GRADLE" "$R_BACKEND"; do
+for r in "$R_UNITY" "$R_JAVA" "$R_MAX" "$R_API" "$R_GRADLE" "$R_BACKEND" "$R_METICA"; do
     [ "${r%%|*}" = "FAIL" ] && STATUS="BLOCK"
 done
 
@@ -308,7 +328,8 @@ emit_check() {
     emit_check "max"               "$MAX"     ">=$MAX_MIN"     "$R_MAX";     printf ',\n'
     emit_check "android_api"       "$API"     ">=$API_MIN"     "$R_API";     printf ',\n'
     emit_check "gradle"            "$GRADLE"  ">=7.0"          "$R_GRADLE";  printf ',\n'
-    emit_check "scripting_backend" "$BACKEND" "IL2CPP|Mono"    "$R_BACKEND"
+    emit_check "scripting_backend" "$BACKEND" "IL2CPP|Mono"    "$R_BACKEND"; printf ',\n'
+    emit_check "metica_sdk"        "$METICA"  ">=$VERSION"     "$R_METICA"
     printf '\n  ]\n}\n'
 }
 

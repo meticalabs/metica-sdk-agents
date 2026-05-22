@@ -1,6 +1,6 @@
 ---
 name: metica-unity-integrator
-description: Integrate MeticaSDK into a Unity project. Auto-detects whether MaxSDK is present and chooses Fresh mode (no existing ad SDK → standalone install) or Side-by-side adapter mode (MaxSDK present → add a separate MeticaAdapter, never modify Max code). Always runs compat-checker first and validator last. Uses Claude Code plan mode before any file change. Phase 4a: orchestrates compat-check, mode-detection, plan, snapshot, SDK download, validation — codegen (step 6) lands in Phase 4b/4c.
+description: Integrate MeticaSDK into a Unity project. Auto-detects whether MaxSDK is present and chooses Fresh mode (no existing ad SDK → standalone install) or Side-by-side adapter mode (MaxSDK present → add a separate MeticaAdapter, never modify Max code). Always runs compat-checker first and validator last. Uses Claude Code plan mode before any file change. MeticaSDK installation is enforced by the compat-checker's `metica_sdk` row — the integrator never downloads or imports the SDK itself; the user does that once after the compat-check BLOCK message, then re-runs.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
 model: sonnet
 ---
@@ -124,21 +124,10 @@ bash "$PLUGIN_DIR/scripts/git-snapshot.sh" pre-metica-integration
 
 If the working tree is dirty (script exits non-zero), stop and tell the user to commit or stash first. Do **not** auto-commit on their behalf.
 
-### Step 5 — Download SDK
+### Step 5 — Apply code changes
 
-```bash
-if [ -n "$VERSION" ]; then
-    bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$VERSION"
-else
-    bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT"
-fi
-```
+(Note: there is no separate "download SDK" step. MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project and its types are available to generated code.)
 
-If `METICA_SDK_DEV=1` is set, the script uses local `metica-versions.dev.yaml`. Otherwise it downloads from the URL in `metica-versions.yaml` and sha256-verifies.
-
-**Capture the resolved version** from the script's `PLAN` stdout block (the line `  version       <x.y.z>`) for use in step 8's final report.
-
-### Step 6 — Apply code changes
 
 **Side-by-side mode (Phase 4c — implemented):** Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key). Apply defaults for missing Metica inputs the same way as fresh mode:
 
@@ -174,7 +163,7 @@ The script writes `Assets/Scripts/MeticaBootstrap.cs` (using Metica + Metica.Ads
 
 Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-side `.unitypackage` import handles most of it.
 
-### Step 7 — Validator (fresh subagent context, always)
+### Step 6 — Validator (fresh subagent context, always)
 
 Invoke `@agent-metica-unity-validator` with the project path and the chosen mode. Concretely, the wrapped bash command is:
 
@@ -184,7 +173,7 @@ bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" --mode="
 
 Extract the JSON and read `.status`.
 
-### Step 8 — Final report
+### Step 7 — Final report
 
 When validator returned **FAIL**, lead with the rollback command:
 
