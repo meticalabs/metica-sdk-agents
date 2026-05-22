@@ -1,7 +1,8 @@
 # Metica Unity SDK 2.4.0 — Canonical API Surface
 
-> TODO: distil from https://docs.metica.com/api/unity-sdk/unity-sdk-2
-> Used by the validator to know what to grep for, and by the integrator as a code-generation reference.
+Distilled from https://docs.metica.com/api/unity-sdk/unity-sdk-2 and the SDK source under `Assets/MeticaSdk/Runtime/Sdk/`.
+
+Used by the validator to know what to grep for, and by the integrator as a code-generation reference. The fresh-mode codegen at `scripts/codegen-fresh.sh` emits this exact API shape — when MeticaSDK adds new surfaces, update this file and the codegen templates together.
 
 ## Initialization
 

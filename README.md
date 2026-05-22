@@ -12,7 +12,7 @@ The plugin ships three subagents:
 
 ## Install
 
-The plugin is private; Claude Code discovers subagents from `.claude/agents/`. Pick one:
+The repo is currently private; you'll need access to `meticalabs/metica-sdk-agents` on GitHub. Claude Code discovers subagents from `.claude/agents/`. Most Claude Code versions also recurse into subdirectories, but the safest portable pattern is per-file symlinks. Pick one:
 
 **Project-local** (recommended for first try):
 
@@ -20,7 +20,9 @@ The plugin is private; Claude Code discovers subagents from `.claude/agents/`. P
 git clone https://github.com/meticalabs/metica-sdk-agents.git ~/dev/metica-sdk-agents
 cd /path/to/your/unity/project
 mkdir -p .claude/agents
-ln -s ~/dev/metica-sdk-agents/agents/unity .claude/agents/unity
+for f in ~/dev/metica-sdk-agents/agents/unity/*.md; do
+    ln -s "$f" .claude/agents/
+done
 ```
 
 **Global** (every project sees the agents):
@@ -28,10 +30,12 @@ ln -s ~/dev/metica-sdk-agents/agents/unity .claude/agents/unity
 ```bash
 git clone https://github.com/meticalabs/metica-sdk-agents.git ~/dev/metica-sdk-agents
 mkdir -p ~/.claude/agents
-ln -s ~/dev/metica-sdk-agents/agents/unity ~/.claude/agents/unity
+for f in ~/dev/metica-sdk-agents/agents/unity/*.md; do
+    ln -s "$f" ~/.claude/agents/
+done
 ```
 
-Verify by launching Claude Code from the project directory and typing `/agents` — you should see all three.
+Verify by launching Claude Code from the project directory and typing `/agents` — you should see `metica-unity-compat-checker`, `metica-unity-integrator`, and `metica-unity-validator`.
 
 ## Quick start
 
@@ -86,11 +90,13 @@ The compat-checker reads this file. To add a new SDK version, add an entry and b
 ## Running the tests
 
 ```bash
-cd metica-sdk-agents
+cd ~/dev/metica-sdk-agents
 bash tests/run-all.sh
 ```
 
-Seven independent suites: `compat`, `format`, `download`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`. ~100 assertions total.
+Eight independent suites: `compat`, `format`, `download`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`, `scan-max-callsites`. 106 assertions total.
+
+A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
 
 ## Repo layout
 

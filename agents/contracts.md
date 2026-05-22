@@ -46,7 +46,65 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
     { "id": "max",               "detected": "8.6.3",       "required": ">=8.2.0",  "level": "PASS",    "hint": "" },
     { "id": "android_api",       "detected": "23",          "required": ">=23",     "level": "PASS",    "hint": "" },
     { "id": "gradle",            "detected": null,          "required": ">=7.0",    "level": "UNKNOWN", "hint": "Custom Gradle template not present; using Unity default." },
-    { "id": "scripting_backend", "detected": "Mono",        "required": "IL2CPP|Mono", "level": "PASS", "hint": "" }
+    { "id": "scripting_backend", "detected": "Mono",        "required": "IL2CPP|Mono", "level": "PASS", "hint": "" },
+    { "id": "metica_sdk",        "detected": "2.4.0",       "required": ">=2.4.0",  "level": "PASS",    "hint": "" }
+  ]
+}
+```
+
+---
+
+## `mode-detect/1.0.0`
+
+Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose between fresh-mode and side-by-side codegen.
+
+**Allowed values:**
+- `mode`: `fresh`, `side-by-side`
+- `signals[<id>].present`: boolean
+- `signals[<id>].location`: relative path (or `file:line`); empty when not present
+
+**Decision rule:** two-of-three signals present → `side-by-side`, else `fresh`.
+
+**Concrete example:**
+
+```json
+{
+  "schema": "mode-detect/1.0.0",
+  "mode": "side-by-side",
+  "signals": {
+    "maxsdk_folder":      { "present": true,  "location": "Assets/MaxSdk/" },
+    "maxsdk_init_symbol": { "present": true,  "location": "Assets/Scripts/HomeScreen.cs:60" },
+    "applovin_manifest":  { "present": true,  "location": "Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" }
+  },
+  "decision": "3 of 3 signals present (>=2 → side-by-side)."
+}
+```
+
+---
+
+## `max-callsite-scan/1.0.0`
+
+Emitted by `scripts/scan-max-callsites.sh`. Consumed by the integrator's step-5 refactor proposal.
+
+**Allowed values:**
+- `callsites[].category`: `bootstrap`, `method_call`, `callback_subscription`, `other`
+- `callsites[].file`: relative path from `$PROJECT`
+- `callsites[].line`: 1-based line number
+- `callsites[].snippet`: trimmed cleaned source line (strings/comments stripped via `lib/clean-cs.awk`)
+
+Excludes `Assets/MaxSdk/`, `Assets/MeticaSdk/`, `Assets/Scripts/Metica/`, `Packages/`, `Library/`, `Temp/`, `obj/` — only user game code surfaces.
+
+**Concrete example:**
+
+```json
+{
+  "schema": "max-callsite-scan/1.0.0",
+  "project": "/Users/me/Projects/MyGame",
+  "callsites": [
+    { "file": "Assets/Scripts/HomeScreen.cs", "line": 59, "category": "bootstrap",             "snippet": "MaxSdk.SetSdkKey(MaxSdkKey);" },
+    { "file": "Assets/Scripts/HomeScreen.cs", "line": 60, "category": "bootstrap",             "snippet": "MaxSdk.InitializeSdk();" },
+    { "file": "Assets/Scripts/HomeScreen.cs", "line": 200, "category": "method_call",          "snippet": "MaxSdk.LoadInterstitial(interstitialAdUnitId);" },
+    { "file": "Assets/Scripts/HomeScreen.cs", "line": 220, "category": "callback_subscription", "snippet": "MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterstitialLoadedEvent;" }
   ]
 }
 ```
