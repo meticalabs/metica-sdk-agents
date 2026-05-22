@@ -4,8 +4,9 @@
   "description": "Claude Code agents for integrating and validating MeticaSDK in Unity projects.",
   "author": {
     "name": "Metica",
-    "email": "hoang@metica.com"
+    "email": "dev@metica.com"
   },
+  "license": "Apache-2.0",
   "homepage": "https://www.metica.com",
   "agents": "./agents"
 }

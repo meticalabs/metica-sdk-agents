@@ -139,6 +139,10 @@ git reset --hard pre-metica-integration
 
 This removes all generated files but does **not** delete the downloaded `.unitypackage` (it's gitignored). To clean that too: `rm -f Assets/MeticaSDK-*.unitypackage`.
 
+## License
+
+Apache License 2.0 — see [LICENSE](./LICENSE).
+
 ## Support
 
-Issues and feedback: https://github.com/meticalabs/metica-sdk-agents/issues
+Issues and feedback: https://github.com/meticalabs/metica-sdk-agents/issues — `dev@metica.com`.
