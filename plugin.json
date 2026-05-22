@@ -1,0 +1,11 @@
+{
+  "name": "metica-sdk-agents",
+  "version": "0.1.0-dev",
+  "description": "Claude Code agents for integrating and validating MeticaSDK in Unity projects.",
+  "author": {
+    "name": "Metica",
+    "email": "hoang@metica.com"
+  },
+  "homepage": "https://www.metica.com",
+  "agents": "./agents"
+}
