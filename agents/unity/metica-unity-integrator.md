@@ -128,6 +128,84 @@ If the working tree is dirty (script exits non-zero), stop and tell the user to 
 
 (Note: there is no separate "download SDK" step. MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project and its types are available to generated code.)
 
+#### Side-by-side: scan + propose Max-callsite refactor
+
+After codegen, run:
+
+```bash
+bash "$PLUGIN_DIR/scripts/scan-max-callsites.sh" --project="$PROJECT"
+```
+
+Parse the JSON `callsites[]` array. Group by `category`:
+
+- **`bootstrap`** — `MaxSdk.SetSdkKey(...)`, `MaxSdk.InitializeSdk()`, `MaxSdk.SetHasUserConsent(...)`, `MaxSdk.SetDoNotSell(...)`. **Propose the bootstrap rewrite below in the SAME file** where the user's Max init lives today (so privacy ordering is enforceable by the validator's `privacy_before_init` rule).
+- **`method_call`** — `MaxSdk.LoadInterstitial`, `ShowInterstitial`, `LoadBanner`, `ShowBanner`, `HideBanner`, `DestroyBanner`, `CreateBanner`, `LoadRewardedAd`, `IsRewardedAdReady`, `ShowRewardedAd`, `IsInterstitialReady`. Simple receiver swap (plus the rewarded name remap: `LoadRewardedAd → LoadRewarded`, etc.).
+- **`callback_subscription`** — `MaxSdkCallbacks.<Format>.OnAd*Event += handler`. Two-step rewrite: change the event source AND the handler signature (Max handlers take `(string adUnitId, MaxSdkBase.AdInfo info)`; ours takes `(AdEventData ad)`).
+- **`other`** — type references like `MaxSdkBase.AdInfo` parameters or local variables. The integrator should leave these alone unless they're inside a callback handler being rewritten.
+
+#### Rewrite patterns
+
+**Bootstrap (one file, replace the Max bootstrap with the router-driven version):**
+
+```csharp
+// before:
+MaxSdk.SetSdkKey(MaxSdkKey);
+MaxSdk.InitializeSdk();
+
+// after:
+var ads = AdServiceRouter.Instance.AdService;
+ads.SetHasUserConsent(true);   // TODO: replace with your real consent value
+ads.SetDoNotSell(false);       // TODO: replace with your real CCPA value
+ads.Initialize(() => {
+    // existing post-init code (e.g. LoadInterstitial calls) goes here
+});
+```
+
+**Method calls (receiver swap + rewarded name remap):**
+
+```csharp
+MaxSdk.LoadInterstitial(adUnitId)        →  AdServiceRouter.Instance.AdService.LoadInterstitial(adUnitId)
+MaxSdk.IsInterstitialReady(adUnitId)     →  AdServiceRouter.Instance.AdService.IsInterstitialReady(adUnitId)
+MaxSdk.ShowInterstitial(adUnitId, p, c)  →  AdServiceRouter.Instance.AdService.ShowInterstitial(adUnitId, p, c)
+MaxSdk.LoadRewardedAd(adUnitId)          →  AdServiceRouter.Instance.AdService.LoadRewarded(adUnitId)
+MaxSdk.IsRewardedAdReady(adUnitId)       →  AdServiceRouter.Instance.AdService.IsRewardedReady(adUnitId)
+MaxSdk.ShowRewardedAd(adUnitId, p, c)    →  AdServiceRouter.Instance.AdService.ShowRewarded(adUnitId, p, c)
+MaxSdk.LoadBanner / ShowBanner / HideBanner / DestroyBanner → AdServiceRouter.Instance.AdService.<same name>
+MaxSdk.CreateBanner(id, MaxSdkBase.AdViewPosition.BottomCenter)
+       →  AdServiceRouter.Instance.AdService.CreateBanner(id, BannerPosition.BottomCenter)
+```
+
+**Callback subscriptions (rewrite signature too):**
+
+```csharp
+// before:
+MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += (adUnitId, info) => Log(adUnitId);
+
+// after:
+AdServiceRouter.Instance.AdService.OnInterstitialLoaded += ad => Log(ad.AdUnitId);
+```
+
+Event-name table:
+
+| MaxSdkCallbacks event | IAdService event | Handler arg |
+|---|---|---|
+| `OnAdLoadedEvent` | `On<Format>Loaded` | `AdEventData` |
+| `OnAdLoadFailedEvent` | `On<Format>LoadFailed` | `AdErrorData` |
+| `OnAdDisplayedEvent` | `On<Format>Shown` | `AdEventData` |
+| `OnAdHiddenEvent` | `On<Format>Hidden` | `AdEventData` |
+| `OnAdRevenuePaidEvent` | `On<Format>RevenuePaid` | `AdEventData` |
+| `OnAdReceivedRewardEvent` (Rewarded only) | `OnRewardedRewarded` | `AdEventData` (reward fields collapsed) |
+
+#### Refactor workflow
+
+1. Present the callsite inventory to the user grouped by file, with category counts.
+2. In plan mode, propose the rewrites file-by-file.
+3. On user approval, apply edits using the `Edit` tool. Always edit the original file in place — never create a parallel copy.
+4. After every file edit, re-run `bash "$PLUGIN_DIR/scripts/scan-max-callsites.sh" --project="$PROJECT"` to confirm the callsite is gone (or recategorize remaining ones).
+5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
+
+**Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
+
 
 **Side-by-side mode (Phase 4c — implemented):** Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key). Apply defaults for missing Metica inputs the same way as fresh mode:
 
@@ -188,7 +266,30 @@ Failures:
 
 Then the standard summary (mode, SDK version, files changed, compat-checker one-liner, validator one-liner).
 
-When validator returned **PASS**, emit the standard summary only, optionally followed by reminders if `API_KEY` / `APP_ID` placeholders were used.
+When validator returned **PASS**, emit the standard summary only, optionally followed by reminders if `API_KEY` / `APP_ID` / `MAX_SDK_KEY` placeholders were used.
+
+In **side-by-side mode**, the PASS summary must also include:
+
+1. **Max-callsite outcome** — if the user approved the refactor, the count of files edited; otherwise the inventory as an action checklist.
+2. **Rollout-config wiring** — point the user at `AdServiceRouter.RolloutDecisionFunc` with this Firebase example (drop into any class):
+
+    ```csharp
+    using Firebase.RemoteConfig;
+    using Metica.AbTest;
+    using UnityEngine;
+
+    static class MeticaRolloutWire {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Wire() {
+            AdServiceRouter.RolloutDecisionFunc =
+                () => FirebaseRemoteConfig.DefaultInstance.GetValue("use_metica").BooleanValue;
+        }
+    }
+    ```
+
+    Explicitly warn the user **not** to hard-code `useMeticaSdk = true` in the inspector for production builds — the field is a dev fallback only. The remote-config provider is the production source of truth for the rollout cohort.
+
+3. **Manual steps remaining** — anything the user still needs to do (replace placeholder keys, write the Firebase Remote Config parameter, choose `SetHasUserConsent` value per their compliance posture, etc.).
 
 ## Hard rules
 
