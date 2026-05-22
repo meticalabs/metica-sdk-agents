@@ -19,7 +19,7 @@ versions:
     android_api_min: 23
     # Note: asset filename casing matches the real GitHub release artifact and intentionally
     # differs between versions (MeticaSdk-2.4.0 vs MeticaSDK-2.2.2). Do not "fix" it.
-    download_url: "https://github.com/meticalabs/metica-unity-sdk/releases/download/2.4.0/MeticaSdk-2.4.0.unitypackage"
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.4.0/MeticaSdk-2.4.0.unitypackage"
     sha256: "8bea5e13a759949f98b961df6b4d730db16ab5e133a5a38fc942195e72fdf067"
     released_at: ""         # ISO date, fill on real release
     release_notes_url: ""
@@ -34,8 +34,8 @@ versions:
     max_min: "8.0.0"
     max_max: ""
     android_api_min: 23
-    download_url: "https://github.com/meticalabs/metica-unity-sdk/releases/download/2.2.2/MeticaSDK-2.2.2.unitypackage"
-    sha256: "d1bd9e6ebc8eb8f1d2f0c424ca43a5fb47e13b0f8fab5febda7d2cf3ede1ba6e"
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.2.2/MeticaSDK-2.2.2.unitypackage"
+    sha256: "7fe8e4edea8066a3d8a8f0f9ad9ef2d66ee2243646c3df6a5a5d437f272343e6"
     released_at: ""
     release_notes_url: ""
     deprecated: false
