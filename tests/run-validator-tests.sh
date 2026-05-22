@@ -120,6 +120,11 @@ assert_case good-block-comment-mention    "PASS" "fresh"        \
 assert_case good-verbatim-string          "PASS" "fresh"        \
     "init_count:PASS" "interstitial_load_show_parity:PASS"
 
+# Regression: imported MeticaSDK (Assets/MeticaSdk/) contains its own test
+# files with multiple Initialize() calls. Validator must scope to user code only.
+assert_case good-fresh-with-imported-sdk  "PASS" "fresh"        \
+    "init_count:PASS"
+
 # New: cross-file privacy is FAIL with explicit hint
 assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
     "privacy_before_init:FAIL"

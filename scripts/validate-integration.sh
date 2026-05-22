@@ -70,8 +70,13 @@ esac
 
 CS_LIST="$(mktemp -t metica-cs-XXXXXX)"
 trap 'rm -f "$CS_LIST"' EXIT
+# Scan only USER game code. Exclude both vendored SDKs (MaxSdk, MeticaSdk) and
+# Unity-managed dirs (PackageCache, Library, Temp, obj). The integrator-generated
+# Assets/Scripts/Metica/ adapter folder IS user code and must remain in scope —
+# it contains the legitimate MeticaSdk.Initialize call that init_count expects.
 find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
     | grep -v '/MaxSdk/' \
+    | grep -v '/MeticaSdk/' \
     | grep -v '/PackageCache/' \
     | grep -v '/Library/' \
     | grep -v '/Temp/' \
