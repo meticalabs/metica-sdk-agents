@@ -1,5 +1,5 @@
 COMPAT REPORT — target MeticaSDK 2.4.0
-  Unity         2020.3.24f1            [FAIL   ] Upgrade Unity to 2021.3 or later.
+  Unity         2020.3.24f1            [FAIL   ] Install Unity 2021.3 LTS via Unity Hub, then switch the project's editor version.
   Java          19.0.2                 [PASS   ]
   MaxSDK        n/a                    [PASS   ]
   Android API   n/a                    [UNKNOWN] Android minSdk not detected; using Unity built-in default

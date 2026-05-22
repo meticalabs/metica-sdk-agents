@@ -228,14 +228,16 @@ int_ge() {
 
 ev_unity() {
     [ -z "$UNITY" ] && { echo "UNKNOWN|Could not read ProjectVersion.txt"; return; }
-    ver_ge "$UNITY" "$UNITY_MIN" && echo "PASS|" || echo "FAIL|Upgrade Unity to $UNITY_MIN or later."
+    ver_ge "$UNITY" "$UNITY_MIN" && echo "PASS|" \
+        || echo "FAIL|Install Unity $UNITY_MIN LTS via Unity Hub, then switch the project's editor version."
 }
 
 ev_java() {
-    [ -z "$JAVA" ] && { echo "UNKNOWN|java not on PATH"; return; }
+    [ -z "$JAVA" ] && { echo "UNKNOWN|java not on PATH — install Adoptium Temurin $JAVA_MIN+ and ensure 'java' is on PATH."; return; }
     local m="${JAVA%%.*}"
     [ "$m" = "1" ] && m="$(echo "$JAVA" | awk -F. '{print $2}')"
-    int_ge "$m" "$JAVA_MIN" && echo "PASS|" || echo "FAIL|Upgrade Java to $JAVA_MIN or later."
+    int_ge "$m" "$JAVA_MIN" && echo "PASS|" \
+        || echo "FAIL|Install Adoptium Temurin $JAVA_MIN+ (or newer) and update JAVA_HOME / your PATH."
 }
 
 ev_max() {
@@ -243,12 +245,14 @@ ev_max() {
     # (fresh-mode integration). When matrix gets a `max_required: true` field
     # we will distinguish here.
     [ -z "$MAX" ] && { echo "PASS|"; return; }
-    ver_ge "$MAX" "$MAX_MIN" && echo "PASS|" || echo "FAIL|Upgrade AppLovin MAX to $MAX_MIN or later."
+    ver_ge "$MAX" "$MAX_MIN" && echo "PASS|" \
+        || echo "FAIL|Update AppLovin MAX to $MAX_MIN+ via Window > AppLovin > Integration Manager in Unity."
 }
 
 ev_api() {
     [ -z "$API" ] && { echo "UNKNOWN|Android minSdk not detected; using Unity built-in default"; return; }
-    int_ge "$API" "$API_MIN" && echo "PASS|" || echo "FAIL|Raise Android minSdk to $API_MIN."
+    int_ge "$API" "$API_MIN" && echo "PASS|" \
+        || echo "FAIL|Set AndroidMinSdkVersion: $API_MIN in ProjectSettings/ProjectSettings.asset, or Edit > Project Settings > Player > Android > Minimum API Level."
 }
 
 ev_gradle() {

@@ -62,8 +62,29 @@ Use `printf '%s' "$SUBAGENT_OUTPUT" | extract_json` then parse the JSON to read 
 
 Invoke `@agent-metica-unity-compat-checker` with the project path. Extract the JSON.
 
-- `status: BLOCK` → print the FAIL rows from `checks[]`, exit. Do **not** prompt the user to override.
 - `status: PASS` (with possible WARN rows) → continue.
+- `status: BLOCK` → **render a friendly remediation block** (template below) using the `checks[]` array, exit non-zero. Do **not** prompt the user to override.
+
+#### BLOCK remediation template
+
+For each `check` where `level == "FAIL"`, emit one bullet using `id`, `detected`, `required`, and `hint`. Example for the DemoApp's Android-API failure:
+
+```
+Compat-check found 1 blocking issue:
+
+  • Android API min: 19 (need >=23)
+    Fix: Set AndroidMinSdkVersion: 23 in ProjectSettings/ProjectSettings.asset,
+         or Edit > Project Settings > Player > Android > Minimum API Level.
+
+After applying the fix, re-run @agent-metica-unity-integrator.
+```
+
+Rules for the rendering:
+
+- One bullet per FAIL check; skip `WARN` and `UNKNOWN` (mention them as advisories at the end if you like, but don't gate on them).
+- Use the check's `hint` field verbatim — do not paraphrase. The hint is already the actionable suggestion.
+- If there are multiple FAILs, list all of them and end with one consolidated "After applying the fixes…" line.
+- Do **not** offer to apply fixes for the user. Auto-fix is out of scope for v0.1.0 — the user has full agency over their project settings.
 
 ### Step 2 — Mode detection
 

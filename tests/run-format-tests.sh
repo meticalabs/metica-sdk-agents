@@ -72,7 +72,7 @@ out=$(run_pipeline "$FIX/unity-too-low")
 assert_contains "unity-too-low: header + unity FAIL + Overall BLOCK" "$out" \
     "COMPAT REPORT — target MeticaSDK 2.4.0" \
     "Unity         2020.3.24f1" \
-    "[FAIL   ] Upgrade Unity to 2021.3 or later." \
+    "[FAIL   ] Install Unity 2021.3 LTS via Unity Hub, then switch the project's editor version." \
     "Overall: BLOCK"
 assert_structure "unity-too-low: 6 rows + 1 Overall" "$out" 6
 assert_golden    "unity-too-low: byte-exact golden" "$out" "$GOLDENS/unity-too-low.txt"
@@ -88,19 +88,19 @@ assert_structure "api-ok: 6 rows" "$out" 6
 out=$(run_pipeline "$FIX/max-too-low")
 assert_contains "max-too-low: max FAIL hint" "$out" \
     "MaxSDK        8.1.0" \
-    "[FAIL   ] Upgrade AppLovin MAX to 8.2.0 or later." \
+    "[FAIL   ] Update AppLovin MAX to 8.2.0+ via Window > AppLovin > Integration Manager in Unity." \
     "Overall: BLOCK"
 
 out=$(run_pipeline "$FIX/api-too-low")
 assert_contains "api-too-low: api FAIL hint" "$out" \
     "Android API   21" \
-    "[FAIL   ] Raise Android minSdk to 23." \
+    "[FAIL   ] Set AndroidMinSdkVersion: 23 in ProjectSettings/ProjectSettings.asset, or Edit > Project Settings > Player > Android > Minimum API Level." \
     "Overall: BLOCK"
 
 out=$(MOCK_JAVA_VERSION=1.8.0_362 run_pipeline "$FIX/missing-max")
 assert_contains "java-too-low (mock): java FAIL hint" "$out" \
     "Java          1.8.0_362" \
-    "[FAIL   ] Upgrade Java to 11 or later." \
+    "[FAIL   ] Install Adoptium Temurin 11+ (or newer) and update JAVA_HOME / your PATH." \
     "Overall: BLOCK"
 
 # die_json path
@@ -149,7 +149,7 @@ if [ -d "$REAL_PROJECT" ]; then
         "MaxSDK        8.6.3" \
         "Backend       Mono" \
         "Android API   19" \
-        "[FAIL   ] Raise Android minSdk to 23." \
+        "[FAIL   ] Set AndroidMinSdkVersion: 23 in ProjectSettings/ProjectSettings.asset, or Edit > Project Settings > Player > Android > Minimum API Level." \
         "Overall: BLOCK"
     assert_structure "real-project: 6 rows + 1 Overall" "$out" 6
 fi
