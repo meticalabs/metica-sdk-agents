@@ -8,11 +8,16 @@ From your Unity project's root in Claude Code:
 
 ```
 @agent-metica-unity-integrator
-
-PROJECT=/absolute/path/to/your/unity/project
 ```
 
-That's the whole invocation. Missing keys are filled with placeholders you swap in later; you'll be shown a plan and asked to approve before any file is written.
+That's the whole invocation. The integrator auto-detects the Unity project (walks up from `$(pwd)` looking for `ProjectSettings/`) and fills missing API keys with placeholders you swap in later. You'll be shown a plan and asked to approve before any file is written.
+
+If you're outside the project, or you have several Unity projects in one workspace, pass it explicitly:
+
+```
+@agent-metica-unity-integrator
+PROJECT=/absolute/path/to/your/unity/project
+```
 
 ## Install
 
@@ -131,9 +136,7 @@ metica-sdk-agents/
 │   ├── lib/clean-cs.awk
 │   └── templates/sidebyside/          # the 4 .cs.tmpl files
 ├── references/
-│   ├── migrate-ab-testing.md          # the side-by-side codegen's source-of-truth
-│   ├── max-vs-metica-2.4.0-api.md
-│   └── unity-sdk-api.md
+│   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
 └── tests/                             # 7 test scripts + fixtures + goldens
 ```
 

@@ -114,4 +114,4 @@ echo
 echo "Next step (manual): replace MaxSdk.* callsites in your game code with"
 echo "  AdServiceRouter.Instance.AdService.*"
 echo "Then call ads.SetHasUserConsent / ads.SetDoNotSell BEFORE ads.Initialize"
-echo "in your game's bootstrap. See references/migrate-ab-testing.md step 6."
+echo "in your game's bootstrap. See references/max-vs-metica-2.4.0-api.md for the parity table."
