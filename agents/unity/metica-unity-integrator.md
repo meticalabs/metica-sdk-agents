@@ -95,7 +95,35 @@ Use `printf '%s' "$SUBAGENT_OUTPUT" | extract_json` then parse the JSON to read 
 Invoke `@agent-metica-unity-compat-checker` with the project path. Extract the JSON.
 
 - `status: PASS` (with possible WARN rows) → continue.
-- `status: BLOCK` → **render a friendly remediation block** (template below) using the `checks[]` array, exit non-zero. Do **not** prompt the user to override.
+- `status: BLOCK` → check whether the **only** FAIL row is `metica_sdk` (see "MeticaSDK auto-install" below). If so, offer to install it. Otherwise render the BLOCK remediation block and exit non-zero. Do **not** prompt the user to override non-fixable failures.
+
+#### MeticaSDK auto-install (only resolvable failure)
+
+If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "metica_sdk"`, the failure is fully self-fixable via `scripts/download-metica-sdk.sh`. Offer the install:
+
+```
+MeticaSDK is not installed in this project.
+
+I can download MeticaSDK <target_sdk> (about ~3 MB) from
+<download_url from metica-versions.yaml> and import it into your project.
+
+  [y] download and import (recommended)
+  [n] cancel; I'll install it manually
+
+Choose [y/n]:
+```
+
+On `y`, run:
+
+```bash
+bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$VERSION" --import
+```
+
+The script verifies the SHA-256 checksum from `metica-versions.yaml`, places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-metica-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
+
+If Unity headless is not available (no `UNITY_PATH` set, no Hub-installed Unity matching the project version), the download script will fall back to placing the `.unitypackage` in `Assets/` and printing "double-click to import in the Editor". Surface that to the user with one extra step: "Unity isn't on PATH for headless import — open the project and double-click `Assets/MeticaSDK-<version>.unitypackage`, then re-run me."
+
+On `n`, render the standard BLOCK remediation block (which already contains the URL) and exit.
 
 #### BLOCK remediation template
 
@@ -116,7 +144,7 @@ Rules for the rendering:
 - One bullet per FAIL check; skip `WARN` and `UNKNOWN` (mention them as advisories at the end if you like, but don't gate on them).
 - Use the check's `hint` field verbatim — do not paraphrase. The hint is already the actionable suggestion.
 - If there are multiple FAILs, list all of them and end with one consolidated "After applying the fixes…" line.
-- Do **not** offer to apply fixes for the user. Auto-fix is out of scope for v0.1.0 — the user has full agency over their project settings.
+- The only failure the integrator may auto-resolve is `metica_sdk` (see "MeticaSDK auto-install" above). For Unity / Java / MaxSDK / Android-API failures, do **not** offer to apply fixes — those touch project settings or the user's machine, and the user has full agency there.
 
 ### Step 2 — Mode detection
 
