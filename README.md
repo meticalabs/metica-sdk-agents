@@ -104,7 +104,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Eight independent suites: `compat`, `format`, `download`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`, `scan-max-callsites`. 106 assertions total.
+Seven independent suites: `compat`, `format`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`, `scan-max-callsites`.
 
 A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
 
@@ -131,7 +131,6 @@ metica-sdk-agents/
 │   ├── scan-max-callsites.sh
 │   ├── codegen-fresh.sh
 │   ├── codegen-sidebyside.sh
-│   ├── download-metica-sdk.sh         # opt-in; not used by the default flow
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
 │   └── templates/sidebyside/          # the 4 .cs.tmpl files
