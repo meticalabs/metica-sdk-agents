@@ -18,10 +18,13 @@ You receive a project path and optionally a target SDK version. Build:
 
 ## What to do — run this single bash command
 
-Replace `PLUGIN_DIR` with the absolute path to the metica-sdk-agents plugin root (the directory containing `plugin.json`). The orchestrator passes it as part of the invocation; if not provided, derive it from this agent file's location.
+Resolve `PLUGIN_DIR` automatically via the shared resolver (checks `$CLAUDE_PLUGIN_ROOT`, `$METICA_SDK_AGENTS_DIR`, symlink targets, and known install paths). Do not ask the user for it.
 
 ```bash
-PLUGIN_DIR="<absolute_plugin_root>"
+PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null)"
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root." >&2; exit 1; }
+
 PROJECT="<absolute_project_path>"
 VERSION_ARG=""   # or "--version=2.4.0"
 

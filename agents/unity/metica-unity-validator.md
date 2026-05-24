@@ -16,10 +16,13 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 
 ## What to do — run this single bash command
 
-Replace `PLUGIN_DIR` with the absolute path to the metica-sdk-agents plugin root.
+Resolve `PLUGIN_DIR` automatically via the shared resolver. Do not ask the user for it.
 
 ```bash
-PLUGIN_DIR="<absolute_plugin_root>"
+PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null)"
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root." >&2; exit 1; }
+
 PROJECT="<absolute_project_path>"
 MODE_ARG=""   # or "--mode=fresh" / "--mode=side-by-side"
 

@@ -13,12 +13,9 @@ Accepted sub-agent contract versions: `compat-checker/1.x`, `mode-detect/1.x`, `
 
 ## Inputs from user
 
-Required:
+Optional (all auto-detected or placeholdered when omitted):
 
-- `PROJECT` — absolute path to the Unity project root (the directory containing `ProjectSettings/`).
-
-Optional:
-
+- `PROJECT` — absolute path to the Unity project root (the directory containing `ProjectSettings/`). **Auto-detected** from `$(pwd)` and up to 4 parent directories; see "Resolve `PROJECT`" below. Only pass this when you cannot run from inside the project or when working with multiple Unity projects at once.
 - `API_KEY` — Metica API key. If absent, use placeholder `YOUR_METICA_API_KEY` and remind the user at the end.
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used in side-by-side mode). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
@@ -27,13 +24,48 @@ Optional:
 
 ## Setup — establish `PLUGIN_DIR`
 
-This agent file lives at `<plugin_root>/agents/unity/metica-unity-integrator.md`. Before running any script, set:
+Resolve the plugin root automatically; do **not** ask the user for it. The first bash command of every run is:
 
 ```bash
-PLUGIN_DIR="<absolute_path_to_plugin_root>"   # the directory containing plugin.json
+PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null \
+    || bash "$(pwd)/.claude/agents/../../scripts/resolve-plugin-dir.sh" 2>/dev/null)"
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Reinstall with the marketplace install (preferred) or set METICA_SDK_AGENTS_DIR." >&2; exit 1; }
 ```
 
-If the caller didn't pass one in, derive it: the plugin root is two levels up from this `.md` file's location. If you cannot determine the absolute path, abort with a clear error rather than running with an empty `$PLUGIN_DIR` (which would silently look for scripts at `/scripts/...`).
+`scripts/resolve-plugin-dir.sh` checks `$CLAUDE_PLUGIN_ROOT` (set by Claude Code for marketplace-installed plugins), `$METICA_SDK_AGENTS_DIR`, symlink targets under `.claude/agents/`, and known install paths. If it fails, abort — do not run scripts with relative paths.
+
+## Setup — resolve `PROJECT`
+
+Auto-detect the Unity project root rather than asking the user. The marker is a `ProjectSettings/ProjectSettings.asset` file.
+
+```bash
+resolve_project() {
+    if [ -n "${PROJECT:-}" ]; then
+        printf '%s' "$PROJECT"; return 0
+    fi
+    dir="$(pwd)"
+    for _ in 1 2 3 4 5; do
+        if [ -f "$dir/ProjectSettings/ProjectSettings.asset" ]; then
+            printf '%s' "$dir"; return 0
+        fi
+        parent="$(dirname "$dir")"
+        [ "$parent" = "$dir" ] && break
+        dir="$parent"
+    done
+    return 1
+}
+
+if PROJECT="$(resolve_project)"; then
+    echo "Detected Unity project: $PROJECT"
+else
+    echo "No Unity project detected from $(pwd) or its parents."
+    echo "Re-run from inside your Unity project, or pass PROJECT=/absolute/path."
+    exit 1
+fi
+```
+
+Always echo the detected path to the user before proceeding so they can spot a wrong-project mismatch in workspaces with multiple Unity projects. If the user passed `PROJECT=...` explicitly, honor that value verbatim and skip the walk-up.
 
 ## Sub-agent output parsing
 
@@ -63,7 +95,35 @@ Use `printf '%s' "$SUBAGENT_OUTPUT" | extract_json` then parse the JSON to read 
 Invoke `@agent-metica-unity-compat-checker` with the project path. Extract the JSON.
 
 - `status: PASS` (with possible WARN rows) → continue.
-- `status: BLOCK` → **render a friendly remediation block** (template below) using the `checks[]` array, exit non-zero. Do **not** prompt the user to override.
+- `status: BLOCK` → check whether the **only** FAIL row is `metica_sdk` (see "MeticaSDK auto-install" below). If so, offer to install it. Otherwise render the BLOCK remediation block and exit non-zero. Do **not** prompt the user to override non-fixable failures.
+
+#### MeticaSDK auto-install (only resolvable failure)
+
+If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "metica_sdk"`, the failure is fully self-fixable via `scripts/download-metica-sdk.sh`. Offer the install:
+
+```
+MeticaSDK is not installed in this project.
+
+I can download MeticaSDK <target_sdk> (about ~3 MB) from
+<download_url from metica-versions.yaml> and import it into your project.
+
+  [y] download and import (recommended)
+  [n] cancel; I'll install it manually
+
+Choose [y/n]:
+```
+
+On `y`, run:
+
+```bash
+bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$VERSION" --import
+```
+
+The script verifies the SHA-256 checksum from `metica-versions.yaml`, places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-metica-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
+
+If Unity headless is not available (no `UNITY_PATH` set, no Hub-installed Unity matching the project version), the download script will fall back to placing the `.unitypackage` in `Assets/` and printing "double-click to import in the Editor". Surface that to the user with one extra step: "Unity isn't on PATH for headless import — open the project and double-click `Assets/MeticaSDK-<version>.unitypackage`, then re-run me."
+
+On `n`, render the standard BLOCK remediation block (which already contains the URL) and exit.
 
 #### BLOCK remediation template
 
@@ -84,7 +144,7 @@ Rules for the rendering:
 - One bullet per FAIL check; skip `WARN` and `UNKNOWN` (mention them as advisories at the end if you like, but don't gate on them).
 - Use the check's `hint` field verbatim — do not paraphrase. The hint is already the actionable suggestion.
 - If there are multiple FAILs, list all of them and end with one consolidated "After applying the fixes…" line.
-- Do **not** offer to apply fixes for the user. Auto-fix is out of scope for v0.1.0 — the user has full agency over their project settings.
+- The only failure the integrator may auto-resolve is `metica_sdk` (see "MeticaSDK auto-install" above). For Unity / Java / MaxSDK / Android-API failures, do **not** offer to apply fixes — those touch project settings or the user's machine, and the user has full agency there.
 
 ### Step 2 — Mode detection
 
@@ -95,7 +155,7 @@ bash "$PLUGIN_DIR/scripts/detect-mode.sh" --project="$PROJECT"
 Parse the JSON:
 
 - `mode: "fresh"` → no existing AppLovin MAX detected; standalone MeticaSDK install.
-- `mode: "side-by-side"` → MaxSDK present. **Do not modify any existing Max code.** Add a separate `MeticaAdService` next to the user's existing Max integration, plus an `IAdService` interface and `AdServiceRouter` per `references/migrate-ab-testing.md`.
+- `mode: "side-by-side"` → MaxSDK present. **Do not modify any existing Max code.** Add a separate `MeticaAdService` next to the user's existing Max integration, plus an `IAdService` interface and `AdServiceRouter`. The four `.cs.tmpl` files under `scripts/templates/sidebyside/` are the verbatim source of truth.
 
 Show the user the detected mode + the three signals + the decision string. **Ask for explicit confirmation** before proceeding. The user may override by saying "force fresh" or "force side-by-side"; honor the override and continue.
 
@@ -111,7 +171,7 @@ The plan must include:
 - Files to edit (full relative paths + which lines / what kind of edit). In **side-by-side** mode this list **must not include any file under `Assets/MaxSdk/`** or any MAX-owned Gradle template line.
 - Dependencies to install (SDK version + form factor).
 - Hard constraints reflected in this plan: privacy calls (`SetHasUserConsent`, `SetDoNotSell`) precede `MeticaSdk.Initialize` and live in the same file; init is called exactly once.
-- Code blocks for each new file (verbatim from `references/migrate-ab-testing.md` for side-by-side; canonical patterns from `references/unity-sdk-api.md` for fresh).
+- Code blocks for each new file. Both codegens are template-driven — the templates under `scripts/templates/sidebyside/` (for side-by-side) and the inline boilerplate in `scripts/codegen-fresh.sh` (for fresh) are the source of truth.
 - Rollback path: `git reset --hard pre-metica-integration` (tag created at step 4).
 
 After user approval, call `ExitPlanMode` (if used) and continue.
@@ -297,13 +357,12 @@ In **side-by-side mode**, the PASS summary must also include:
 - Privacy calls (`SetHasUserConsent`, `SetDoNotSell`) **must** precede `MeticaSdk.Initialize` and live in the **same file**.
 - Reuse the existing Max ad unit IDs for MeticaSDK (per migration guide).
 - Sub-agent invocations (compat-checker, validator) **must** be in fresh subagent contexts — never share your reasoning context with them.
-- If `$PLUGIN_DIR` is empty, abort. Do not run scripts with relative paths.
+- If `$PLUGIN_DIR` is empty after running `resolve-plugin-dir.sh`, abort. Never run scripts with relative paths.
 
 ## References
 
-- `../../references/migrate-ab-testing.md` — side-by-side architecture (verbatim source for 4c codegen).
-- `../../references/max-vs-metica-2.4.0-api.md` — API parity table.
-- `../../references/unity-sdk-api.md` — distilled MeticaSDK Unity API surface.
+- `../../references/max-vs-metica-2.4.0-api.md` — API parity table (MaxSdk ↔ MeticaSdk).
+- `../../scripts/templates/sidebyside/*.cs.tmpl` — verbatim templates for the side-by-side adapter files.
 - `../../agents/contracts.md` — sub-agent JSON schemas and extraction regex.
 
 ## Phase 4 follow-ups
