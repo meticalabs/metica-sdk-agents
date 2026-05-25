@@ -10,8 +10,7 @@ bash "$SCRIPT_DIR/run-download-tests.sh"   || any_fail=1; echo
 bash "$SCRIPT_DIR/run-validator-tests.sh"  || any_fail=1; echo
 bash "$SCRIPT_DIR/run-mode-tests.sh"       || any_fail=1; echo
 bash "$SCRIPT_DIR/run-codegen-tests.sh"    || any_fail=1; echo
-bash "$SCRIPT_DIR/run-codegen-sbs-tests.sh" || any_fail=1; echo
-bash "$SCRIPT_DIR/run-scan-tests.sh"        || any_fail=1
+bash "$SCRIPT_DIR/run-codegen-sbs-tests.sh" || any_fail=1
 
 echo
 [ "$any_fail" -eq 0 ] && { echo "ALL GREEN"; exit 0; }

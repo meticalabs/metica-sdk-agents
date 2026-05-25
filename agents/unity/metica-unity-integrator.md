@@ -190,13 +190,30 @@ If the working tree is dirty (script exits non-zero), stop and tell the user to 
 
 #### Side-by-side: scan + propose Max-callsite refactor
 
-After codegen, run:
+After codegen, scan the user's game code for MaxSdk callsites that need to be rewritten to go through `AdServiceRouter`. Use the Bash tool with `grep`, piped through `clean-cs.awk` to ignore matches inside string literals and comments. There is no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
+
+`ADAPTER_FOLDER` is the side-by-side adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). Strip any leading `$PROJECT/` and trailing slash before substituting it into the exclusion below.
 
 ```bash
-bash "$PLUGIN_DIR/scripts/scan-max-callsites.sh" --project="$PROJECT"
+ADAPTER_REL="${ADAPTER_FOLDER#$PROJECT/}"
+ADAPTER_REL="${ADAPTER_REL%/}"
+
+scan_max_callsites() {
+    local project="$1"
+    find "$project/Assets" "$project/Packages" -type f -name '*.cs' 2>/dev/null \
+        | grep -v -e "/MaxSdk/" -e "/MeticaSdk/" -e "/$ADAPTER_REL/" \
+                  -e "/PackageCache/" -e "/Library/" -e "/Temp/" -e "/obj/" \
+        | while IFS= read -r f; do
+            awk -f "$PLUGIN_DIR/scripts/lib/clean-cs.awk" "$f" \
+              | grep -nE 'MaxSdk(\.|Callbacks\.)' \
+              | sed "s|^|${f#$project/}:|"
+          done
+}
+
+scan_max_callsites "$PROJECT"
 ```
 
-Parse the JSON `callsites[]` array. Group by `category`:
+For each hit (lines emitted as `<relative_path>:<line>:<cleaned_snippet>`), Read enough surrounding context to assign a **category**:
 
 - **`bootstrap`** — `MaxSdk.SetSdkKey(...)`, `MaxSdk.InitializeSdk()`, `MaxSdk.SetHasUserConsent(...)`, `MaxSdk.SetDoNotSell(...)`. **Propose the bootstrap rewrite below in the SAME file** where the user's Max init lives today (so privacy ordering is enforceable by the validator's `privacy_before_init` rule).
 - **`method_call`** — `MaxSdk.LoadInterstitial`, `ShowInterstitial`, `LoadBanner`, `ShowBanner`, `HideBanner`, `DestroyBanner`, `CreateBanner`, `LoadRewardedAd`, `IsRewardedAdReady`, `ShowRewardedAd`, `IsInterstitialReady`. Simple receiver swap (plus the rewarded name remap: `LoadRewardedAd → LoadRewarded`, etc.).
@@ -261,7 +278,12 @@ Event-name table:
 1. Present the callsite inventory to the user grouped by file, with category counts.
 2. In plan mode, propose the rewrites file-by-file.
 3. On user approval, apply edits using the `Edit` tool. Always edit the original file in place — never create a parallel copy.
-4. After every file edit, re-run `bash "$PLUGIN_DIR/scripts/scan-max-callsites.sh" --project="$PROJECT"` to confirm the callsite is gone (or recategorize remaining ones).
+4. After every file edit, re-scan **only the file just edited** to confirm the callsite is gone (or recategorize remaining ones):
+
+    ```bash
+    awk -f "$PLUGIN_DIR/scripts/lib/clean-cs.awk" "<edited_file>" \
+      | grep -nE 'MaxSdk(\.|Callbacks\.)' || echo "OK: no MaxSdk callsites remain in <edited_file>"
+    ```
 5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
 
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.

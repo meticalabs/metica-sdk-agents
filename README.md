@@ -128,13 +128,10 @@ metica-sdk-agents/
 │   ├── detect-mode.sh
 │   ├── format-compat-report.sh
 │   ├── validate-integration.sh
-│   ├── scan-max-callsites.sh
-│   ├── codegen-fresh.sh
-│   ├── codegen-sidebyside.sh
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
-│   └── templates/sidebyside/          # the 4 .cs.tmpl files
+│   └── templates/sidebyside/          # canonical reference shapes the integrator reads at codegen time
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
 └── tests/                             # 7 test scripts + fixtures + goldens
