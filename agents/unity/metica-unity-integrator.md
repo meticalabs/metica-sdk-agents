@@ -21,6 +21,10 @@ Optional (all auto-detected or placeholdered when omitted):
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used in side-by-side mode). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`). Default: `interstitial`. **Fresh mode only** — the side-by-side codegen generates the full IAdService surface unconditionally and ignores this input.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
+- `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Side-by-side only** — controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against.
+- `REMOTE_CONFIG_KEY` — the boolean-typed key name read from the remote-config provider for the Metica rollout decision. Default: `metica_rollout`. **Side-by-side only.**
+- `NAMESPACE` — explicit namespace string for all generated files. If omitted, auto-detected from the project's dominant namespace (Step 2.5). Pass an empty string to force bare/no-namespace.
+- `ADAPTER_FOLDER` — explicit project-relative path for the side-by-side adapter folder. If omitted, auto-picked in Step 2.5 (default `Assets/Scripts/Metica`). **Side-by-side only.**
 
 ## Setup — establish `PLUGIN_DIR`
 
@@ -158,6 +162,80 @@ Parse the JSON:
 - `mode: "side-by-side"` → MaxSDK present. **Do not modify any existing Max code.** Add a separate `MeticaAdService` next to the user's existing Max integration, plus an `IAdService` interface and `AdServiceRouter`. The four `.cs.tmpl` files under `scripts/templates/sidebyside/` are the verbatim source of truth.
 
 Show the user the detected mode + the three signals + the decision string. **Ask for explicit confirmation** before proceeding. The user may override by saying "force fresh" or "force side-by-side"; honor the override and continue.
+
+### Step 2.5 — Detect project patterns
+
+Before codegen, learn two facts about the game's codebase: which remote-config provider already exists (used to auto-wire `AdServiceRouter.RolloutDecisionFunc` in side-by-side mode), and which namespace the generated files should live in. All detection is done via Bash + Grep + Read — no script.
+
+Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing.
+
+#### Signal 1 — `remote_config_provider`
+
+Skipped in fresh mode (no `AdServiceRouter` exists). In side-by-side mode, check each provider's signals; if multiple are present, pick the one with the most `using` imports across `Assets/Scripts/`:
+
+- **`firebase`** — any of:
+  - `[ -d "$PROJECT/Assets/Firebase" ]`
+  - `grep -q '"com.google.firebase.remote-config"' "$PROJECT/Packages/manifest.json" 2>/dev/null`
+  - Any `.cs` file in `$PROJECT/Assets/Scripts/` matches `^using Firebase\.RemoteConfig` (Grep tool: pattern `^using Firebase\.RemoteConfig`, glob `Assets/Scripts/**/*.cs`)
+- **`appmetrica`** — any of:
+  - `[ -d "$PROJECT/Assets/AppMetrica" ]`
+  - `grep -qE '"(io\.appmetrica|appmetrica)' "$PROJECT/Packages/manifest.json" 2>/dev/null`
+  - Any `.cs` file in `$PROJECT/Assets/Scripts/` matches `^using Io\.AppMetrica` or `^using AppMetricaSdk`
+- **`unity-remote-config`** — any of:
+  - `grep -q '"com.unity.remote-config"' "$PROJECT/Packages/manifest.json" 2>/dev/null`
+  - Any `.cs` file matches `^using Unity\.RemoteConfig` (note: the runtime class lives in `Unity.Services.RemoteConfig` in current versions; the `using` line in user code can be either)
+- **`none`** — no provider above detected.
+
+To pick a dominant provider when multiple are present, count `using` imports for each (`grep -rcE '^using (Firebase\.RemoteConfig|Io\.AppMetrica|Unity\.RemoteConfig)' "$PROJECT/Assets/Scripts/" 2>/dev/null | awk -F: '$2>0'`) and choose the highest. Surface the alternatives in the detection report so the user can override.
+
+#### Signal 2 — `namespace_dominant`
+
+Both modes. Walk `$PROJECT/Assets/Scripts/**/*.cs`, extract `^namespace\s+([\w.]+)` from each file, and pick the longest namespace prefix that appears in **≥50%** of files (and has at least one segment). Empty string if no prefix dominates.
+
+```bash
+detect_namespace() {
+    local project="$1"
+    local cs_files
+    cs_files=$(find "$project/Assets/Scripts" -type f -name '*.cs' 2>/dev/null)
+    [ -z "$cs_files" ] && return 0
+    local total
+    total=$(printf '%s\n' "$cs_files" | wc -l)
+    local namespaces
+    namespaces=$(printf '%s\n' "$cs_files" | while IFS= read -r f; do
+        awk '/^[[:space:]]*namespace[[:space:]]+/ { sub(/^[[:space:]]*namespace[[:space:]]+/, ""); sub(/[[:space:]{;].*/, ""); print; exit }' "$f"
+    done | sort | uniq -c | sort -rn)
+    [ -z "$namespaces" ] && return 0
+    printf '%s\n' "$namespaces" | awk -v total="$total" '
+        { count=$1; ns=$2; if (count*2 >= total) { print ns; exit } }'
+}
+detect_namespace "$PROJECT"
+```
+
+If no dominant single namespace emerges but a longer prefix is shared (e.g. `MyGame.UI`, `MyGame.Services`, `MyGame.Audio` all start with `MyGame`), pick the longest shared prefix that covers ≥50%. The agent applies common-sense judgment here — perfect precision is not required since the user reviews the detected value before plan approval.
+
+#### Side-by-side secondary checks (inline at generation time)
+
+These do not need a detection-report row; they are applied during Phase 3b codegen:
+
+- **Adapter folder pick** — `ls "$PROJECT/Assets/"`. If `Assets/_Project/Scripts/` exists, the folder is `Assets/_Project/Scripts/Metica`. Else if `Assets/Game/Scripts/` exists, `Assets/Game/Scripts/Metica`. Else default `Assets/Scripts/Metica`.
+- **Collision-prefix check** — before writing each side-by-side file, Grep `$PROJECT/Assets/` for each unprefixed class name (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, `MeticaRolloutBinding`). If any pre-existing definition is found (`interface\s+IAdService`, `class\s+\w*Ad(Service|Manager|Router)`), prefix all 5 generated names with `Metica` consistently (`IAdService` → `MeticaIAdService`, `AdServiceRouter` → `MeticaAdServiceRouter`, etc.).
+
+#### Detection report (show to user, then proceed)
+
+Render one block before continuing to Step 3:
+
+```
+Detected remote-config provider: firebase (3 of 71 .cs files import Firebase.RemoteConfig)
+  Alternatives present: (none)  |  appmetrica (1 import)  |  ...
+Detected dominant namespace: MyGame.Services (38 of 71 .cs files)
+Resolved adapter folder: Assets/_Project/Scripts/Metica
+Resolved namespace wrap (side-by-side): MyGame.Services.Metica
+Collision check: no conflicts  |  Found IAdService at Assets/Scripts/Old/IAdService.cs → prefixing with Metica
+```
+
+In fresh mode, omit the side-by-side-only lines (provider, alternatives, adapter folder, collision check).
+
+Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
 
 ### Step 3 — Plan presentation
 

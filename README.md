@@ -67,6 +67,10 @@ Tune behavior by passing any of these after `PROJECT=...`:
 | `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
 | `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
 | `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
+| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. Side-by-side only. |
+| `REMOTE_CONFIG_KEY` | `metica_rollout` | Boolean-typed key name read from the remote-config provider. Side-by-side only. |
+| `NAMESPACE` | auto-detected | Explicit namespace for all generated files (overrides project-dominant detection). Pass an empty string to force bare/no-namespace. |
+| `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the side-by-side adapter folder (overrides location pick). Side-by-side only. |
 
 ## The three agents
 
