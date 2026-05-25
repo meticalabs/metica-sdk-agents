@@ -367,21 +367,166 @@ Event-name table:
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
 
 
-**Side-by-side mode (Phase 4c — implemented):** Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key). Apply defaults for missing Metica inputs the same way as fresh mode:
+**Side-by-side codegen (agent-driven):** Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key) if not provided. Resolve inputs:
 
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
 MAX_SDK_KEY="${MAX_SDK_KEY:-YOUR_MAX_SDK_KEY}"
-
-bash "$PLUGIN_DIR/scripts/codegen-sidebyside.sh" \
-    --project="$PROJECT" \
-    --api-key="$API_KEY" \
-    --app-id="$APP_ID" \
-    --max-sdk-key="$MAX_SDK_KEY"
+# from Step 2.5:
+ADAPTER_FOLDER="<resolved adapter folder>"            # default Assets/Scripts/Metica (relative to $PROJECT)
+NAMESPACE="<resolved namespace>"                      # default "Metica.AbTest" when no project namespace dominates
+PREFIX="<empty>"                                      # or "Metica" if any collision found
+REMOTE_CONFIG_PROVIDER="<firebase|appmetrica|unity-remote-config|none>"
+REMOTE_CONFIG_KEY="${REMOTE_CONFIG_KEY:-metica_rollout}"
 ```
 
-Generates four files under `Assets/Scripts/Metica/`: `IAdService.cs`, `MaxAdService.cs`, `MeticaAdService.cs`, `AdServiceRouter.cs`. **Existing files under `Assets/MaxSdk/` are not touched** (asserted by tests). The user still needs to refactor their game code to call `AdServiceRouter.Instance.AdService.*` instead of `MaxSdk.*` — surface this as the next manual step in your final report (the codegen prints it too).
+**Input validation** — refuse to proceed if any of these fail:
+
+- `API_KEY`, `APP_ID`, `MAX_SDK_KEY` are all non-empty.
+- None of the three contains a newline, carriage return, or tab character. (Reject with `ERROR: keys must not contain control chars.`)
+- All five target files under `$PROJECT/$ADAPTER_FOLDER/` are either missing or will be overwritten only with explicit user confirmation. List existing collisions and stop until the user agrees.
+
+**Resolved namespace rule:** if Step 2.5 detected `namespace_dominant=MyGame.Services`, the effective namespace for these files is `MyGame.Services.Metica` (i.e., dominant + `.Metica`). If no dominant namespace was detected, use `Metica.AbTest` (matching the templates verbatim). If the user passed `NAMESPACE` explicitly, use it verbatim — do not append `.Metica`.
+
+**Resolved class-name rule:** if Step 2.5's collision-prefix check found any of `IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, or `MeticaRolloutBinding` already in the project (outside `$ADAPTER_FOLDER`), set `PREFIX=Metica` and rename **all five** generated symbols consistently: `IAdService → MeticaIAdService`, `MaxAdService → MeticaMaxAdService`, `MeticaAdService → MeticaMeticaAdService` (kept verbose to avoid further collision), `AdServiceRouter → MeticaAdServiceRouter`, `MeticaRolloutBinding → MeticaRolloutBinding` (already prefixed; no change).
+
+**C# string escaping for keys** — apply two substitutions, in this order, to each of `API_KEY`, `APP_ID`, `MAX_SDK_KEY` before embedding in a C# string literal:
+
+1. `\` → `\\`
+2. `"` → `\"`
+
+No other transforms. There is no second-stage sed-replacement escape (the agent writes via Write, not sed) — that's a difference from the deleted script's `cs_escape`, and it's correct.
+
+**File generation — for each of the 4 adapter files**, Read the canonical template from `$PLUGIN_DIR/scripts/templates/sidebyside/<File>.cs.tmpl`, apply the following transforms in order, then Write to `$PROJECT/$ADAPTER_FOLDER/<output_name>.cs`:
+
+| Template | Output filename | Substitutions |
+|---|---|---|
+| `IAdService.cs.tmpl` | `${PREFIX}IAdService.cs` | namespace replace, identifier rename |
+| `MaxAdService.cs.tmpl` | `${PREFIX}MaxAdService.cs` | namespace replace, identifier rename, `__MAX_SDK_KEY__` → escaped key |
+| `MeticaAdService.cs.tmpl` | `${PREFIX}MeticaAdService.cs` | namespace replace, identifier rename, `__METICA_API_KEY__` / `__METICA_APP_ID__` → escaped keys |
+| `AdServiceRouter.cs.tmpl` | `${PREFIX}AdServiceRouter.cs` | namespace replace, identifier rename, all three `__…__` → escaped keys |
+
+Transforms:
+
+1. Replace `namespace Metica.AbTest` (and the matching `} // namespace Metica.AbTest` closer) with the resolved namespace.
+2. Replace every occurrence of each unprefixed class/interface name (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`) with `${PREFIX}<name>` when `PREFIX` is non-empty. Including type references in other generated files (e.g. `AdServiceRouter`'s field declarations referencing `IAdService`).
+3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values, where applicable.
+
+**5th file — `${PREFIX}MeticaRolloutBinding.cs`** at `$PROJECT/$ADAPTER_FOLDER/${PREFIX}MeticaRolloutBinding.cs`. Auto-wires the router's `RolloutDecisionFunc` to the detected remote-config provider. Choose one of the four variants below based on `REMOTE_CONFIG_PROVIDER`. Substitute `<NAMESPACE>` with the resolved namespace, `<ROUTER>` with `${PREFIX}AdServiceRouter`, and `<KEY>` with `$REMOTE_CONFIG_KEY` (the agent must validate that `REMOTE_CONFIG_KEY` is a C-style identifier matching `^[A-Za-z_][A-Za-z0-9_]*$` before embedding — reject otherwise).
+
+**Variant `firebase`:**
+
+```csharp
+using Firebase.RemoteConfig;
+using UnityEngine;
+
+namespace <NAMESPACE>
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            <ROUTER>.RolloutDecisionFunc = () =>
+                FirebaseRemoteConfig.DefaultInstance.GetValue("<KEY>").BooleanValue;
+        }
+    }
+}
+```
+
+**Variant `appmetrica`:** AppMetrica's remote-config Unity API has shifted across SDK versions, so confirm the current accessor first. Run a WebFetch:
+
+```
+WebFetch url=https://appmetrica.io/docs/mobile-sdk-dg/unity/unity-quickstart.html
+        prompt="What is the current Unity API to read a boolean remote-config value or feature flag from AppMetrica? Provide the exact class and method name."
+```
+
+If the fetch resolves to a concrete accessor (e.g. `AppMetrica.GetFeatureFlag` or similar), emit:
+
+```csharp
+// Verified against AppMetrica Unity SDK docs on <YYYY-MM-DD> — confirm against your installed SDK version.
+using Io.AppMetrica;
+using UnityEngine;
+
+namespace <NAMESPACE>
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            <ROUTER>.RolloutDecisionFunc = () =>
+                <RESOLVED_APPMETRICA_ACCESSOR>("<KEY>");
+        }
+    }
+}
+```
+
+If WebFetch fails or returns no concrete accessor, fall back to the `none` variant below and flag in the final report: `"⚠ AppMetrica detected but remote-config accessor could not be verified — emitted TODO stub instead. Manually wire <ROUTER>.RolloutDecisionFunc against your AppMetrica SDK."`
+
+**Variant `unity-remote-config`:**
+
+```csharp
+using Unity.Services.RemoteConfig;
+using UnityEngine;
+
+namespace <NAMESPACE>
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            <ROUTER>.RolloutDecisionFunc = () =>
+                RemoteConfigService.Instance.appConfig.GetBool("<KEY>");
+        }
+    }
+}
+```
+
+**Variant `none`** — emit a stub that compiles but leaves `RolloutDecisionFunc` null. The router already handles a null `RolloutDecisionFunc` by falling back to the inspector fields, so this is safe to ship as-is during development. The three commented one-liners give the user copy-paste options:
+
+```csharp
+using UnityEngine;
+
+namespace <NAMESPACE>
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            // CHOOSE ONE AND UNCOMMENT — DO NOT SHIP THIS STUB
+            //
+            // Firebase Remote Config:
+            // <ROUTER>.RolloutDecisionFunc = () =>
+            //     Firebase.RemoteConfig.FirebaseRemoteConfig.DefaultInstance.GetValue("<KEY>").BooleanValue;
+            //
+            // AppMetrica:
+            // <ROUTER>.RolloutDecisionFunc = () =>
+            //     Io.AppMetrica.AppMetrica.GetFeatureFlag("<KEY>"); // verify accessor name against your SDK version
+            //
+            // Unity Remote Config:
+            // <ROUTER>.RolloutDecisionFunc = () =>
+            //     Unity.Services.RemoteConfig.RemoteConfigService.Instance.appConfig.GetBool("<KEY>");
+        }
+    }
+}
+```
+
+**After generating all 5 files:**
+
+```bash
+mkdir -p "$PROJECT/$ADAPTER_FOLDER"
+ls -la "$PROJECT/$ADAPTER_FOLDER"
+echo "Generated 5 files in $ADAPTER_FOLDER"
+echo "Provider: $REMOTE_CONFIG_PROVIDER (key: $REMOTE_CONFIG_KEY)"
+echo "Namespace: $NAMESPACE"
+[ -n "$PREFIX" ] && echo "Class prefix applied: $PREFIX (collision detected)"
+```
+
+**Existing files under `Assets/MaxSdk/` are never touched** (tested explicitly; the agent's prose must never include MaxSdk paths in any Write call). The user still needs to refactor their game code to call `${PREFIX}AdServiceRouter.Instance.AdService.*` instead of `MaxSdk.*` — that happens in the "scan + propose Max-callsite refactor" subsection above.
 
 **Fresh mode codegen (agent-driven):** Ask the user which ad formats they need (banner / interstitial / rewarded; default `interstitial` if they don't specify). Resolve inputs:
 
@@ -524,25 +669,15 @@ When validator returned **PASS**, emit the standard summary only, optionally fol
 In **side-by-side mode**, the PASS summary must also include:
 
 1. **Max-callsite outcome** — if the user approved the refactor, the count of files edited; otherwise the inventory as an action checklist.
-2. **Rollout-config wiring** — point the user at `AdServiceRouter.RolloutDecisionFunc` with this Firebase example (drop into any class):
+2. **Rollout-config wiring status** — report which remote-config provider was detected and how `RolloutDecisionFunc` was wired:
 
-    ```csharp
-    using Firebase.RemoteConfig;
-    using Metica.AbTest;
-    using UnityEngine;
+    - `firebase` / `appmetrica` (verified) / `unity-remote-config` → `✓ AdServiceRouter.RolloutDecisionFunc is auto-wired in MeticaRolloutBinding.cs against <provider>, key "<REMOTE_CONFIG_KEY>". Confirm the key exists in your remote-config dashboard before shipping.`
+    - `appmetrica` (WebFetch verification failed) → `⚠ AppMetrica detected, but the remote-config accessor could not be verified at codegen time. A TODO stub was emitted in MeticaRolloutBinding.cs — wire it manually against your installed AppMetrica SDK version.`
+    - `none` → `⚠ No remote-config provider detected. MeticaRolloutBinding.cs ships as a TODO stub with one-liner examples for Firebase, AppMetrica, and Unity Remote Config — uncomment whichever you use.`
 
-    static class MeticaRolloutWire {
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        static void Wire() {
-            AdServiceRouter.RolloutDecisionFunc =
-                () => FirebaseRemoteConfig.DefaultInstance.GetValue("use_metica").BooleanValue;
-        }
-    }
-    ```
+    In all cases warn the user **not** to hard-code `useMeticaSdk = true` in the inspector for production builds — the field is a dev fallback only.
 
-    Explicitly warn the user **not** to hard-code `useMeticaSdk = true` in the inspector for production builds — the field is a dev fallback only. The remote-config provider is the production source of truth for the rollout cohort.
-
-3. **Manual steps remaining** — anything the user still needs to do (replace placeholder keys, write the Firebase Remote Config parameter, choose `SetHasUserConsent` value per their compliance posture, etc.).
+3. **Manual steps remaining** — anything the user still needs to do (replace placeholder keys, create the `<REMOTE_CONFIG_KEY>` parameter in their remote-config dashboard, choose `SetHasUserConsent` value per their compliance posture, etc.).
 
 ## Hard rules
 
