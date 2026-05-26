@@ -200,18 +200,49 @@ detect_namespace() {
     [ -z "$cs_files" ] && return 0
     local total
     total=$(printf '%s\n' "$cs_files" | wc -l)
-    local namespaces
-    namespaces=$(printf '%s\n' "$cs_files" | while IFS= read -r f; do
+    [ "$total" -eq 0 ] && return 0
+
+    # Per-file namespace (first declaration in each file, or empty).
+    local per_file
+    per_file=$(printf '%s\n' "$cs_files" | while IFS= read -r f; do
         awk '/^[[:space:]]*namespace[[:space:]]+/ { sub(/^[[:space:]]*namespace[[:space:]]+/, ""); sub(/[[:space:]{;].*/, ""); print; exit }' "$f"
-    done | sort | uniq -c | sort -rn)
-    [ -z "$namespaces" ] && return 0
-    printf '%s\n' "$namespaces" | awk -v total="$total" '
-        { count=$1; ns=$2; if (count*2 >= total) { print ns; exit } }'
+    done | grep -v '^$' | sort)
+    [ -z "$per_file" ] && return 0
+
+    # Stage 1: an exact namespace that appears in >=50% of files wins.
+    local exact
+    exact=$(printf '%s\n' "$per_file" | uniq -c | sort -rn \
+        | awk -v total="$total" '{ if ($1*2 >= total) { sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); print; exit } }')
+    [ -n "$exact" ] && { printf '%s' "$exact"; return 0; }
+
+    # Stage 2: prefix fallback — derive every prefix of every per-file namespace,
+    # count how many files have each prefix, return the LONGEST prefix that
+    # covers >=50%. (Longest, not most-frequent: a 3-segment prefix shared by
+    # 50% beats a 1-segment prefix shared by 80%.)
+    printf '%s\n' "$per_file" | awk -v total="$total" '
+        {
+            ns = $0
+            # Emit each leading prefix: A, A.B, A.B.C, ...
+            split(ns, parts, ".")
+            acc = ""
+            for (i = 1; i <= length(parts); i++) {
+                acc = (i == 1) ? parts[i] : acc "." parts[i]
+                counts[acc]++
+            }
+        }
+        END {
+            best = ""; best_len = 0
+            for (p in counts) {
+                if (counts[p] * 2 < total) continue
+                if (length(p) > best_len) { best = p; best_len = length(p) }
+            }
+            if (best != "") print best
+        }'
 }
 detect_namespace "$PROJECT"
 ```
 
-If no dominant single namespace emerges but a longer prefix is shared (e.g. `MyGame.UI`, `MyGame.Services`, `MyGame.Audio` all start with `MyGame`), pick the longest shared prefix that covers ≥50%. The agent applies common-sense judgment here — perfect precision is not required since the user reviews the detected value before plan approval.
+The snippet now implements both branches: an exact-namespace majority and a prefix-fallback. Manually verify the output against the user-visible project shape — perfect precision is not required since the user reviews the detected value in Step 3's plan before approval.
 
 #### Side-by-side secondary checks (inline at generation time)
 
