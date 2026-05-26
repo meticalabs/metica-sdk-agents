@@ -326,6 +326,31 @@ else
     rm -rf "$p"
 fi
 
+# 7. Property: after prefix mode, NO unprefixed base name leaks into any
+# generated file. This guards against a future rename-order regression
+# (adding a 6th class without thinking through substring overlap).
+p="$(make_sbs_project)"
+emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "ABC123" "XYZ987" "MAXKEY99"
+emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
+unprefixed_leaks=0
+for stem in IAdService MaxAdService MeticaAdService AdServiceRouter; do
+    # An unprefixed name is one that doesn't have an alphanumeric or '_' char
+    # immediately before it. Use grep -P for negative lookbehind.
+    if grep -rPq "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" 2>/dev/null; then
+        echo "        leak: unprefixed '$stem' found in generated files"
+        grep -rnP "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" | sed 's/^/          /'
+        unprefixed_leaks=1
+    fi
+done
+if [ "$unprefixed_leaks" = "0" ]; then
+    echo "  PASS  sbs prefix property (no unprefixed leaks)"
+    pass=$((pass+1))
+else
+    echo "  FAIL  sbs prefix property (unprefixed names leaked)"
+    fail=$((fail+1))
+fi
+rm -rf "$p"
+
 echo
 echo "Pass: $pass   Fail: $fail"
 [ "$fail" = "0" ] || exit 1
