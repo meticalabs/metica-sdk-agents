@@ -24,7 +24,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Side-by-side only** — controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name read from the remote-config provider for the Metica rollout decision. Default: `metica_rollout`. **Side-by-side only.**
 - `NAMESPACE` — explicit namespace string for all generated files. If omitted, auto-detected from the project's dominant namespace (Step 2.5). Pass an empty string to force bare/no-namespace.
-- `ADAPTER_FOLDER` — explicit project-relative path for the side-by-side adapter folder. If omitted, auto-picked in Step 2.5 (default `Assets/Scripts/Metica`). **Side-by-side only.**
+- `ADAPTER_FOLDER` — explicit **project-relative** path for the side-by-side adapter folder (must start with `Assets/`; do not pass an absolute path or a parent-relative path like `../foo`). If omitted, auto-picked in Step 2.5 (default `Assets/Scripts/Metica`). **Side-by-side only.**
 
 ## Setup — establish `PLUGIN_DIR`
 
@@ -301,10 +301,20 @@ If the working tree is dirty (script exits non-zero), stop and tell the user to 
 
 After codegen, scan the user's game code for MaxSdk callsites that need to be rewritten to go through `AdServiceRouter`. Use the Bash tool with `grep`, piped through `clean-cs.awk` to ignore matches inside string literals and comments. There is no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
 
-`ADAPTER_FOLDER` is the side-by-side adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). Strip any leading `$PROJECT/` and trailing slash before substituting it into the exclusion below.
+`ADAPTER_FOLDER` is the side-by-side adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). It must be project-relative and start with `Assets/`. If the user passed an absolute path that begins with `$PROJECT/`, strip the prefix; reject any other absolute path or any path containing `..` segments (do **not** silently use a path outside the project root).
 
 ```bash
-ADAPTER_REL="${ADAPTER_FOLDER#$PROJECT/}"
+case "$ADAPTER_FOLDER" in
+    /*) ADAPTER_REL="${ADAPTER_FOLDER#$PROJECT/}"
+        case "$ADAPTER_REL" in
+            /*) echo "ADAPTER_FOLDER is outside the project root: $ADAPTER_FOLDER" >&2; exit 1 ;;
+        esac
+        ;;
+    *) ADAPTER_REL="$ADAPTER_FOLDER" ;;
+esac
+case "$ADAPTER_REL" in
+    *..*|"") echo "ADAPTER_FOLDER must be a project-relative path under Assets/" >&2; exit 1 ;;
+esac
 ADAPTER_REL="${ADAPTER_REL%/}"
 
 scan_max_callsites() {
