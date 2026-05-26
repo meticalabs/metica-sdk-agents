@@ -9,6 +9,7 @@ bash "$SCRIPT_DIR/run-format-tests.sh"     || any_fail=1; echo
 bash "$SCRIPT_DIR/run-download-tests.sh"   || any_fail=1; echo
 bash "$SCRIPT_DIR/run-validator-tests.sh"  || any_fail=1; echo
 bash "$SCRIPT_DIR/run-mode-tests.sh"       || any_fail=1; echo
+bash "$SCRIPT_DIR/run-input-validation-tests.sh"  || any_fail=1; echo
 bash "$SCRIPT_DIR/run-codegen-validator-tests.sh" || any_fail=1
 
 echo

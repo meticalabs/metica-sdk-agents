@@ -422,22 +422,24 @@ REMOTE_CONFIG_PROVIDER="<firebase|appmetrica|unity-remote-config|none>"
 REMOTE_CONFIG_KEY="${REMOTE_CONFIG_KEY:-metica_rollout}"
 ```
 
-**Input validation** — refuse to proceed if any of these fail:
+**Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form. Exit non-zero on any failure; do not write any file.
 
-- `API_KEY`, `APP_ID`, `MAX_SDK_KEY` are all non-empty.
-- None of the three contains a newline, carriage return, or tab character. (Reject with `ERROR: keys must not contain control chars.`)
+```bash
+API_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$API_KEY")"     || exit 1
+APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$APP_ID")"      || exit 1
+MAX_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$MAX_SDK_KEY")" || exit 1
+RC_KEY="$(bash      "$PLUGIN_DIR/scripts/validate-keys.sh" --type=remote-config-key "$REMOTE_CONFIG_KEY")" || exit 1
+```
+
+**Other input checks** the agent enforces inline:
+
 - All five target files under `$PROJECT/$ADAPTER_FOLDER/` are either missing or will be overwritten only with explicit user confirmation. List existing collisions and stop until the user agrees.
 
 **Resolved namespace rule:** if Step 2.5 detected `namespace_dominant=MyGame.Services`, the effective namespace for these files is `MyGame.Services.Metica` (i.e., dominant + `.Metica`). If no dominant namespace was detected, use `Metica.AbTest` (matching the templates verbatim). If the user passed `NAMESPACE` explicitly, use it verbatim — do not append `.Metica`.
 
 **Resolved class-name rule:** if Step 2.5's collision-prefix check found any of `IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, or `MeticaRolloutBinding` already in the project (outside `$ADAPTER_FOLDER`), set `PREFIX=Metica` and rename **all five** generated symbols consistently: `IAdService → MeticaIAdService`, `MaxAdService → MeticaMaxAdService`, `MeticaAdService → MeticaMeticaAdService` (kept verbose to avoid further collision), `AdServiceRouter → MeticaAdServiceRouter`, `MeticaRolloutBinding → MeticaRolloutBinding` (already prefixed; no change).
 
-**C# string escaping for keys** — apply two substitutions, in this order, to each of `API_KEY`, `APP_ID`, `MAX_SDK_KEY` before embedding in a C# string literal:
-
-1. `\` → `\\`
-2. `"` → `\"`
-
-No other transforms. There is no second-stage sed-replacement escape (the agent writes via Write, not sed) — that's a difference from the deleted script's `cs_escape`, and it's correct.
+**C# string escaping for keys** — already performed by the `validate-keys.sh` calls above (`$API_KEY_ESC`, `$APP_ID_ESC`, `$MAX_KEY_ESC` are ready to embed). Do not re-escape; do not apply a sed-replacement second stage (that was needed by the deleted sed-driven script; the agent writes via the Write tool, so a single-stage escape is correct).
 
 **File generation — for each of the 4 adapter files**, Read the canonical template from `$PLUGIN_DIR/scripts/templates/sidebyside/<File>.cs.tmpl`, apply the following transforms in order, then Write to `$PROJECT/$ADAPTER_FOLDER/<output_name>.cs`:
 
@@ -577,21 +579,21 @@ NAMESPACE="${NAMESPACE-<value_from_step_2.5>}"  # default empty (bare namespace)
 OUT_FILE="$PROJECT/Assets/Scripts/MeticaBootstrap.cs"
 ```
 
-**Input validation** — refuse to proceed if any of these fail (do not write the file):
+**Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key it embeds. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form on stdout. Exit non-zero on any failure; do not write the file.
 
-- `API_KEY` and `APP_ID` are non-empty.
-- Neither `API_KEY` nor `APP_ID` contains a newline, carriage return, or tab character. (Reject with: `ERROR: API key / App ID must not contain newlines or tabs.`)
+```bash
+API_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$API_KEY")" || exit 1
+APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$APP_ID")"  || exit 1
+```
+
+`tests/run-input-validation-tests.sh` exercises the helper's invariants (empty rejection, control-char rejection, `\` and `"` escape, `&`/`/` preservation, injection-resistance) so they stay testable from bash even though codegen itself is agent-driven. Do not duplicate the escape logic in the agent's reasoning — call the helper.
+
+**Other input checks** the agent enforces inline (no helper):
+
 - `FORMATS` parses to a non-empty subset of `{banner, interstitial, rewarded}` after whitespace-trimming each token. Reject unknown tokens.
 - If `$OUT_FILE` already exists, do not overwrite. Tell the user to remove the existing file or pass an explicit "force" instruction.
 
-**C# string escaping** — before embedding `API_KEY` or `APP_ID` into a C# string literal, apply exactly two substitutions, in this order:
-
-1. `\` → `\\` (every backslash → two backslashes)
-2. `"` → `\"` (every double-quote → backslash + double-quote)
-
-No other transforms. The validator's correctness rules + an injection-resistance test in `tests/run-codegen-tests.sh` depend on this being exact.
-
-**File contents** — Write the file at `$OUT_FILE` with the template below. Substitute `<API_KEY_ESCAPED>` and `<APP_ID_ESCAPED>` with the C#-escaped inputs. Include each per-format block (banner / interstitial / rewarded) **only** if that format is in `FORMATS`. Wrap the entire `public class MeticaBootstrap { ... }` declaration in `namespace <NAMESPACE> { ... }` only when `NAMESPACE` is non-empty.
+**File contents** — Write the file at `$OUT_FILE` with the template below. Substitute `<API_KEY_ESCAPED>` and `<APP_ID_ESCAPED>` with `$API_KEY_ESC` / `$APP_ID_ESC` from `validate-keys.sh` above. Include each per-format block (banner / interstitial / rewarded) **only** if that format is in `FORMATS`. Wrap the entire `public class MeticaBootstrap { ... }` declaration in `namespace <NAMESPACE> { ... }` only when `NAMESPACE` is non-empty.
 
 ```csharp
 using UnityEngine;

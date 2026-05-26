@@ -132,6 +132,7 @@ metica-sdk-agents/
 │   ├── detect-mode.sh
 │   ├── format-compat-report.sh
 │   ├── validate-integration.sh
+│   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
