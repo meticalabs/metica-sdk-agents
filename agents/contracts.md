@@ -82,32 +82,9 @@ Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose betwee
 
 ---
 
-## `max-callsite-scan/1.0.0`
+## Max-callsite inventory (no JSON contract)
 
-Emitted by `scripts/scan-max-callsites.sh`. Consumed by the integrator's step-5 refactor proposal.
-
-**Allowed values:**
-- `callsites[].category`: `bootstrap`, `method_call`, `callback_subscription`, `other`
-- `callsites[].file`: relative path from `$PROJECT`
-- `callsites[].line`: 1-based line number
-- `callsites[].snippet`: trimmed cleaned source line (strings/comments stripped via `lib/clean-cs.awk`)
-
-Excludes `Assets/MaxSdk/`, `Assets/MeticaSdk/`, `Assets/Scripts/Metica/`, `Packages/`, `Library/`, `Temp/`, `obj/` — only user game code surfaces.
-
-**Concrete example:**
-
-```json
-{
-  "schema": "max-callsite-scan/1.0.0",
-  "project": "/Users/me/Projects/MyGame",
-  "callsites": [
-    { "file": "Assets/Scripts/HomeScreen.cs", "line": 59, "category": "bootstrap",             "snippet": "MaxSdk.SetSdkKey(MaxSdkKey);" },
-    { "file": "Assets/Scripts/HomeScreen.cs", "line": 60, "category": "bootstrap",             "snippet": "MaxSdk.InitializeSdk();" },
-    { "file": "Assets/Scripts/HomeScreen.cs", "line": 200, "category": "method_call",          "snippet": "MaxSdk.LoadInterstitial(interstitialAdUnitId);" },
-    { "file": "Assets/Scripts/HomeScreen.cs", "line": 220, "category": "callback_subscription", "snippet": "MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterstitialLoadedEvent;" }
-  ]
-}
-```
+The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity/metica-unity-integrator.md` (Step 5, side-by-side branch) for the canonical scan snippet.
 
 ---
 

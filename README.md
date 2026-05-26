@@ -67,6 +67,10 @@ Tune behavior by passing any of these after `PROJECT=...`:
 | `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
 | `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
 | `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
+| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. Side-by-side only. |
+| `REMOTE_CONFIG_KEY` | `metica_rollout` | Boolean-typed key name read from the remote-config provider. Side-by-side only. |
+| `NAMESPACE` | auto-detected | Explicit namespace for all generated files (overrides project-dominant detection). Pass an empty string to force bare/no-namespace. |
+| `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the side-by-side adapter folder (must start with `Assets/`; absolute paths and `..` segments are rejected). Side-by-side only. |
 
 ## The three agents
 
@@ -128,13 +132,11 @@ metica-sdk-agents/
 │   ├── detect-mode.sh
 │   ├── format-compat-report.sh
 │   ├── validate-integration.sh
-│   ├── scan-max-callsites.sh
-│   ├── codegen-fresh.sh
-│   ├── codegen-sidebyside.sh
+│   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
-│   └── templates/sidebyside/          # the 4 .cs.tmpl files
+│   └── templates/sidebyside/          # canonical reference shapes the integrator reads at codegen time
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
 └── tests/                             # 7 test scripts + fixtures + goldens
