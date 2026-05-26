@@ -437,18 +437,13 @@ namespace <NAMESPACE>
 }
 ```
 
-**Variant `appmetrica`:** AppMetrica's remote-config Unity API has shifted across SDK versions, so confirm the current accessor first. Run a WebFetch:
-
-```
-WebFetch url=https://appmetrica.io/docs/mobile-sdk-dg/unity/unity-quickstart.html
-        prompt="What is the current Unity API to read a boolean remote-config value or feature flag from AppMetrica? Provide the exact class and method name."
-```
-
-If the fetch resolves to a concrete accessor (e.g. `AppMetrica.GetFeatureFlag` or similar), emit:
+**Variant `appmetrica`:** AppMetrica's remote-config / feature-flag Unity API has shifted across SDK versions, and the publisher's installed SDK is the source of truth. The agent does **not** auto-wire AppMetrica — it emits an AppMetrica-flavoured TODO stub so the user wires it against their actual SDK version. Optionally run a WebFetch to surface a *suggested* accessor name in the comment, but never emit a "verified" claim — an LLM reading a docs page is not verification.
 
 ```csharp
-// Verified against AppMetrica Unity SDK docs on <YYYY-MM-DD> — confirm against your installed SDK version.
-using Io.AppMetrica;
+// AppMetrica detected. Wire RolloutDecisionFunc against the remote-config /
+// feature-flag accessor exposed by your installed AppMetrica Unity SDK.
+// Recent SDKs expose this differently — consult your SDK's docs:
+//   https://appmetrica.io/docs/en/sdk-information/sdk-list
 using UnityEngine;
 
 namespace <NAMESPACE>
@@ -458,14 +453,15 @@ namespace <NAMESPACE>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Bind()
         {
-            <ROUTER>.RolloutDecisionFunc = () =>
-                <RESOLVED_APPMETRICA_ACCESSOR>("<KEY>");
+            // Example (verify against your SDK version before shipping):
+            // <ROUTER>.RolloutDecisionFunc = () =>
+            //     Io.AppMetrica.AppMetrica.GetFeatureFlag("<KEY>");
         }
     }
 }
 ```
 
-If WebFetch fails or returns no concrete accessor, fall back to the `none` variant below and flag in the final report: `"⚠ AppMetrica detected but remote-config accessor could not be verified — emitted TODO stub instead. Manually wire <ROUTER>.RolloutDecisionFunc against your AppMetrica SDK."`
+If the agent ran a WebFetch and the page surfaced a likely accessor name, include it as a second commented example with an explicit `// proposed from docs at <URL>; confirm against your installed SDK version` annotation — never as the uncommented `Bind()` body.
 
 **Variant `unity-remote-config`:**
 
@@ -673,8 +669,8 @@ In **side-by-side mode**, the PASS summary must also include:
 1. **Max-callsite outcome** — if the user approved the refactor, the count of files edited; otherwise the inventory as an action checklist.
 2. **Rollout-config wiring status** — report which remote-config provider was detected and how `RolloutDecisionFunc` was wired:
 
-    - `firebase` / `appmetrica` (verified) / `unity-remote-config` → `✓ AdServiceRouter.RolloutDecisionFunc is auto-wired in MeticaRolloutBinding.cs against <provider>, key "<REMOTE_CONFIG_KEY>". Confirm the key exists in your remote-config dashboard before shipping.`
-    - `appmetrica` (WebFetch verification failed) → `⚠ AppMetrica detected, but the remote-config accessor could not be verified at codegen time. A TODO stub was emitted in MeticaRolloutBinding.cs — wire it manually against your installed AppMetrica SDK version.`
+    - `firebase` / `unity-remote-config` → `✓ AdServiceRouter.RolloutDecisionFunc is auto-wired in MeticaRolloutBinding.cs against <provider>, key "<REMOTE_CONFIG_KEY>". Confirm the key exists in your remote-config dashboard before shipping.`
+    - `appmetrica` → `⚠ AppMetrica detected. MeticaRolloutBinding.cs ships as a TODO stub with an AppMetrica-flavoured example because the remote-config accessor varies across SDK versions. Wire it manually against your installed AppMetrica SDK version.`
     - `none` → `⚠ No remote-config provider detected. MeticaRolloutBinding.cs ships as a TODO stub with one-liner examples for Firebase, AppMetrica, and Unity Remote Config — uncomment whichever you use.`
 
     In all cases warn the user **not** to hard-code `useMeticaSdk = true` in the inspector for production builds — the field is a dev fallback only.
