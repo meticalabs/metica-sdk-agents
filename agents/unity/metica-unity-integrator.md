@@ -19,9 +19,9 @@ Optional (all auto-detected or placeholdered when omitted):
 - `API_KEY` — Metica API key. If absent, use placeholder `YOUR_METICA_API_KEY` and remind the user at the end.
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used in side-by-side mode). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
-- `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`). Default: `interstitial`. **Fresh mode only** — the side-by-side codegen generates the full IAdService surface unconditionally and ignores this input.
+- `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`). Default: `interstitial`. **Both modes.** Only the per-format provider files for the listed formats are generated (see Step 5). In side-by-side mode, when omitted, formats are auto-detected from the project's existing `MaxSdk.Load*` callsites.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
-- `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Side-by-side only** — controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against.
+- `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `gameanalytics` | `none`. If omitted, auto-detected in Step 2.5. **Side-by-side only** — controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name read from the remote-config provider for the Metica rollout decision. Default: `metica_rollout`. **Side-by-side only.**
 - `NAMESPACE` — explicit namespace string for all generated files. If omitted, auto-detected from the project's dominant namespace (Step 2.5). Pass an empty string to force bare/no-namespace.
 - `ADAPTER_FOLDER` — explicit **project-relative** path for the side-by-side adapter folder (must start with `Assets/`; do not pass an absolute path or a parent-relative path like `../foo`). If omitted, auto-picked in Step 2.5 (default `Assets/Scripts/Metica`). **Side-by-side only.**
@@ -159,7 +159,7 @@ bash "$PLUGIN_DIR/scripts/detect-mode.sh" --project="$PROJECT"
 Parse the JSON:
 
 - `mode: "fresh"` → no existing AppLovin MAX detected; standalone MeticaSDK install.
-- `mode: "side-by-side"` → MaxSDK present. **Do not modify any existing Max code.** Add a separate `MeticaAdService` next to the user's existing Max integration, plus an `IAdService` interface and `AdServiceRouter`. The four `.cs.tmpl` files under `scripts/templates/sidebyside/` are the verbatim source of truth.
+- `mode: "side-by-side"` → MaxSDK present. **Do not modify any existing Max code.** Add the Metica adapter family next to the user's existing Max integration: `MeticaAdProvider` (init/lifecycle, implements `IAdService`) plus a per-format provider class for each ad format the game uses (`MeticaBannerProvider`, `MeticaInterstitialProvider`, `MeticaRewardedProvider`), plus the `IAdService` interface and `AdServiceRouter`. The `.cs.tmpl` files under `scripts/templates/sidebyside/` are the verbatim source of truth. `MaxAdService.cs` is **not** split — only the Metica side is per-format.
 
 Show the user the detected mode + the three signals + the decision string. **Ask for explicit confirmation** before proceeding. The user may override by saying "force fresh" or "force side-by-side"; honor the override and continue.
 
@@ -184,9 +184,13 @@ Skipped in fresh mode (no `AdServiceRouter` exists). In side-by-side mode, check
 - **`unity-remote-config`** — any of:
   - `grep -q '"com.unity.remote-config"' "$PROJECT/Packages/manifest.json" 2>/dev/null`
   - Any `.cs` file matches `^using Unity\.RemoteConfig` (note: the runtime class lives in `Unity.Services.RemoteConfig` in current versions; the `using` line in user code can be either)
+- **`gameanalytics`** — any of:
+  - `[ -d "$PROJECT/Assets/GameAnalytics" ]`
+  - `grep -q '"com.gameanalytics.sdk"' "$PROJECT/Packages/manifest.json" 2>/dev/null`
+  - Any `.cs` file matches `^using GameAnalyticsSDK`, or references `GameAnalytics\.GetABTestingId` / `OnABTestingDataReceived` (GameAnalytics A/B testing surfaces a variant ID rather than a boolean flag — see the rollout-binding variant)
 - **`none`** — no provider above detected.
 
-To pick a dominant provider when multiple are present, count `using` imports for each (`grep -rcE '^using (Firebase\.RemoteConfig|Io\.AppMetrica|Unity\.RemoteConfig)' "$PROJECT/Assets/Scripts/" 2>/dev/null | awk -F: '$2>0'`) and choose the highest. Surface the alternatives in the detection report so the user can override.
+To pick a dominant provider when multiple are present, count `using` imports for each (`grep -rcE '^using (Firebase\.RemoteConfig|Io\.AppMetrica|Unity\.RemoteConfig|GameAnalyticsSDK)' "$PROJECT/Assets/Scripts/" 2>/dev/null | awk -F: '$2>0'`) and choose the highest. Surface the alternatives in the detection report so the user can override.
 
 #### Signal 2 — `namespace_dominant`
 
@@ -249,7 +253,7 @@ The snippet now implements both branches: an exact-namespace majority and a pref
 These do not need a detection-report row; they are applied during Phase 3b codegen:
 
 - **Adapter folder pick** — `ls "$PROJECT/Assets/"`. If `Assets/_Project/Scripts/` exists, the folder is `Assets/_Project/Scripts/Metica`. Else if `Assets/Game/Scripts/` exists, `Assets/Game/Scripts/Metica`. Else default `Assets/Scripts/Metica`.
-- **Collision-prefix check** — before writing each side-by-side file, Grep `$PROJECT/Assets/` for each unprefixed class name (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, `MeticaRolloutBinding`). If any pre-existing definition is found (`interface\s+IAdService`, `class\s+\w*Ad(Service|Manager|Router)`), prefix all 5 generated names with `Metica` consistently (`IAdService` → `MeticaIAdService`, `AdServiceRouter` → `MeticaAdServiceRouter`, etc.).
+- **Collision-prefix check** — before writing each side-by-side file, Grep `$PROJECT/Assets/` for each unprefixed class name (`IAdService`, `MaxAdService`, `MeticaAdProvider`, `AdServiceRouter`, `MeticaRolloutBinding`). If any pre-existing definition is found (`interface\s+IAdService`, `class\s+\w*Ad(Service|Provider|Manager|Router)`), prefix all generated names with `Metica` consistently (`IAdService` → `MeticaIAdService`, `AdServiceRouter` → `MeticaAdServiceRouter`, etc.). The per-format provider classes (`MeticaBannerProvider`, `MeticaInterstitialProvider`, `MeticaRewardedProvider`) are already `Metica`-prefixed; leave them unchanged.
 
 #### Detection report (show to user, then proceed)
 
@@ -418,9 +422,17 @@ MAX_SDK_KEY="${MAX_SDK_KEY:-YOUR_MAX_SDK_KEY}"
 ADAPTER_FOLDER="<resolved adapter folder>"            # default Assets/Scripts/Metica (relative to $PROJECT)
 NAMESPACE="<resolved namespace>"                      # default "Metica.AbTest" when no project namespace dominates
 PREFIX="<empty>"                                      # or "Metica" if any collision found
-REMOTE_CONFIG_PROVIDER="<firebase|appmetrica|unity-remote-config|none>"
+REMOTE_CONFIG_PROVIDER="<firebase|appmetrica|unity-remote-config|gameanalytics|none>"
 REMOTE_CONFIG_KEY="${REMOTE_CONFIG_KEY:-metica_rollout}"
 ```
+
+**Resolve `FORMATS`** — the Metica adapter is split per ad format: only the per-format provider files for formats the game actually uses are generated. When `FORMATS` is passed, use it verbatim. Otherwise derive it from the Max-callsite inventory you already gathered in the "scan + propose Max-callsite refactor" subsection above:
+
+- `MaxSdk.LoadBanner` / `CreateBanner` / `ShowBanner` present → include `banner`
+- `MaxSdk.LoadInterstitial` / `ShowInterstitial` / `IsInterstitialReady` present → include `interstitial`
+- `MaxSdk.LoadRewardedAd` / `ShowRewardedAd` / `IsRewardedAdReady` present → include `rewarded`
+
+If the scan surfaced no ad-format callsites at all, default to all three (the game may not have wired ads yet). Methods on `IAdService` for formats **not** in `FORMATS` are still present in `MeticaAdProvider` (the interface demands the full surface for A/B parity with `MaxAdService`) but emit a NO-OP stub body — see the format-block step below.
 
 **Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form. Exit non-zero on any failure; do not write any file.
 
@@ -437,26 +449,66 @@ RC_KEY="$(bash      "$PLUGIN_DIR/scripts/validate-keys.sh" --type=remote-config-
 
 **Resolved namespace rule:** if Step 2.5 detected `namespace_dominant=MyGame.Services`, the effective namespace for these files is `MyGame.Services.Metica` (i.e., dominant + `.Metica`). If no dominant namespace was detected, use `Metica.AbTest` (matching the templates verbatim). If the user passed `NAMESPACE` explicitly, use it verbatim — do not append `.Metica`.
 
-**Resolved class-name rule:** if Step 2.5's collision-prefix check found any of `IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, or `MeticaRolloutBinding` already in the project (outside `$ADAPTER_FOLDER`), set `PREFIX=Metica` and rename **all five** generated symbols consistently: `IAdService → MeticaIAdService`, `MaxAdService → MeticaMaxAdService`, `MeticaAdService → MeticaMeticaAdService` (kept verbose to avoid further collision), `AdServiceRouter → MeticaAdServiceRouter`, `MeticaRolloutBinding → MeticaRolloutBinding` (already prefixed; no change).
+**Resolved class-name rule:** if Step 2.5's collision-prefix check found any of `IAdService`, `MaxAdService`, `MeticaAdProvider`, `AdServiceRouter`, or `MeticaRolloutBinding` already in the project (outside `$ADAPTER_FOLDER`), set `PREFIX=Metica` and rename those generated symbols consistently: `IAdService → MeticaIAdService`, `MaxAdService → MeticaMaxAdService`, `MeticaAdProvider → MeticaMeticaAdProvider` (kept verbose to avoid further collision), `AdServiceRouter → MeticaAdServiceRouter`, `MeticaRolloutBinding → MeticaRolloutBinding` (already prefixed; no change). The per-format provider classes (`MeticaBannerProvider`, `MeticaInterstitialProvider`, `MeticaRewardedProvider`) are already `Metica`-prefixed — leave their names unchanged in all cases.
 
 **C# string escaping for keys** — already performed by the `validate-keys.sh` calls above (`$API_KEY_ESC`, `$APP_ID_ESC`, `$MAX_KEY_ESC` are ready to embed). Do not re-escape; do not apply a sed-replacement second stage (that was needed by the deleted sed-driven script; the agent writes via the Write tool, so a single-stage escape is correct).
 
-**File generation — for each of the 4 adapter files**, Read the canonical template from `$PLUGIN_DIR/scripts/templates/sidebyside/<File>.cs.tmpl`, apply the following transforms in order, then Write to `$PROJECT/$ADAPTER_FOLDER/<output_name>.cs`:
+**File generation** — Read the canonical template from `$PLUGIN_DIR/scripts/templates/sidebyside/<File>.cs.tmpl`, apply the transforms below, then Write to `$PROJECT/$ADAPTER_FOLDER/<output_name>.cs`. The unconditional files are generated every run; per-format provider files are generated **only** for formats in `FORMATS`:
 
-| Template | Output filename | Substitutions |
-|---|---|---|
-| `IAdService.cs.tmpl` | `${PREFIX}IAdService.cs` | namespace replace, identifier rename |
-| `MaxAdService.cs.tmpl` | `${PREFIX}MaxAdService.cs` | namespace replace, identifier rename, `__MAX_SDK_KEY__` → escaped key |
-| `MeticaAdService.cs.tmpl` | `${PREFIX}MeticaAdService.cs` | namespace replace, identifier rename, `__METICA_API_KEY__` / `__METICA_APP_ID__` → escaped keys |
-| `AdServiceRouter.cs.tmpl` | `${PREFIX}AdServiceRouter.cs` | namespace replace, identifier rename, all three `__…__` → escaped keys |
+| Template | Output filename | When | Substitutions |
+|---|---|---|---|
+| `IAdService.cs.tmpl` | `${PREFIX}IAdService.cs` | always | namespace replace, identifier rename |
+| `MaxAdService.cs.tmpl` | `${PREFIX}MaxAdService.cs` | always | namespace replace, identifier rename, `__MAX_SDK_KEY__` → escaped key |
+| `MeticaAdProvider.cs.tmpl` | `${PREFIX}MeticaAdProvider.cs` | always | namespace replace, identifier rename, **format-block stripping** |
+| `AdServiceRouter.cs.tmpl` | `${PREFIX}AdServiceRouter.cs` | always | namespace replace, identifier rename, all three `__…__` → escaped keys |
+| `MeticaBannerProvider.cs.tmpl` | `MeticaBannerProvider.cs` | `banner` in `FORMATS` | namespace replace |
+| `MeticaInterstitialProvider.cs.tmpl` | `MeticaInterstitialProvider.cs` | `interstitial` in `FORMATS` | namespace replace |
+| `MeticaRewardedProvider.cs.tmpl` | `MeticaRewardedProvider.cs` | `rewarded` in `FORMATS` | namespace replace |
+
+Note: the `__METICA_API_KEY__` / `__METICA_APP_ID__` placeholders live in `AdServiceRouter.cs.tmpl` (it constructs `MeticaAdProvider` with the keys); `MeticaAdProvider.cs.tmpl` itself takes them via constructor and has no key placeholders.
 
 Transforms:
 
 1. Replace `namespace Metica.AbTest` (and the matching `} // namespace Metica.AbTest` closer) with the resolved namespace.
-2. Replace every occurrence of each unprefixed class/interface name (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`) with `${PREFIX}<name>` when `PREFIX` is non-empty. Including type references in other generated files (e.g. `AdServiceRouter`'s field declarations referencing `IAdService`).
+2. Replace every occurrence of each unprefixed class/interface name (`IAdService`, `MaxAdService`, `MeticaAdProvider`, `AdServiceRouter`) with `${PREFIX}<name>` when `PREFIX` is non-empty. Including type references in other generated files (e.g. `AdServiceRouter`'s field declarations referencing `IAdService`). Do **not** prefix the per-format provider class names.
+3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values, where applicable (`AdServiceRouter.cs`, `MaxAdService.cs`).
+
+**Format-block stripping (`MeticaAdProvider.cs.tmpl` only):** the template carries paired marker comments so the agent can keep only the wiring + method bodies for formats in `FORMATS`. Markers come in three families per format `<F>` (`BANNER` / `INTERSTITIAL` / `REWARDED`):
+
+- `// __FMT_<F>_BEGIN__` … `// __FMT_<F>_END__` — field declaration + `Initialize()` wiring for that format's provider.
+- `// __FMT_<F>_BODY_BEGIN__` … `// __FMT_<F>_BODY_END__` — the real `IAdService` method body that delegates to the provider.
+- `// __FMT_<F>_STUB_BEGIN__` … `// __FMT_<F>_STUB_END__` — the NO-OP stub body used when the format is unused.
+
+Apply this transform with `sed` (run it via Bash on the substituted file). For each format **in** `FORMATS`, delete the STUB blocks and unwrap (remove only the marker lines of) the outer + BODY blocks. For each format **not** in `FORMATS`, delete the outer + BODY blocks entirely and unwrap the STUB blocks. The EOL anchor tolerates trailing whitespace so a stray space never leaks a marker into the output:
+
+```bash
+# $USED is the space-separated uppercase format list, e.g. "INTERSTITIAL REWARDED"
+strip_format_blocks() {
+    local infile="$1" outfile="$2" used="$3" f script=""
+    for f in BANNER INTERSTITIAL REWARDED; do
+        if printf '%s\n' $used | grep -qx "$f"; then
+            script="$script
+/__FMT_${f}_STUB_BEGIN__/,/__FMT_${f}_STUB_END__/d
+/__FMT_${f}_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_END__[[:space:]]*\$/d
+/__FMT_${f}_BODY_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_BODY_END__[[:space:]]*\$/d"
+        else
+            script="$script
+/__FMT_${f}_BEGIN__/,/__FMT_${f}_END__/d
+/__FMT_${f}_BODY_BEGIN__/,/__FMT_${f}_BODY_END__/d
+/__FMT_${f}_STUB_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_STUB_END__[[:space:]]*\$/d"
+        fi
+    done
+    sed "$script" "$infile" > "$outfile"
+}
+```
+
+After stripping, the generated `MeticaAdProvider.cs` must contain no `__FMT_` residue (verify with `grep -L __FMT_`).
 3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values, where applicable.
 
-**5th file — `${PREFIX}MeticaRolloutBinding.cs`** at `$PROJECT/$ADAPTER_FOLDER/${PREFIX}MeticaRolloutBinding.cs`. Auto-wires the router's `RolloutDecisionFunc` to the detected remote-config provider. Choose one of the four variants below based on `REMOTE_CONFIG_PROVIDER`. Substitute `<NAMESPACE>` with the resolved namespace, `<ROUTER>` with `${PREFIX}AdServiceRouter`, and `<KEY>` with `$REMOTE_CONFIG_KEY`.
+**5th file — `${PREFIX}MeticaRolloutBinding.cs`** at `$PROJECT/$ADAPTER_FOLDER/${PREFIX}MeticaRolloutBinding.cs`. Auto-wires the router's `RolloutDecisionFunc` to the detected remote-config provider. Choose one of the five variants below based on `REMOTE_CONFIG_PROVIDER`. Substitute `<NAMESPACE>` with the resolved namespace, `<ROUTER>` with `${PREFIX}AdServiceRouter`, and `<KEY>` with `$REMOTE_CONFIG_KEY`.
 
 `REMOTE_CONFIG_KEY` validation: the value must be a non-empty string that is safe to embed in a C# string literal. The agent rejects values containing newline, carriage return, tab, double-quote, or backslash characters (reject — do not auto-escape; remote-config dashboards do not allow these characters in key names, so a value containing them is a user mistake). The accepted character set must allow alphanumeric plus `_`, `.`, and `-` (regex: `^[A-Za-z0-9_.\-]+$`) — Firebase Remote Config and Unity Remote Config both permit `.` and `-` in parameter names, and rejecting them would force users onto a needlessly narrow subset.
 
@@ -526,6 +578,26 @@ namespace <NAMESPACE>
 }
 ```
 
+**Variant `gameanalytics`:** GameAnalytics A/B testing surfaces a **variant ID string** (not a boolean), so `<KEY>` here is the variant ID that should route users to MeticaSdk — set `REMOTE_CONFIG_KEY` to that variant ID (default `metica_rollout` is unlikely to match a real GA variant, so confirm the value with the user). `GetABTestingId()` returns the empty string until A/B data has been received, so cold-start users fall into the MaxSdk cohort until the value is cached.
+
+```csharp
+using GameAnalyticsSDK;
+using UnityEngine;
+
+namespace <NAMESPACE>
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            <ROUTER>.RolloutDecisionFunc = () =>
+                GameAnalytics.GetABTestingId() == "<KEY>";
+        }
+    }
+}
+```
+
 **Variant `none`** — emit a stub that compiles but leaves `RolloutDecisionFunc` null. The router already handles a null `RolloutDecisionFunc` by falling back to the inspector fields, so this is safe to ship as-is during development. The three commented one-liners give the user copy-paste options:
 
 ```csharp
@@ -551,17 +623,21 @@ namespace <NAMESPACE>
             // Unity Remote Config:
             // <ROUTER>.RolloutDecisionFunc = () =>
             //     Unity.Services.RemoteConfig.RemoteConfigService.Instance.appConfig.GetBool("<KEY>");
+            //
+            // GameAnalytics A/B (compare against the variant ID for the Metica cohort):
+            // <ROUTER>.RolloutDecisionFunc = () =>
+            //     GameAnalyticsSDK.GameAnalytics.GetABTestingId() == "<KEY>";
         }
     }
 }
 ```
 
-**After generating all 5 files:**
+**After generating all files** (4 unconditional + one per format in `FORMATS` + `MeticaRolloutBinding.cs`):
 
 ```bash
 mkdir -p "$PROJECT/$ADAPTER_FOLDER"
 ls -la "$PROJECT/$ADAPTER_FOLDER"
-echo "Generated 5 files in $ADAPTER_FOLDER"
+echo "Generated adapter files in $ADAPTER_FOLDER (formats: $FORMATS)"
 echo "Provider: $REMOTE_CONFIG_PROVIDER (key: $REMOTE_CONFIG_KEY)"
 echo "Namespace: $NAMESPACE"
 [ -n "$PREFIX" ] && echo "Class prefix applied: $PREFIX (collision detected)"
@@ -569,17 +645,17 @@ echo "Namespace: $NAMESPACE"
 
 **Existing files under `Assets/MaxSdk/` are never touched** (tested explicitly; the agent's prose must never include MaxSdk paths in any Write call). The user still needs to refactor their game code to call `${PREFIX}AdServiceRouter.Instance.AdService.*` instead of `MaxSdk.*` — that happens in the "scan + propose Max-callsite refactor" subsection above.
 
-**Fresh mode codegen (agent-driven):** Ask the user which ad formats they need (banner / interstitial / rewarded; default `interstitial` if they don't specify). Resolve inputs:
+**Fresh mode codegen (agent-driven):** Ask the user which ad formats they need (banner / interstitial / rewarded; default `interstitial` if they don't specify). Like side-by-side, the Metica adapter is split per ad format: a `MeticaAdProvider` MonoBehaviour bootstrap plus one `Metica<Format>Provider` helper class per format in `FORMATS`. Resolve inputs:
 
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="${NAMESPACE-<value_from_step_2.5>}"  # default empty (bare namespace)
-OUT_FILE="$PROJECT/Assets/Scripts/MeticaBootstrap.cs"
+OUT_DIR="$PROJECT/Assets/Scripts/Metica"
 ```
 
-**Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key it embeds. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form on stdout. Exit non-zero on any failure; do not write the file.
+**Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key it embeds. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form on stdout. Exit non-zero on any failure; do not write any file.
 
 ```bash
 API_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$API_KEY")" || exit 1
@@ -591,92 +667,52 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
 **Other input checks** the agent enforces inline (no helper):
 
 - `FORMATS` parses to a non-empty subset of `{banner, interstitial, rewarded}` after whitespace-trimming each token. Reject unknown tokens.
-- If `$OUT_FILE` already exists, do not overwrite. Tell the user to remove the existing file or pass an explicit "force" instruction.
+- If any target file under `$OUT_DIR/` already exists, do not overwrite. Tell the user to remove the existing files or pass an explicit "force" instruction.
 
-**File contents** — Write the file at `$OUT_FILE` with the template below. Substitute `<API_KEY_ESCAPED>` and `<APP_ID_ESCAPED>` with `$API_KEY_ESC` / `$APP_ID_ESC` from `validate-keys.sh` above. Include each per-format block (banner / interstitial / rewarded) **only** if that format is in `FORMATS`. Wrap the entire `public class MeticaBootstrap { ... }` declaration in `namespace <NAMESPACE> { ... }` only when `NAMESPACE` is non-empty.
+**File generation** — Read the canonical template from `$PLUGIN_DIR/scripts/templates/fresh/<File>.cs.tmpl`, apply the transforms below, then Write to `$OUT_DIR/<output_name>.cs`. `MeticaAdProvider.cs` is generated every run; per-format provider files only for formats in `FORMATS`:
 
-```csharp
-using UnityEngine;
-using Metica;
-using Metica.Ads;
+| Template | Output filename | When | Substitutions |
+|---|---|---|---|
+| `MeticaAdProvider.cs.tmpl` | `MeticaAdProvider.cs` | always | `__METICA_API_KEY__` / `__METICA_APP_ID__` → escaped keys, **format-block stripping**, optional namespace wrap |
+| `MeticaBannerProvider.cs.tmpl` | `MeticaBannerProvider.cs` | `banner` in `FORMATS` | optional namespace wrap |
+| `MeticaInterstitialProvider.cs.tmpl` | `MeticaInterstitialProvider.cs` | `interstitial` in `FORMATS` | optional namespace wrap |
+| `MeticaRewardedProvider.cs.tmpl` | `MeticaRewardedProvider.cs` | `rewarded` in `FORMATS` | optional namespace wrap |
 
-// Generated by metica-sdk-agents (fresh-mode codegen).
-public class MeticaBootstrap : MonoBehaviour
-{
-    void Start()
-    {
-        // ── per-format callback subscriptions ── (include the matching block for each format in $FORMATS)
+Transforms:
 
-        // banner:
-        MeticaAdsCallbacks.Banner.OnAdLoadSuccess += ad => Debug.Log("[Metica] banner loaded");
-        MeticaAdsCallbacks.Banner.OnAdLoadFailed += err => Debug.LogWarning("[Metica] banner failed");
-        MeticaAdsCallbacks.Banner.OnAdRevenuePaid += ad => Debug.Log("[Metica] banner revenue");
+1. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__` with `$API_KEY_ESC` / `$APP_ID_ESC` (`MeticaAdProvider.cs` only).
+2. **Format-block stripping (`MeticaAdProvider.cs.tmpl` only):** the fresh template carries `// __FMT_<F>_BEGIN__` … `// __FMT_<F>_END__` markers around each format's field declaration, `Start()` wiring, and `Show<Format>()` method. For each format in `FORMATS`, remove only the marker lines (unwrap); for each format not in `FORMATS`, delete the whole block. Use the same EOL-anchored `sed` recipe as side-by-side (the fresh template has only the outer `BEGIN/END` family — no BODY/STUB pair):
 
-        // interstitial:
-        MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("[Metica] interstitial loaded");
-        MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.LogWarning("[Metica] interstitial failed");
-        MeticaAdsCallbacks.Interstitial.OnAdShowSuccess += ad => Debug.Log("[Metica] interstitial shown");
-        MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => Debug.Log("[Metica] interstitial hidden");
-        MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("[Metica] interstitial revenue");
+   ```bash
+   strip_fresh_blocks() {
+       local infile="$1" outfile="$2" used="$3" f script=""
+       for f in BANNER INTERSTITIAL REWARDED; do
+           if printf '%s\n' $used | grep -qx "$f"; then
+               script="$script
+/__FMT_${f}_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_END__[[:space:]]*\$/d"
+           else
+               script="$script
+/__FMT_${f}_BEGIN__/,/__FMT_${f}_END__/d"
+           fi
+       done
+       sed "$script" "$infile" > "$outfile"
+   }
+   ```
 
-        // rewarded:
-        MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess += ad => Debug.Log("[Metica] rewarded loaded");
-        MeticaAdsCallbacks.Rewarded.OnAdLoadFailed += err => Debug.LogWarning("[Metica] rewarded failed");
-        MeticaAdsCallbacks.Rewarded.OnAdShowSuccess += ad => Debug.Log("[Metica] rewarded shown");
-        MeticaAdsCallbacks.Rewarded.OnAdHidden += ad => Debug.Log("[Metica] rewarded hidden");
-        MeticaAdsCallbacks.Rewarded.OnAdRewarded += ad => Debug.Log("[Metica] rewarded reward granted");
-        MeticaAdsCallbacks.Rewarded.OnAdRevenuePaid += ad => Debug.Log("[Metica] rewarded revenue");
+3. **Optional namespace wrap:** the fresh templates are bare (no namespace). When `NAMESPACE` is non-empty, wrap every generated file's body in `namespace <NAMESPACE>\n{\n … \n}` so the per-format providers and the bootstrap resolve each other within one namespace. When `NAMESPACE` is empty, write the files as-is.
 
-        // ── privacy MUST precede Initialize (same file) ──
-        MeticaSdk.Ads.SetHasUserConsent(true);
-        MeticaSdk.Ads.SetDoNotSell(false);
-
-        // ── Initialize exactly once ──
-        var config = new MeticaInitConfig("<API_KEY_ESCAPED>", "<APP_ID_ESCAPED>", null);
-        MeticaSdk.Initialize(config, null, response => {
-            Debug.Log("[Metica] SDK initialized");
-        });
-
-        // ── per-format Load / CreateBanner ──
-        // banner:
-        MeticaSdk.Ads.CreateBanner("banner_main", new MeticaAdViewConfiguration(MeticaAdViewPosition.BottomCenter));
-        MeticaSdk.Ads.LoadBanner("banner_main");
-        MeticaSdk.Ads.ShowBanner("banner_main");
-
-        // interstitial:
-        MeticaSdk.Ads.LoadInterstitial("interstitial_main");
-
-        // rewarded:
-        MeticaSdk.Ads.LoadRewarded("rewarded_main");
-    }
-
-    // ── per-format Show methods (matching every Load call above) ──
-
-    // interstitial:
-    public void ShowInterstitial()
-    {
-        if (MeticaSdk.Ads.IsInterstitialReady("interstitial_main"))
-            MeticaSdk.Ads.ShowInterstitial("interstitial_main");
-    }
-
-    // rewarded:
-    public void ShowRewarded()
-    {
-        if (MeticaSdk.Ads.IsRewardedReady("rewarded_main"))
-            MeticaSdk.Ads.ShowRewarded("rewarded_main");
-    }
-}
-```
+After stripping, `MeticaAdProvider.cs` must contain no `__FMT_` residue (verify with `grep -L __FMT_`).
 
 **Hard correctness invariants** (validator-enforced, restated here for clarity):
 
-- Exactly one `MeticaSdk.Initialize(` call site in the generated file.
-- Both `MeticaSdk.Ads.SetHasUserConsent` and `MeticaSdk.Ads.SetDoNotSell` appear **before** `MeticaSdk.Initialize` in source order (same file).
-- For each format in `$FORMATS`: at minimum `OnAdLoadSuccess` and `OnAdLoadFailed` subscribed. The template above subscribes the full set, which is fine.
-- If `$FORMATS` contains `rewarded`: `OnAdRewarded` is subscribed.
-- Every `Load*("…")` call has a matching `Show*("…")` somewhere in the file (banner shows inline; interstitial / rewarded show in their dedicated methods).
+- Exactly one `MeticaSdk.Initialize(` call site across the generated files (it lives in `MeticaAdProvider.cs`; per-format providers never call `Initialize`).
+- Both `MeticaSdk.Ads.SetHasUserConsent` and `MeticaSdk.Ads.SetDoNotSell` appear **before** `MeticaSdk.Initialize` in source order **in `MeticaAdProvider.cs`** (same file — the per-format helpers carry no privacy/init calls).
+- For each format in `$FORMATS`: the per-format provider subscribes at minimum `OnAdLoadSuccess` and `OnAdLoadFailed` (the templates subscribe the full set with a comment per callback).
+- If `$FORMATS` contains `rewarded`: `MeticaRewardedProvider` subscribes `OnAdRewarded`.
+- Every `Load*("…")` call has a matching `Show*("…")` in the same per-format provider file (each provider exposes both `Load` and `Show`).
 
-After writing, run `mkdir -p "$PROJECT/Assets/Scripts"` if needed (the agent uses the Bash tool — Write does not auto-create directories). Confirm the file exists with `ls -la "$OUT_FILE"` and print `Generated: $OUT_FILE (formats: $FORMATS)` to mirror the deleted script's output.
+After writing, run `mkdir -p "$OUT_DIR"` first (the agent uses the Bash tool — Write does not auto-create directories). Confirm the files exist with `ls -la "$OUT_DIR"` and print `Generated: $OUT_DIR (formats: $FORMATS)`.
 
 Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-side `.unitypackage` import handles most of it.
 
@@ -710,15 +746,17 @@ When validator returned **PASS**, emit the standard summary only, optionally fol
 In **side-by-side mode**, the PASS summary must also include:
 
 1. **Max-callsite outcome** — if the user approved the refactor, the count of files edited; otherwise the inventory as an action checklist.
-2. **Rollout-config wiring status** — report which remote-config provider was detected and how `RolloutDecisionFunc` was wired:
+2. **Format coverage** — the set of per-format provider files generated (`MeticaBannerProvider.cs` / `MeticaInterstitialProvider.cs` / `MeticaRewardedProvider.cs`). For formats not generated, the matching `IAdService` methods on `MeticaAdProvider` are NO-OP stubs — re-run with `FORMATS=…` to add a format later.
+3. **Rollout-config wiring status** — report which remote-config provider was detected and how `RolloutDecisionFunc` was wired:
 
     - `firebase` / `unity-remote-config` → `✓ AdServiceRouter.RolloutDecisionFunc is auto-wired in MeticaRolloutBinding.cs against <provider>, key "<REMOTE_CONFIG_KEY>". Confirm the key exists in your remote-config dashboard before shipping.`
+    - `gameanalytics` → `✓ AdServiceRouter.RolloutDecisionFunc is auto-wired in MeticaRolloutBinding.cs against GameAnalytics A/B, matching variant ID "<REMOTE_CONFIG_KEY>". Confirm that variant ID exists in your GameAnalytics A/B test, and note that GetABTestingId() is empty until A/B data is received (cold-start users fall into the MaxSdk cohort).`
     - `appmetrica` → `⚠ AppMetrica detected. MeticaRolloutBinding.cs ships as a TODO stub with an AppMetrica-flavoured example because the remote-config accessor varies across SDK versions. Wire it manually against your installed AppMetrica SDK version.`
-    - `none` → `⚠ No remote-config provider detected. MeticaRolloutBinding.cs ships as a TODO stub with one-liner examples for Firebase, AppMetrica, and Unity Remote Config — uncomment whichever you use.`
+    - `none` → `⚠ No remote-config provider detected. MeticaRolloutBinding.cs ships as a TODO stub with one-liner examples for Firebase, AppMetrica, Unity Remote Config, and GameAnalytics — uncomment whichever you use.`
 
     In all cases warn the user **not** to hard-code `useMeticaSdk = true` in the inspector for production builds — the field is a dev fallback only.
 
-3. **Manual steps remaining** — anything the user still needs to do (replace placeholder keys, create the `<REMOTE_CONFIG_KEY>` parameter in their remote-config dashboard, choose `SetHasUserConsent` value per their compliance posture, etc.).
+4. **Manual steps remaining** — anything the user still needs to do (replace placeholder keys, create the `<REMOTE_CONFIG_KEY>` parameter / variant in their remote-config dashboard, choose `SetHasUserConsent` value per their compliance posture, etc.).
 
 ## Hard rules
 

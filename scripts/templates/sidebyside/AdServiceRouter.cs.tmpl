@@ -49,7 +49,7 @@ public class AdServiceRouter : MonoBehaviour
         bool shouldUseMetica = DetermineGroup();
         ActiveSdk = shouldUseMetica ? "MeticaSdk" : "MaxSdk";
         AdService = shouldUseMetica
-            ? (IAdService)new MeticaAdService(meticaApiKey, meticaAppId, maxSdkKey)
+            ? (IAdService)new MeticaAdProvider(meticaApiKey, meticaAppId, maxSdkKey)
             : new MaxAdService(maxSdkKey);
 
         Debug.Log($"[AdServiceRouter] Active SDK: {ActiveSdk}");

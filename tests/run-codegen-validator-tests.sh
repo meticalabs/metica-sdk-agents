@@ -1,27 +1,30 @@
 #!/bin/bash
 # run-codegen-validator-tests.sh — validate the canonical agent-generated outputs.
 #
-# Phase 3 deleted codegen-fresh.sh and codegen-sidebyside.sh; codegen now lives
-# in the integrator agent's prose. This test suite cannot drive the agent from
-# bash, so it instead pre-populates synthetic projects with the *expected* agent
-# output (a reference impl that mirrors integrator.md Step 5 verbatim) and runs
-# the unchanged validator over them. If a documented template is invalid, this
-# test catches it.
+# Codegen lives in the integrator agent's prose (no shell codegen scripts). This
+# suite cannot drive the agent from bash, so it pre-populates synthetic projects
+# with the *expected* agent output — a reference impl that mirrors integrator.md
+# Step 5 verbatim (template Read + format-block stripping + namespace/prefix/key
+# substitution) — and runs the unchanged validator over them. If a documented
+# template or transform is invalid, this test catches it.
 #
 # Coverage:
-#   1. fresh / interstitial / no namespace          → PASS
-#   2. fresh / rewarded / namespace MyGame.Services → PASS  (validates wrap + reward callback)
-#   3. fresh / privacy AFTER init                   → FAIL  (negative golden)
-#   4. side-by-side / firebase binding              → PASS  (validates 4 adapter files + 5th binding)
-#   5. side-by-side / none binding                  → PASS  (validates TODO-stub variant)
-#   6. side-by-side / Metica-prefixed names         → PASS  (validates collision-prefix path)
+#   1. fresh / interstitial / no namespace            → PASS
+#   2. fresh / banner+rewarded / ns MyGame.Services   → PASS  (wrap + reward callback + per-format files)
+#   3. fresh / privacy AFTER init                     → FAIL  (negative golden)
+#   4. side-by-side / all formats / firebase binding  → PASS  (MeticaAdProvider + 3 providers + binding)
+#   5. side-by-side / interstitial only / none        → PASS  (per-format omission + NO-OP stubs)
+#   6. side-by-side / Metica-prefixed names           → PASS  (collision-prefix path)
+#   7. side-by-side / gameanalytics binding           → PASS  (variant-ID comparison)
+#   8. prefix property: no unprefixed base name leaks
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VALIDATE="$PLUGIN_DIR/scripts/validate-integration.sh"
-TEMPLATE_DIR="$PLUGIN_DIR/scripts/templates/sidebyside"
+SBS_TMPL_DIR="$PLUGIN_DIR/scripts/templates/sidebyside"
+FRESH_TMPL_DIR="$PLUGIN_DIR/scripts/templates/fresh"
 
 pass=0
 fail=0
@@ -53,122 +56,148 @@ EOF
     echo "$dir"
 }
 
-# Reference impl of the agent's fresh-mode template (integrator.md Step 5).
+# Uppercase, space-separated format list from a csv (banner,rewarded → "BANNER REWARDED").
+formats_upper() {
+    printf '%s\n' "$1" | tr ',' '\n' | tr '[:lower:]' '[:upper:]' \
+        | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'
+}
+
+# Side-by-side format-block stripping — mirrors integrator.md strip_format_blocks().
+strip_sbs_blocks() {
+    local infile="$1" outfile="$2" used="$3" f script=""
+    for f in BANNER INTERSTITIAL REWARDED; do
+        if printf '%s\n' $used | grep -qx "$f"; then
+            script="$script
+/__FMT_${f}_STUB_BEGIN__/,/__FMT_${f}_STUB_END__/d
+/__FMT_${f}_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_END__[[:space:]]*\$/d
+/__FMT_${f}_BODY_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_BODY_END__[[:space:]]*\$/d"
+        else
+            script="$script
+/__FMT_${f}_BEGIN__/,/__FMT_${f}_END__/d
+/__FMT_${f}_BODY_BEGIN__/,/__FMT_${f}_BODY_END__/d
+/__FMT_${f}_STUB_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_STUB_END__[[:space:]]*\$/d"
+        fi
+    done
+    sed "$script" "$infile" > "$outfile"
+}
+
+# Fresh format-block stripping — mirrors integrator.md strip_fresh_blocks().
+strip_fresh_blocks() {
+    local infile="$1" outfile="$2" used="$3" f script=""
+    for f in BANNER INTERSTITIAL REWARDED; do
+        if printf '%s\n' $used | grep -qx "$f"; then
+            script="$script
+/__FMT_${f}_BEGIN__[[:space:]]*\$/d
+/__FMT_${f}_END__[[:space:]]*\$/d"
+        else
+            script="$script
+/__FMT_${f}_BEGIN__/,/__FMT_${f}_END__/d"
+        fi
+    done
+    sed "$script" "$infile" > "$outfile"
+}
+
+# Wrap a whole file's content in `namespace <ns> { ... }` when ns is non-empty.
+# (using directives inside a namespace body are valid C#.)
+ns_wrap() {
+    local file="$1" ns="$2"
+    [ -z "$ns" ] && return 0
+    local tmp; tmp="$(mktemp)"
+    { printf 'namespace %s\n{\n' "$ns"; cat "$file"; printf '}\n'; } > "$tmp"
+    mv "$tmp" "$file"
+}
+
+# Reference impl of the agent's fresh-mode codegen (integrator.md Step 5).
 # Args: project, namespace_or_empty, formats (csv), api_key, app_id
-emit_fresh_bootstrap() {
+emit_fresh_files() {
     local project="$1" ns="$2" formats="$3" api="$4" app="$5"
-    local out="$project/Assets/Scripts/MeticaBootstrap.cs"
-    mkdir -p "$(dirname "$out")"
+    local out_dir="$project/Assets/Scripts/Metica"
+    mkdir -p "$out_dir"
+    local used; used="$(formats_upper "$formats")"
 
-    local has_banner=0 has_inter=0 has_rew=0
-    case ",$formats," in *,banner,*) has_banner=1 ;; esac
-    case ",$formats," in *,interstitial,*) has_inter=1 ;; esac
-    case ",$formats," in *,rewarded,*) has_rew=1 ;; esac
+    # MeticaAdProvider.cs (always): key sub → format strip → ns wrap.
+    local tmp; tmp="$(mktemp)"
+    sed -e "s|__METICA_API_KEY__|$api|g" -e "s|__METICA_APP_ID__|$app|g" \
+        "$FRESH_TMPL_DIR/MeticaAdProvider.cs.tmpl" > "$tmp"
+    strip_fresh_blocks "$tmp" "$out_dir/MeticaAdProvider.cs" "$used"
+    rm -f "$tmp"
+    ns_wrap "$out_dir/MeticaAdProvider.cs" "$ns"
 
-    {
-        echo 'using UnityEngine;'
-        echo 'using Metica;'
-        echo 'using Metica.Ads;'
-        echo ''
-        echo '// Generated by metica-sdk-agents (fresh-mode codegen).'
-        if [ -n "$ns" ]; then echo "namespace $ns {"; fi
-        echo 'public class MeticaBootstrap : MonoBehaviour'
-        echo '{'
-        echo '    void Start()'
-        echo '    {'
-        if [ "$has_banner" = 1 ]; then
-            echo '        MeticaAdsCallbacks.Banner.OnAdLoadSuccess += ad => Debug.Log("[Metica] banner loaded");'
-            echo '        MeticaAdsCallbacks.Banner.OnAdLoadFailed += err => Debug.LogWarning("[Metica] banner failed");'
-            echo '        MeticaAdsCallbacks.Banner.OnAdRevenuePaid += ad => Debug.Log("[Metica] banner revenue");'
-        fi
-        if [ "$has_inter" = 1 ]; then
-            echo '        MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("[Metica] interstitial loaded");'
-            echo '        MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.LogWarning("[Metica] interstitial failed");'
-            echo '        MeticaAdsCallbacks.Interstitial.OnAdShowSuccess += ad => Debug.Log("[Metica] interstitial shown");'
-            echo '        MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => Debug.Log("[Metica] interstitial hidden");'
-            echo '        MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("[Metica] interstitial revenue");'
-        fi
-        if [ "$has_rew" = 1 ]; then
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess += ad => Debug.Log("[Metica] rewarded loaded");'
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdLoadFailed += err => Debug.LogWarning("[Metica] rewarded failed");'
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdShowSuccess += ad => Debug.Log("[Metica] rewarded shown");'
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdHidden += ad => Debug.Log("[Metica] rewarded hidden");'
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdRewarded += ad => Debug.Log("[Metica] rewarded reward granted");'
-            echo '        MeticaAdsCallbacks.Rewarded.OnAdRevenuePaid += ad => Debug.Log("[Metica] rewarded revenue");'
-        fi
-        echo '        MeticaSdk.Ads.SetHasUserConsent(true);'
-        echo '        MeticaSdk.Ads.SetDoNotSell(false);'
-        printf '        var config = new MeticaInitConfig("%s", "%s", null);\n' "$api" "$app"
-        echo '        MeticaSdk.Initialize(config, null, response => { Debug.Log("[Metica] SDK initialized"); });'
-        if [ "$has_banner" = 1 ]; then
-            echo '        MeticaSdk.Ads.CreateBanner("banner_main", new MeticaAdViewConfiguration(MeticaAdViewPosition.BottomCenter));'
-            echo '        MeticaSdk.Ads.LoadBanner("banner_main");'
-            echo '        MeticaSdk.Ads.ShowBanner("banner_main");'
-        fi
-        [ "$has_inter" = 1 ] && echo '        MeticaSdk.Ads.LoadInterstitial("interstitial_main");'
-        [ "$has_rew" = 1 ] && echo '        MeticaSdk.Ads.LoadRewarded("rewarded_main");'
-        echo '    }'
-        if [ "$has_inter" = 1 ]; then
-            echo ''
-            echo '    public void ShowInterstitial() {'
-            echo '        if (MeticaSdk.Ads.IsInterstitialReady("interstitial_main"))'
-            echo '            MeticaSdk.Ads.ShowInterstitial("interstitial_main");'
-            echo '    }'
-        fi
-        if [ "$has_rew" = 1 ]; then
-            echo ''
-            echo '    public void ShowRewarded() {'
-            echo '        if (MeticaSdk.Ads.IsRewardedReady("rewarded_main"))'
-            echo '            MeticaSdk.Ads.ShowRewarded("rewarded_main");'
-            echo '    }'
-        fi
-        echo '}'
-        if [ -n "$ns" ]; then echo '}'; fi
-    } > "$out"
+    # Per-format provider files (only for used formats): ns wrap.
+    printf '%s\n' $used | grep -qx BANNER && {
+        cp "$FRESH_TMPL_DIR/MeticaBannerProvider.cs.tmpl" "$out_dir/MeticaBannerProvider.cs"
+        ns_wrap "$out_dir/MeticaBannerProvider.cs" "$ns"; }
+    printf '%s\n' $used | grep -qx INTERSTITIAL && {
+        cp "$FRESH_TMPL_DIR/MeticaInterstitialProvider.cs.tmpl" "$out_dir/MeticaInterstitialProvider.cs"
+        ns_wrap "$out_dir/MeticaInterstitialProvider.cs" "$ns"; }
+    printf '%s\n' $used | grep -qx REWARDED && {
+        cp "$FRESH_TMPL_DIR/MeticaRewardedProvider.cs.tmpl" "$out_dir/MeticaRewardedProvider.cs"
+        ns_wrap "$out_dir/MeticaRewardedProvider.cs" "$ns"; }
 }
 
 # Reference impl of the agent's side-by-side codegen.
-# Reads templates verbatim and applies the documented transforms.
-# Args: project, namespace, prefix (may be empty), api_key, app_id, max_key
+# Args: project, namespace, prefix (may be empty), formats (csv), api, app, max_key
 emit_sbs_files() {
-    local project="$1" ns="$2" prefix="$3" api="$4" app="$5" maxk="$6"
+    local project="$1" ns="$2" prefix="$3" formats="$4" api="$5" app="$6" maxk="$7"
     local out_dir="$project/Assets/Scripts/Metica"
     mkdir -p "$out_dir"
+    local used; used="$(formats_upper "$formats")"
 
-    local files=(IAdService MaxAdService MeticaAdService AdServiceRouter)
-    for stem in "${files[@]}"; do
-        local tmpl="$TEMPLATE_DIR/$stem.cs.tmpl"
-        local out="$out_dir/${prefix}${stem}.cs"
-        # Apply transforms via sed: namespace + identifier prefix + key substitution.
+    # 4 unconditional adapter files.
+    local stem out
+    for stem in IAdService MaxAdService MeticaAdProvider AdServiceRouter; do
+        out="$out_dir/${prefix}${stem}.cs"
         sed \
             -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
             -e "s|} // namespace Metica\\.AbTest|} // namespace $ns|g" \
             -e "s|__METICA_API_KEY__|$api|g" \
             -e "s|__METICA_APP_ID__|$app|g" \
             -e "s|__MAX_SDK_KEY__|$maxk|g" \
-            "$tmpl" > "$out"
+            "$SBS_TMPL_DIR/$stem.cs.tmpl" > "$out"
+        if [ "$stem" = "MeticaAdProvider" ]; then
+            strip_sbs_blocks "$out" "$out.stripped" "$used"
+            mv "$out.stripped" "$out"
+        fi
         if [ -n "$prefix" ]; then
-            # Replace identifier references in this order (no word-boundary regex,
-            # which BSD sed lacks). Order matters: rename the original class names
-            # FIRST so later renames don't accidentally match inside earlier
-            # prefixed forms (e.g. MeticaAdService → MeticaMeticaAdService must
-            # happen before AdServiceRouter → MeticaAdServiceRouter, otherwise
-            # MeticaAdServiceRouter would re-match as a prefix and become
-            # MeticaMeticaAdServiceRouter).
+            # Order matters: rename longer/original names before shorter so a
+            # prefixed form isn't re-matched. Do NOT prefix the per-format
+            # provider class names (already Metica-prefixed).
             sed -i.bak \
-                -e "s|MeticaAdService|${prefix}MeticaAdService|g" \
+                -e "s|MeticaAdProvider|${prefix}MeticaAdProvider|g" \
                 -e "s|MaxAdService|${prefix}MaxAdService|g" \
                 -e "s|IAdService|${prefix}IAdService|g" \
                 -e "s|AdServiceRouter|${prefix}AdServiceRouter|g" \
                 "$out"
             rm -f "$out.bak"
-            # Adjust the output filename: emit_sbs_files already wrote to ${prefix}${stem}.cs
-            # so no rename needed.
+        fi
+    done
+
+    # Per-format provider files (only for used formats); namespace replace only.
+    local pf
+    for pf in Banner:BANNER Interstitial:INTERSTITIAL Rewarded:REWARDED; do
+        local cls="${pf%%:*}" key="${pf##*:}"
+        printf '%s\n' $used | grep -qx "$key" || continue
+        out="$out_dir/Metica${cls}Provider.cs"
+        sed \
+            -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
+            -e "s|} // namespace Metica\\.AbTest|} // namespace $ns|g" \
+            "$SBS_TMPL_DIR/Metica${cls}Provider.cs.tmpl" > "$out"
+        if [ -n "$prefix" ]; then
+            sed -i.bak \
+                -e "s|MeticaAdProvider|${prefix}MeticaAdProvider|g" \
+                -e "s|MaxAdService|${prefix}MaxAdService|g" \
+                -e "s|IAdService|${prefix}IAdService|g" \
+                -e "s|AdServiceRouter|${prefix}AdServiceRouter|g" \
+                "$out"
+            rm -f "$out.bak"
         fi
     done
 }
 
-# Args: project, namespace, prefix, variant (firebase|none), key
+# Args: project, namespace, prefix, variant (firebase|none|gameanalytics), key
 emit_rollout_binding() {
     local project="$1" ns="$2" prefix="$3" variant="$4" key="$5"
     local out="$project/Assets/Scripts/Metica/${prefix}MeticaRolloutBinding.cs"
@@ -189,6 +218,25 @@ namespace $ns
         {
             $router.RolloutDecisionFunc = () =>
                 FirebaseRemoteConfig.DefaultInstance.GetValue("$key").BooleanValue;
+        }
+    }
+}
+EOF
+            ;;
+        gameanalytics)
+            cat > "$out" <<EOF
+using GameAnalyticsSDK;
+using UnityEngine;
+
+namespace $ns
+{
+    static class MeticaRolloutBinding
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Bind()
+        {
+            $router.RolloutDecisionFunc = () =>
+                GameAnalytics.GetABTestingId() == "$key";
         }
     }
 }
@@ -218,6 +266,10 @@ namespace $ns
             // Unity Remote Config:
             // $router.RolloutDecisionFunc = () =>
             //     Unity.Services.RemoteConfig.RemoteConfigService.Instance.appConfig.GetBool("$key");
+            //
+            // GameAnalytics A/B (compare against the variant ID for the Metica cohort):
+            // $router.RolloutDecisionFunc = () =>
+            //     GameAnalyticsSDK.GameAnalytics.GetABTestingId() == "$key";
         }
     }
 }
@@ -246,26 +298,32 @@ echo "=== run-codegen-validator-tests.sh ==="
 
 # 1. fresh / interstitial / no namespace
 p="$(make_fresh_project)"
-emit_fresh_bootstrap "$p" "" "interstitial" "ABC123" "XYZ987"
-run_case "fresh interstitial no-ns" "PASS" "$p" "fresh"
-
-# 2. fresh / rewarded / namespace MyGame.Services
-p="$(make_fresh_project)"
-emit_fresh_bootstrap "$p" "MyGame.Services" "interstitial,rewarded" "ABC123" "XYZ987"
-# also assert the namespace and reward callback are present
-if grep -q "namespace MyGame.Services" "$p/Assets/Scripts/MeticaBootstrap.cs" \
-    && grep -q "Rewarded.OnAdRewarded" "$p/Assets/Scripts/MeticaBootstrap.cs"; then
-    run_case "fresh rewarded ns=MyGame.Services" "PASS" "$p" "fresh"
+emit_fresh_files "$p" "" "interstitial" "ABC123" "XYZ987"
+if grep -qF '__FMT_' "$p/Assets/Scripts/Metica/MeticaAdProvider.cs"; then
+    echo "  FAIL  fresh interstitial no-ns  (marker leak)"; fail=$((fail+1)); rm -rf "$p"
 else
-    echo "  FAIL  fresh rewarded ns=MyGame.Services  (template missing expected lines)"
-    fail=$((fail+1))
-    rm -rf "$p"
+    run_case "fresh interstitial no-ns" "PASS" "$p" "fresh"
+fi
+
+# 2. fresh / banner+rewarded / namespace MyGame.Services
+p="$(make_fresh_project)"
+emit_fresh_files "$p" "MyGame.Services" "banner,rewarded" "ABC123" "XYZ987"
+d="$p/Assets/Scripts/Metica"
+if grep -q "namespace MyGame.Services" "$d/MeticaAdProvider.cs" \
+    && [ -f "$d/MeticaBannerProvider.cs" ] && [ -f "$d/MeticaRewardedProvider.cs" ] \
+    && [ ! -f "$d/MeticaInterstitialProvider.cs" ] \
+    && grep -q "Rewarded.OnAdRewarded" "$d/MeticaRewardedProvider.cs"; then
+    run_case "fresh banner+rewarded ns=MyGame.Services" "PASS" "$p" "fresh"
+else
+    echo "  FAIL  fresh banner+rewarded ns=MyGame.Services  (layout/wrap/reward-callback)"
+    ls "$d" | sed 's/^/        /'
+    fail=$((fail+1)); rm -rf "$p"
 fi
 
 # 3. fresh / privacy AFTER init → validator FAIL (negative golden)
 p="$(make_fresh_project)"
-emit_fresh_bootstrap "$p" "" "interstitial" "ABC123" "XYZ987"
-# Swap order: move SetHasUserConsent/SetDoNotSell to AFTER MeticaSdk.Initialize.
+emit_fresh_files "$p" "" "interstitial" "ABC123" "XYZ987"
+f="$p/Assets/Scripts/Metica/MeticaAdProvider.cs"
 awk '
     /MeticaSdk.Ads.SetHasUserConsent\(true\);/ { consent=$0; next }
     /MeticaSdk.Ads.SetDoNotSell\(false\);/      { dns=$0; next }
@@ -276,66 +334,83 @@ awk '
         next
     }
     { print }
-' "$p/Assets/Scripts/MeticaBootstrap.cs" > "$p/Assets/Scripts/MeticaBootstrap.cs.new"
-mv "$p/Assets/Scripts/MeticaBootstrap.cs.new" "$p/Assets/Scripts/MeticaBootstrap.cs"
+' "$f" > "$f.new"
+mv "$f.new" "$f"
 run_case "fresh privacy-after-init (negative)" "FAIL" "$p" "fresh"
 
-# 4. side-by-side / firebase binding
+# 4. side-by-side / all formats / firebase binding
 p="$(make_sbs_project)"
-emit_sbs_files "$p" "Metica.AbTest" "" "ABC123" "XYZ987" "MAXKEY99"
+emit_sbs_files "$p" "Metica.AbTest" "" "banner,interstitial,rewarded" "ABC123" "XYZ987" "MAXKEY99"
 emit_rollout_binding "$p" "Metica.AbTest" "" "firebase" "metica_rollout"
-if grep -q "FirebaseRemoteConfig.DefaultInstance.GetValue" "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs"; then
-    run_case "sbs firebase binding" "PASS" "$p" "side-by-side"
+d="$p/Assets/Scripts/Metica"
+if grep -q "FirebaseRemoteConfig.DefaultInstance.GetValue" "$d/MeticaRolloutBinding.cs" \
+    && [ -f "$d/MeticaAdProvider.cs" ] && [ -f "$d/MeticaBannerProvider.cs" ] \
+    && [ -f "$d/MeticaInterstitialProvider.cs" ] && [ -f "$d/MeticaRewardedProvider.cs" ] \
+    && ! grep -qF '__FMT_' "$d/MeticaAdProvider.cs"; then
+    run_case "sbs all-formats firebase binding" "PASS" "$p" "side-by-side"
 else
-    echo "  FAIL  sbs firebase binding  (binding template missing FirebaseRemoteConfig call)"
-    fail=$((fail+1))
-    rm -rf "$p"
+    echo "  FAIL  sbs all-formats firebase binding  (missing file / marker leak / binding)"
+    ls "$d" | sed 's/^/        /'
+    fail=$((fail+1)); rm -rf "$p"
 fi
 
-# 5. side-by-side / none binding (TODO-stub)
+# 5. side-by-side / interstitial only / none binding → per-format omission + NO-OP stubs
 p="$(make_sbs_project)"
-emit_sbs_files "$p" "Metica.AbTest" "" "ABC123" "XYZ987" "MAXKEY99"
+emit_sbs_files "$p" "Metica.AbTest" "" "interstitial" "ABC123" "XYZ987" "MAXKEY99"
 emit_rollout_binding "$p" "Metica.AbTest" "" "none" "metica_rollout"
-all_three=1
-grep -q "Firebase Remote Config:"     "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-grep -q "AppMetrica:"                  "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-grep -q "Unity Remote Config:"         "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-if [ "$all_three" = 1 ]; then
-    run_case "sbs none binding (TODO stub)" "PASS" "$p" "side-by-side"
+d="$p/Assets/Scripts/Metica"
+ok=1
+[ -f "$d/MeticaInterstitialProvider.cs" ] || ok=0
+[ ! -f "$d/MeticaBannerProvider.cs" ]     || ok=0
+[ ! -f "$d/MeticaRewardedProvider.cs" ]   || ok=0
+grep -q "NO-OP: banner format not used"   "$d/MeticaAdProvider.cs" || ok=0
+grep -q "NO-OP: rewarded format not used" "$d/MeticaAdProvider.cs" || ok=0
+grep -qF '__FMT_' "$d/MeticaAdProvider.cs" && ok=0
+if [ "$ok" = 1 ]; then
+    run_case "sbs interstitial-only + NO-OP stubs" "PASS" "$p" "side-by-side"
 else
-    echo "  FAIL  sbs none binding (TODO stub)  (missing one of the three commented examples)"
-    fail=$((fail+1))
-    rm -rf "$p"
+    echo "  FAIL  sbs interstitial-only + NO-OP stubs  (omission/stub/marker)"
+    ls "$d" | sed 's/^/        /'
+    fail=$((fail+1)); rm -rf "$p"
 fi
 
 # 6. side-by-side / Metica-prefixed names (collision-prefix path)
 p="$(make_sbs_project)"
-# Pre-existing IAdService in the project triggers prefix mode.
 mkdir -p "$p/Assets/Scripts/Existing"
 cat > "$p/Assets/Scripts/Existing/IAdService.cs" <<'EOF'
 namespace Existing { public interface IAdService { } }
 EOF
-emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "ABC123" "XYZ987" "MAXKEY99"
+emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "banner,interstitial,rewarded" "ABC123" "XYZ987" "MAXKEY99"
 emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
-if grep -q "MeticaAdServiceRouter" "$p/Assets/Scripts/Metica/MeticaAdServiceRouter.cs" \
-    && grep -q "namespace MyGame.Services.Metica" "$p/Assets/Scripts/Metica/MeticaAdServiceRouter.cs"; then
+d="$p/Assets/Scripts/Metica"
+if grep -q "MeticaAdServiceRouter" "$d/MeticaAdServiceRouter.cs" \
+    && grep -q "namespace MyGame.Services.Metica" "$d/MeticaAdServiceRouter.cs" \
+    && grep -q "new MeticaMeticaAdProvider(" "$d/MeticaAdServiceRouter.cs"; then
     run_case "sbs Metica-prefixed names" "PASS" "$p" "side-by-side"
 else
     echo "  FAIL  sbs Metica-prefixed names  (prefix or namespace not applied)"
-    fail=$((fail+1))
-    rm -rf "$p"
+    fail=$((fail+1)); rm -rf "$p"
 fi
 
-# 7. Property: after prefix mode, NO unprefixed base name leaks into any
-# generated file. This guards against a future rename-order regression
-# (adding a 6th class without thinking through substring overlap).
+# 7. side-by-side / gameanalytics binding
 p="$(make_sbs_project)"
-emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "ABC123" "XYZ987" "MAXKEY99"
+emit_sbs_files "$p" "Metica.AbTest" "" "interstitial,rewarded" "ABC123" "XYZ987" "MAXKEY99"
+emit_rollout_binding "$p" "Metica.AbTest" "" "gameanalytics" "metica_variant"
+d="$p/Assets/Scripts/Metica"
+if grep -q 'GameAnalytics.GetABTestingId() == "metica_variant"' "$d/MeticaRolloutBinding.cs"; then
+    run_case "sbs gameanalytics binding" "PASS" "$p" "side-by-side"
+else
+    echo "  FAIL  sbs gameanalytics binding  (variant-ID comparison missing)"
+    fail=$((fail+1)); rm -rf "$p"
+fi
+
+# 8. Property: after prefix mode, NO unprefixed base name leaks into any
+# generated file. Guards against a rename-order regression.
+p="$(make_sbs_project)"
+emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "banner,interstitial,rewarded" "ABC123" "XYZ987" "MAXKEY99"
 emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
 unprefixed_leaks=0
-for stem in IAdService MaxAdService MeticaAdService AdServiceRouter; do
-    # An unprefixed name is one that doesn't have an alphanumeric or '_' char
-    # immediately before it. Use grep -P for negative lookbehind.
+for stem in IAdService MaxAdService MeticaAdProvider AdServiceRouter; do
     if grep -rPq "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" 2>/dev/null; then
         echo "        leak: unprefixed '$stem' found in generated files"
         grep -rnP "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" | sed 's/^/          /'

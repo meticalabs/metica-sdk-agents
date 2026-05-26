@@ -111,7 +111,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
   "warnings": [],
   "checks": [
     { "rule": "init_count",                     "location": "",                                      "level": "PASS",     "detail": "MeticaSdk.Initialize called exactly once." },
-    { "rule": "privacy_before_init",            "location": "Assets/Scripts/MeticaBootstrap.cs:42",  "level": "FAIL",     "detail": "SetHasUserConsent called after Initialize." },
+    { "rule": "privacy_before_init",            "location": "Assets/Scripts/Metica/MeticaAdProvider.cs:42",  "level": "FAIL",     "detail": "SetHasUserConsent called after Initialize." },
     { "rule": "rewarded_callbacks_subscribed",  "location": "Assets/Scripts/MeticaAdapter.cs",       "level": "PASS",     "detail": "" },
     { "rule": "rewarded_reward_callback",       "location": "",                                      "level": "PASS",     "detail": "" },
     { "rule": "revenue_callback_subscribed",    "location": "",                                      "level": "ADVISORY", "detail": "OnAdRevenuePaid not subscribed; attribution will be incomplete." }

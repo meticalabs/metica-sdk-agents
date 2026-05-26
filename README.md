@@ -52,7 +52,7 @@ The integrator runs in 7 steps:
 2. **Mode detection** — multi-signal: `Assets/MaxSdk/` folder, `MaxSdk.Initialize(` symbol, AppLovin manifest entry. Two-of-three → side-by-side; else fresh.
 3. **Plan presentation** — Claude Code plan mode (or plain-text fallback) lists files to create / edit. You approve.
 4. **Git snapshot** — tags `pre-metica-integration` for one-command rollback.
-5. **Codegen** — fresh mode writes `Assets/Scripts/MeticaBootstrap.cs`; side-by-side writes 4 files under `Assets/Scripts/Metica/` (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified.
+5. **Codegen** — both modes write per-format files under `Assets/Scripts/Metica/`. The Metica adapter is `MeticaAdProvider` (init/lifecycle) plus a `Metica<Format>Provider` class per ad format the game uses (`banner`/`interstitial`/`rewarded` — only the needed ones are generated). Side-by-side also writes `IAdService`, `MaxAdService`, `AdServiceRouter`, and a `MeticaRolloutBinding.cs` that auto-wires `AdServiceRouter.RolloutDecisionFunc` to a detected remote-config provider (Firebase / AppMetrica / Unity Remote Config / GameAnalytics). Existing `Assets/MaxSdk/` is **never** modified; `MaxAdService.cs` is intentionally not split.
 6. **Validator** — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `ad_service_router_present` (side-by-side), etc.
 7. **Final report** — mode, SDK version, files changed, validator summary, rollback command (if anything failed), placeholder reminders, and (side-by-side only) a Max-callsite inventory with proposed rewrites you can ask the agent to apply.
 
@@ -65,9 +65,9 @@ Tune behavior by passing any of these after `PROJECT=...`:
 | `API_KEY` | `YOUR_METICA_API_KEY` | Metica API key |
 | `APP_ID` | `YOUR_METICA_APP_ID` | Metica App ID |
 | `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
-| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
+| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded`. Only the per-format provider files for the listed formats are generated. In side-by-side mode, auto-detected from existing `MaxSdk.Load*` callsites when omitted. |
 | `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
-| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. Side-by-side only. |
+| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `gameanalytics` / `none`. Controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. Side-by-side only. |
 | `REMOTE_CONFIG_KEY` | `metica_rollout` | Boolean-typed key name read from the remote-config provider. Side-by-side only. |
 | `NAMESPACE` | auto-detected | Explicit namespace for all generated files (overrides project-dominant detection). Pass an empty string to force bare/no-namespace. |
 | `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the side-by-side adapter folder (must start with `Assets/`; absolute paths and `..` segments are rejected). Side-by-side only. |
@@ -88,7 +88,7 @@ It deliberately stops short of touching your game code. The integrator's final r
 
 - **Max callsites** — every `MaxSdk.*` and `MaxSdkCallbacks.*` location, categorized as `bootstrap` / `method_call` / `callback_subscription`. You can ask the integrator to refactor them via the `IAdService` interface; it does this file-by-file in plan mode.
 - **Bootstrap rewrite** — the existing `MaxSdk.SetSdkKey + MaxSdk.InitializeSdk()` pair becomes `ads.SetHasUserConsent + ads.SetDoNotSell + ads.Initialize(callback)` in the same file. The integrator will propose the edit.
-- **Rollout source** — `AdServiceRouter` ships with a `static Func<bool> RolloutDecisionFunc` you wire to Firebase Remote Config (or your equivalent). Don't hardcode the rollout in production builds. Example wiring is in the generated `AdServiceRouter.cs`.
+- **Rollout source** — `AdServiceRouter` ships with a `static Func<bool> RolloutDecisionFunc`. When a remote-config provider is detected (Firebase / Unity Remote Config / GameAnalytics), the generated `MeticaRolloutBinding.cs` auto-wires it; for AppMetrica or no provider it ships a TODO stub with copy-paste examples. Don't hardcode the rollout in production builds.
 
 ## Compatibility matrix
 
@@ -108,7 +108,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Eight independent suites: `compat`, `format`, `download`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`, `scan-max-callsites`.
+Seven independent suites: `compat`, `format`, `download`, `validator`, `mode`, `input-validation`, `codegen-validator`. The last validates that the integrator's documented codegen templates (per-format `MeticaAdProvider` / `Metica<Format>Provider` shapes, the rollout-binding variants) produce validator-passing output.
 
 A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
 
@@ -136,7 +136,9 @@ metica-sdk-agents/
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── lib/clean-cs.awk
-│   └── templates/sidebyside/          # canonical reference shapes the integrator reads at codegen time
+│   └── templates/
+│       ├── sidebyside/                # side-by-side adapter shapes (MeticaAdProvider + per-format providers, IAdService, MaxAdService, AdServiceRouter)
+│       └── fresh/                     # fresh-mode shapes (MeticaAdProvider bootstrap + per-format providers)
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
 └── tests/                             # 7 test scripts + fixtures + goldens
