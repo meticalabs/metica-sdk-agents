@@ -2,23 +2,6 @@
 
 Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX.
 
-## Use it
-
-From your Unity project's root in Claude Code:
-
-```
-@agent-metica-unity-integrator
-```
-
-That's the whole invocation. The integrator auto-detects the Unity project (walks up from `$(pwd)` looking for `ProjectSettings/`) and fills missing API keys with placeholders you swap in later. You'll be shown a plan and asked to approve before any file is written.
-
-If you're outside the project, or you have several Unity projects in one workspace, pass it explicitly:
-
-```
-@agent-metica-unity-integrator
-PROJECT=/absolute/path/to/your/unity/project
-```
-
 ## Install
 
 **Via Claude Code marketplace (recommended):**
@@ -44,6 +27,23 @@ The script clones into `~/.metica-sdk-agents` and symlinks each agent into `.cla
 
 **Verify:** launch Claude Code in your project and type `/agents` — you should see `metica-unity-compat-checker`, `metica-unity-integrator`, and `metica-unity-validator`.
 
+## Use it
+
+From your Unity project's root in Claude Code:
+
+```
+@agent-metica-unity-integrator
+```
+
+That's the whole invocation. The integrator auto-detects the Unity project (walks up from `$(pwd)` looking for `ProjectSettings/`) and fills missing API keys with placeholders you swap in later. You'll be shown a plan and asked to approve before any file is written.
+
+If you're outside the project, or you have several Unity projects in one workspace, pass it explicitly:
+
+```
+@agent-metica-unity-integrator
+PROJECT=/absolute/path/to/your/unity/project
+```
+
 ## What it does
 
 The integrator runs in 7 steps:
@@ -52,7 +52,7 @@ The integrator runs in 7 steps:
 2. **Mode detection** — multi-signal: `Assets/MaxSdk/` folder, `MaxSdk.Initialize(` symbol, AppLovin manifest entry. Two-of-three → side-by-side; else fresh.
 3. **Plan presentation** — Claude Code plan mode (or plain-text fallback) lists files to create / edit. You approve.
 4. **Git snapshot** — tags `pre-metica-integration` for one-command rollback.
-5. **Codegen** — fresh mode writes `Assets/Scripts/MeticaBootstrap.cs`; side-by-side writes 4 files under `Assets/Scripts/Metica/` (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified.
+5. **Codegen** — fresh mode writes `Assets/Scripts/MeticaBootstrap.cs`; side-by-side writes 5 files under `Assets/Scripts/Metica/` (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, `MeticaRolloutBinding`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified.
 6. **Validator** — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `ad_service_router_present` (side-by-side), etc.
 7. **Final report** — mode, SDK version, files changed, validator summary, rollback command (if anything failed), placeholder reminders, and (side-by-side only) a Max-callsite inventory with proposed rewrites you can ask the agent to apply.
 
@@ -108,7 +108,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Eight independent suites: `compat`, `format`, `download`, `validator`, `mode`, `codegen-fresh`, `codegen-sidebyside`, `scan-max-callsites`.
+Eight test scripts covering: `compat`, `format`, `download`, `validator`, `mode`, `codegen` (fresh and side-by-side modes), `input-validation`, and `scan-max-callsites`.
 
 A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
 
@@ -139,7 +139,7 @@ metica-sdk-agents/
 │   └── templates/sidebyside/          # canonical reference shapes the integrator reads at codegen time
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
-└── tests/                             # 7 test scripts + fixtures + goldens
+└── tests/                             # 8 test scripts + fixtures + goldens
 ```
 
 ## Rollback

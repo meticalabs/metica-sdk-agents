@@ -8,5 +8,9 @@
   },
   "license": "Apache-2.0",
   "homepage": "https://www.metica.com",
-  "agents": "./agents"
+  "agents": [
+    "./agents/unity/metica-unity-integrator.md",
+    "./agents/unity/metica-unity-validator.md",
+    "./agents/unity/metica-unity-compat-checker.md"
+  ]
 }
