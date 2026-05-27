@@ -190,7 +190,7 @@ Skipped in fresh mode (no `AdServiceRouter` exists). In side-by-side mode, check
   - Any `.cs` file matches `^using GameAnalyticsSDK`, or references `GameAnalytics\.GetABTestingId` / `OnABTestingDataReceived` (GameAnalytics A/B testing surfaces a variant ID rather than a boolean flag — see the rollout-binding variant)
 - **`none`** — no provider above detected.
 
-To pick a dominant provider when multiple are present, count `using` imports for each (`grep -rcE '^using (Firebase\.RemoteConfig|Io\.AppMetrica|Unity\.RemoteConfig|GameAnalyticsSDK)' "$PROJECT/Assets/Scripts/" 2>/dev/null | awk -F: '$2>0'`) and choose the highest. Surface the alternatives in the detection report so the user can override.
+To pick a dominant provider when multiple are present, count `using` imports for each (`grep -rcE '^using (Firebase\.RemoteConfig|Io\.AppMetrica|Unity\.RemoteConfig|GameAnalyticsSDK)' "$PROJECT/Assets/Scripts/" 2>/dev/null | awk -F: '$2>0'`) and choose the highest. **Floor each detected provider's count at 1**: several providers are detected purely by folder or manifest signals (Firebase via `Assets/Firebase`, Unity RC and GameAnalytics via `manifest.json`, GameAnalytics also via `GetABTestingId` references) and may have zero `^using` lines under `Assets/Scripts/` (referenced fully-qualified, or from a non-`Scripts` folder). A provider detected by any Signal-1 check but with a 0 import count must still participate in the tiebreak — never let an import count of 0 silently drop a provider that Signal 1 found. Surface all detected providers (with counts) in the detection report so the user can override.
 
 #### Signal 2 — `namespace_dominant`
 
@@ -458,7 +458,7 @@ RC_KEY="$(bash      "$PLUGIN_DIR/scripts/validate-keys.sh" --type=remote-config-
 | Template | Output filename | When | Substitutions |
 |---|---|---|---|
 | `IAdService.cs.tmpl` | `${PREFIX}IAdService.cs` | always | namespace replace, identifier rename |
-| `MaxAdService.cs.tmpl` | `${PREFIX}MaxAdService.cs` | always | namespace replace, identifier rename, `__MAX_SDK_KEY__` → escaped key |
+| `MaxAdService.cs.tmpl` | `${PREFIX}MaxAdService.cs` | always | namespace replace, identifier rename (takes `maxSdkKey` via constructor — no key placeholder) |
 | `MeticaAdProvider.cs.tmpl` | `${PREFIX}MeticaAdProvider.cs` | always | namespace replace, identifier rename, **format-block stripping** |
 | `AdServiceRouter.cs.tmpl` | `${PREFIX}AdServiceRouter.cs` | always | namespace replace, identifier rename, all three `__…__` → escaped keys |
 | `MeticaBannerProvider.cs.tmpl` | `MeticaBannerProvider.cs` | `banner` in `FORMATS` | namespace replace |
@@ -471,7 +471,7 @@ Transforms:
 
 1. Replace `namespace Metica.AbTest` (and the matching `} // namespace Metica.AbTest` closer) with the resolved namespace.
 2. Replace every occurrence of each unprefixed class/interface name (`IAdService`, `MaxAdService`, `MeticaAdProvider`, `AdServiceRouter`) with `${PREFIX}<name>` when `PREFIX` is non-empty. Including type references in other generated files (e.g. `AdServiceRouter`'s field declarations referencing `IAdService`). Do **not** prefix the per-format provider class names.
-3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values, where applicable (`AdServiceRouter.cs`, `MaxAdService.cs`).
+3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values. All three placeholders live **only** in `AdServiceRouter.cs.tmpl` (it constructs `MeticaAdProvider` and `MaxAdService` with the keys); no other template carries a key placeholder.
 
 **Format-block stripping (`MeticaAdProvider.cs.tmpl` only):** the template carries paired marker comments so the agent can keep only the wiring + method bodies for formats in `FORMATS`. Markers come in three families per format `<F>` (`BANNER` / `INTERSTITIAL` / `REWARDED`):
 
@@ -506,7 +506,6 @@ strip_format_blocks() {
 ```
 
 After stripping, the generated `MeticaAdProvider.cs` must contain no `__FMT_` residue (verify with `grep -L __FMT_`).
-3. Replace `__METICA_API_KEY__`, `__METICA_APP_ID__`, `__MAX_SDK_KEY__` with the C#-escaped key values, where applicable.
 
 **5th file — `${PREFIX}MeticaRolloutBinding.cs`** at `$PROJECT/$ADAPTER_FOLDER/${PREFIX}MeticaRolloutBinding.cs`. Auto-wires the router's `RolloutDecisionFunc` to the detected remote-config provider. Choose one of the five variants below based on `REMOTE_CONFIG_PROVIDER`. Substitute `<NAMESPACE>` with the resolved namespace, `<ROUTER>` with `${PREFIX}AdServiceRouter`, and `<KEY>` with `$REMOTE_CONFIG_KEY`.
 
@@ -578,7 +577,7 @@ namespace <NAMESPACE>
 }
 ```
 
-**Variant `gameanalytics`:** GameAnalytics A/B testing surfaces a **variant ID string** (not a boolean), so `<KEY>` here is the variant ID that should route users to MeticaSdk — set `REMOTE_CONFIG_KEY` to that variant ID (default `metica_rollout` is unlikely to match a real GA variant, so confirm the value with the user). `GetABTestingId()` returns the empty string until A/B data has been received, so cold-start users fall into the MaxSdk cohort until the value is cached.
+**Variant `gameanalytics`:** GameAnalytics A/B testing surfaces a **variant ID string** (not a boolean), so `<KEY>` here is the variant ID that should route users to MeticaSdk. The default `REMOTE_CONFIG_KEY` (`metica_rollout`) is a boolean key name and will **never** match a real GA variant ID — when `REMOTE_CONFIG_PROVIDER` resolves to `gameanalytics` and `REMOTE_CONFIG_KEY` was not explicitly set, **stop and ask the user for the GA variant ID** rather than emitting a binding that silently never selects the Metica cohort. The variant ID must satisfy `validate-keys.sh --type=remote-config-key` (`^[A-Za-z0-9_.\-]+$`); GA dashboard variant names containing spaces or other characters must be renamed to that charset (the agent rejects them rather than embedding an invalid literal). `GetABTestingId()` returns the empty string until A/B data has been received, so cold-start users fall into the MaxSdk cohort until the value is cached.
 
 ```csharp
 using GameAnalyticsSDK;
@@ -775,5 +774,5 @@ In **side-by-side mode**, the PASS summary must also include:
 ## Phase 4 follow-ups
 
 - **4b:** Fresh-mode codegen — bootstrap script + direct callsites.
-- **4c:** Side-by-side codegen — `IAdService` / `MeticaAdService` / `AdServiceRouter` taken verbatim from migration guide.
+- **4c:** Side-by-side codegen — `IAdService` / `MeticaAdProvider` (+ per-format providers) / `AdServiceRouter` taken verbatim from migration guide.
 - **4d:** Robust orchestration — full failure handling, plan-mode harness verification, optional `--import` for Unity headless.

@@ -23,6 +23,10 @@ namespace Metica.AbTest
 
 public class MeticaAdProvider : IAdService
 {
+    // IAdService demands the full event surface for A/B parity with MaxAdService,
+    // but a given format's events are only raised when that format is generated.
+    // Suppress CS0067 ("event is never used") for the formats stripped to NO-OP.
+#pragma warning disable 67
     public event Action<AdEventData> OnBannerLoaded;
     public event Action<AdErrorData> OnBannerLoadFailed;
     public event Action<AdEventData> OnBannerRevenuePaid;
@@ -37,6 +41,7 @@ public class MeticaAdProvider : IAdService
     public event Action<AdEventData> OnRewardedHidden;
     public event Action<AdEventData> OnRewardedRewarded;
     public event Action<AdEventData> OnRewardedRevenuePaid;
+#pragma warning restore 67
 
     private readonly string _apiKey;
     private readonly string _appId;
@@ -45,6 +50,9 @@ public class MeticaAdProvider : IAdService
     private bool _consent;
     private bool _doNotSell;
 
+    // Per-format providers are created in Initialize(). Delegating methods below
+    // null-guard with ?. so an ad call made before Initialize() no-ops instead of
+    // throwing (MaxAdService tolerates pre-init calls; keep the arms symmetric).
     // __FMT_BANNER_BEGIN__
     private MeticaBannerProvider _banner;
     // __FMT_BANNER_END__
@@ -112,7 +120,7 @@ public class MeticaAdProvider : IAdService
     public void CreateBanner(string adUnitId, BannerPosition position)
     {
         // __FMT_BANNER_BODY_BEGIN__
-        _banner.Create(adUnitId, position);
+        _banner?.Create(adUnitId, position);
         // __FMT_BANNER_BODY_END__
         // __FMT_BANNER_STUB_BEGIN__
         // NO-OP: banner format not used in this integration.
@@ -122,7 +130,7 @@ public class MeticaAdProvider : IAdService
     public void LoadBanner(string adUnitId)
     {
         // __FMT_BANNER_BODY_BEGIN__
-        _banner.Load(adUnitId);
+        _banner?.Load(adUnitId);
         // __FMT_BANNER_BODY_END__
         // __FMT_BANNER_STUB_BEGIN__
         // NO-OP: banner format not used in this integration.
@@ -131,7 +139,7 @@ public class MeticaAdProvider : IAdService
     public void ShowBanner(string adUnitId)
     {
         // __FMT_BANNER_BODY_BEGIN__
-        _banner.Show(adUnitId);
+        _banner?.Show(adUnitId);
         // __FMT_BANNER_BODY_END__
         // __FMT_BANNER_STUB_BEGIN__
         // NO-OP: banner format not used in this integration.
@@ -140,7 +148,7 @@ public class MeticaAdProvider : IAdService
     public void HideBanner(string adUnitId)
     {
         // __FMT_BANNER_BODY_BEGIN__
-        _banner.Hide(adUnitId);
+        _banner?.Hide(adUnitId);
         // __FMT_BANNER_BODY_END__
         // __FMT_BANNER_STUB_BEGIN__
         // NO-OP: banner format not used in this integration.
@@ -149,7 +157,7 @@ public class MeticaAdProvider : IAdService
     public void DestroyBanner(string adUnitId)
     {
         // __FMT_BANNER_BODY_BEGIN__
-        _banner.Destroy(adUnitId);
+        _banner?.Destroy(adUnitId);
         // __FMT_BANNER_BODY_END__
         // __FMT_BANNER_STUB_BEGIN__
         // NO-OP: banner format not used in this integration.
@@ -160,7 +168,7 @@ public class MeticaAdProvider : IAdService
     public void LoadInterstitial(string adUnitId)
     {
         // __FMT_INTERSTITIAL_BODY_BEGIN__
-        _interstitial.Load(adUnitId);
+        _interstitial?.Load(adUnitId);
         // __FMT_INTERSTITIAL_BODY_END__
         // __FMT_INTERSTITIAL_STUB_BEGIN__
         // NO-OP: interstitial format not used in this integration.
@@ -169,7 +177,7 @@ public class MeticaAdProvider : IAdService
     public bool IsInterstitialReady(string adUnitId)
     {
         // __FMT_INTERSTITIAL_BODY_BEGIN__
-        return _interstitial.IsReady(adUnitId);
+        return _interstitial?.IsReady(adUnitId) ?? false;
         // __FMT_INTERSTITIAL_BODY_END__
         // __FMT_INTERSTITIAL_STUB_BEGIN__
         // NO-OP: interstitial format not used in this integration.
@@ -179,7 +187,7 @@ public class MeticaAdProvider : IAdService
     public void ShowInterstitial(string adUnitId, string placement = null, string customData = null)
     {
         // __FMT_INTERSTITIAL_BODY_BEGIN__
-        _interstitial.Show(adUnitId, placement, customData);
+        _interstitial?.Show(adUnitId, placement, customData);
         // __FMT_INTERSTITIAL_BODY_END__
         // __FMT_INTERSTITIAL_STUB_BEGIN__
         // NO-OP: interstitial format not used in this integration.
@@ -190,7 +198,7 @@ public class MeticaAdProvider : IAdService
     public void LoadRewarded(string adUnitId)
     {
         // __FMT_REWARDED_BODY_BEGIN__
-        _rewarded.Load(adUnitId);
+        _rewarded?.Load(adUnitId);
         // __FMT_REWARDED_BODY_END__
         // __FMT_REWARDED_STUB_BEGIN__
         // NO-OP: rewarded format not used in this integration.
@@ -199,7 +207,7 @@ public class MeticaAdProvider : IAdService
     public bool IsRewardedReady(string adUnitId)
     {
         // __FMT_REWARDED_BODY_BEGIN__
-        return _rewarded.IsReady(adUnitId);
+        return _rewarded?.IsReady(adUnitId) ?? false;
         // __FMT_REWARDED_BODY_END__
         // __FMT_REWARDED_STUB_BEGIN__
         // NO-OP: rewarded format not used in this integration.
@@ -209,7 +217,7 @@ public class MeticaAdProvider : IAdService
     public void ShowRewarded(string adUnitId, string placement = null, string customData = null)
     {
         // __FMT_REWARDED_BODY_BEGIN__
-        _rewarded.Show(adUnitId, placement, customData);
+        _rewarded?.Show(adUnitId, placement, customData);
         // __FMT_REWARDED_BODY_END__
         // __FMT_REWARDED_STUB_BEGIN__
         // NO-OP: rewarded format not used in this integration.

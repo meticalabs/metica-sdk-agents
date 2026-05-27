@@ -410,10 +410,17 @@ p="$(make_sbs_project)"
 emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "banner,interstitial,rewarded" "ABC123" "XYZ987" "MAXKEY99"
 emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
 unprefixed_leaks=0
+# Extract every maximal identifier token from the generated files, then check
+# whether any UNPREFIXED base name survives as a standalone token. Maximal munch
+# means MeticaIAdService / MeticaMeticaAdProvider / MeticaAdServiceRouter come out
+# whole and never reduce to a bare IAdService / MeticaAdProvider / AdServiceRouter.
+# Uses only -rhoE / -qx (portable to BSD/macOS); avoids grep -P (PCRE lookbehind),
+# which BSD grep lacks and would make this guard silently no-op.
+tokens="$(grep -rhoE '[A-Za-z_][A-Za-z0-9_]*' "$p/Assets/Scripts/Metica/" 2>/dev/null)"
 for stem in IAdService MaxAdService MeticaAdProvider AdServiceRouter; do
-    if grep -rPq "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" 2>/dev/null; then
+    if printf '%s\n' "$tokens" | grep -qx "$stem"; then
         echo "        leak: unprefixed '$stem' found in generated files"
-        grep -rnP "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" | sed 's/^/          /'
+        grep -rn "$stem" "$p/Assets/Scripts/Metica/" | sed 's/^/          /'
         unprefixed_leaks=1
     fi
 done

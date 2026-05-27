@@ -205,8 +205,26 @@ if [ "$MODE" = "side-by-side" ]; then
     done <<< "$ROUTER_FILES"
 
     if [ -z "$BOOTSTRAP_HIT" ]; then
-        add_check "privacy_before_init" "" "ADVISORY" \
-            "No bootstrap file found yet (AdServiceRouter.Instance + .Initialize). When you write the bootstrap, call SetHasUserConsent and SetDoNotSell before Initialize."
+        # No user bootstrap callsite yet. The generated adapter (the file holding
+        # MeticaSdk.Initialize, e.g. MeticaAdProvider.cs) applies privacy inside
+        # Initialize() before MeticaSdk.Initialize — validate that in-file ordering
+        # so an adapter regression is caught even before the user writes their
+        # bootstrap. Match call sites only (leading dot) so the IAdService
+        # SetHasUserConsent/SetDoNotSell *setter declarations* are not mistaken for
+        # the privacy *calls*.
+        ADAPTER_INIT=$(clean_cs "$INIT_FILE" | grep -nF -- 'MeticaSdk.Initialize(' | head -1 | awk -F: '{print $1}')
+        ADAPTER_CONSENT=$(clean_cs "$INIT_FILE" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
+        ADAPTER_DNS=$(clean_cs "$INIT_FILE" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
+        if [ -z "$INIT_FILE" ] || [ -z "$ADAPTER_CONSENT" ] || [ -z "$ADAPTER_DNS" ]; then
+            add_check "privacy_before_init" "" "ADVISORY" \
+                "No bootstrap file found yet (AdServiceRouter.Instance + .Initialize). When you write the bootstrap, call SetHasUserConsent and SetDoNotSell before Initialize."
+        elif [ "$ADAPTER_CONSENT" -ge "$ADAPTER_INIT" ] || [ "$ADAPTER_DNS" -ge "$ADAPTER_INIT" ]; then
+            add_check "privacy_before_init" "$INIT_FILE:$ADAPTER_INIT" "FAIL" \
+                "Adapter privacy calls (SetHasUserConsent/SetDoNotSell) must precede MeticaSdk.Initialize in $INIT_FILE."
+        else
+            add_check "privacy_before_init" "$INIT_FILE:$ADAPTER_INIT" "PASS" \
+                "Adapter applies SetHasUserConsent/SetDoNotSell before MeticaSdk.Initialize."
+        fi
     elif [ -n "$BOOTSTRAP_BAD" ]; then
         add_check "privacy_before_init" "$BOOTSTRAP_BAD" "FAIL" \
             "Side-by-side bootstrap: $BOOTSTRAP_BAD_REASON."
@@ -342,7 +360,7 @@ fi
 #   - single_init_per_session:      MaxSdk.InitializeSdk gated by router; not called unconditionally
 #   - iadservice_interface_present: an IAdService (or equivalent) interface exists
 #   - max_adapter_present:          a MaxAdService (or equivalent) wraps Max calls
-#   - metica_adapter_present:       a MeticaAdService (or equivalent) wraps Metica calls
+#   - metica_adapter_present:       a MeticaAdProvider (or equivalent) wraps Metica calls
 #   - max_callsites_routed:         game code uses AdServiceRouter.Instance.AdService.* not MaxSdk.* directly
 
 # ---- determine status ------------------------------------------------------
