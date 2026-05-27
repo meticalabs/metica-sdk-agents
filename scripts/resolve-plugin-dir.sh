@@ -6,8 +6,8 @@
 # Resolution order:
 #   1. $CLAUDE_PLUGIN_ROOT, if set and is a plugin root (marketplace install).
 #   2. $METICA_SDK_AGENTS_DIR, if set and is a plugin root (env override).
-#   3. The symlink target of either .claude/agents/metica-unity-integrator.md
-#      (project-local install) or ~/.claude/agents/metica-unity-integrator.md
+#   3. The symlink target of either .claude/agents/unity-integrator.md
+#      (project-local install) or ~/.claude/agents/unity-integrator.md
 #      (global symlink install).
 #   4. Common install locations: ~/.claude/plugins/metica-sdk-agents,
 #      ~/.metica-sdk-agents, ~/dev/metica-sdk-agents.
@@ -46,8 +46,8 @@ resolve_symlink() {
 }
 
 for f in \
-    "$(pwd)/.claude/agents/metica-unity-integrator.md" \
-    "${HOME}/.claude/agents/metica-unity-integrator.md"; do
+    "$(pwd)/.claude/agents/unity-integrator.md" \
+    "${HOME}/.claude/agents/unity-integrator.md"; do
     if [ -L "$f" ]; then
         if found=$(resolve_symlink "$f"); then
             printf '%s\n' "$found"
@@ -72,8 +72,8 @@ cat >&2 <<EOF
 resolve-plugin-dir: could not locate the metica-sdk-agents plugin root.
 Tried:
   \$CLAUDE_PLUGIN_ROOT, \$METICA_SDK_AGENTS_DIR,
-  symlink target of .claude/agents/metica-unity-integrator.md,
-  symlink target of ~/.claude/agents/metica-unity-integrator.md,
+  symlink target of .claude/agents/unity-integrator.md,
+  symlink target of ~/.claude/agents/unity-integrator.md,
   ~/.claude/plugins/metica-sdk-agents,
   ~/.metica-sdk-agents, ~/dev/metica-sdk-agents.
 Set METICA_SDK_AGENTS_DIR to the absolute path of the plugin root and retry.

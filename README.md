@@ -25,22 +25,28 @@ curl -fsSL https://raw.githubusercontent.com/meticalabs/metica-sdk-agents/main/i
 
 The script clones into `~/.metica-sdk-agents` and symlinks each agent into `.claude/agents/`.
 
-**Verify:** launch Claude Code in your project and type `/agents` — you should see `metica-unity-compat-checker`, `metica-unity-integrator`, and `metica-unity-validator`.
+**Verify:** launch Claude Code in your project and type `/agents` — you should see the three agents (listed under the `metica-sdk-agents` plugin if you installed via the marketplace, or as bare `unity-compat-checker` / `unity-integrator` / `unity-validator` if you used the one-line installer).
 
 ## Use it
 
-From your Unity project's root in Claude Code:
+From your Unity project's root in Claude Code, mention the integrator. The name depends on how you installed:
 
 ```
-@agent-metica-unity-integrator
+# Marketplace install (recommended):
+@agent-metica-sdk-agents:unity-integrator
+
+# One-line installer (symlinks, un-namespaced):
+@agent-unity-integrator
 ```
 
 That's the whole invocation. The integrator auto-detects the Unity project (walks up from `$(pwd)` looking for `ProjectSettings/`) and fills missing API keys with placeholders you swap in later. You'll be shown a plan and asked to approve before any file is written.
 
+> **Tip:** unsure which form your install registered? Type `@agent-` and let autocomplete show it.
+
 If you're outside the project, or you have several Unity projects in one workspace, pass it explicitly:
 
 ```
-@agent-metica-unity-integrator
+@agent-metica-sdk-agents:unity-integrator
 PROJECT=/absolute/path/to/your/unity/project
 ```
 
@@ -76,9 +82,9 @@ Tune behavior by passing any of these after `PROJECT=...`:
 
 | Agent | Role |
 |---|---|
-| `@agent-metica-unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint. |
-| `@agent-metica-unity-integrator` | Orchestrator. Mode-detects (fresh vs side-by-side), presents a plan, snapshots git, generates code, invokes the validator. |
-| `@agent-metica-unity-validator` | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
+| `@agent-metica-sdk-agents:unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint. |
+| `@agent-metica-sdk-agents:unity-integrator` | Orchestrator. Mode-detects (fresh vs side-by-side), presents a plan, snapshots git, generates code, invokes the validator. |
+| `@agent-metica-sdk-agents:unity-validator` | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
 
 Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration).
 
@@ -124,9 +130,9 @@ metica-sdk-agents/
 ├── agents/
 │   ├── contracts.md                   # JSON schemas for sub-agent outputs
 │   └── unity/
-│       ├── metica-unity-compat-checker.md
-│       ├── metica-unity-integrator.md
-│       └── metica-unity-validator.md
+│       ├── unity-compat-checker.md
+│       ├── unity-integrator.md
+│       └── unity-validator.md
 ├── scripts/
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for the agents
 │   ├── detect-compat.sh

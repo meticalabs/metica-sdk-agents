@@ -1,5 +1,5 @@
 ---
-name: metica-unity-compat-checker
+name: unity-compat-checker
 description: Detect Unity, Java, MaxSDK, Android API, Gradle, and scripting backend (IL2CPP/Mono) versions in a Unity project. Report PASS/WARN/FAIL/UNKNOWN per check against the matrix in metica-versions.yaml. Use before any MeticaSDK integration.
 tools: Bash
 model: haiku

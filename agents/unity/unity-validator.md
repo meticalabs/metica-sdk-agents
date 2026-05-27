@@ -1,5 +1,5 @@
 ---
-name: metica-unity-validator
+name: unity-validator
 description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, and side-by-side router presence. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone.
 tools: Bash
 model: sonnet

@@ -25,7 +25,7 @@ Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/mode
 
 ## Architecture
 
-**Orchestrator + two thin wrappers.** `metica-unity-integrator` (model: sonnet) is the only agent users invoke directly. It calls `metica-unity-compat-checker` (haiku) and `metica-unity-validator` (sonnet) as sub-agents. The compat-checker and validator do nothing but run a script and print its stdout verbatim — never paraphrase or summarize their output when editing them.
+**Orchestrator + two thin wrappers.** `unity-integrator` (model: sonnet) is the only agent users invoke directly. It calls `unity-compat-checker` (haiku) and `unity-validator` (sonnet) as sub-agents. The compat-checker and validator do nothing but run a script and print its stdout verbatim — never paraphrase or summarize their output when editing them.
 
 **Agents talk to the orchestrator in versioned JSON.** Each sub-agent's final message ends with a fenced ` ```json ` block. The orchestrator parses **the last** such block (regex in `agents/contracts.md`), never the prose. Schemas are versioned `<name>/<major>.<minor>.<patch>`; the orchestrator accepts any minor/patch within an accepted major. **If you add a field to a script's JSON output, bump the minor and update `agents/contracts.md` — these three move together.** Contracts: `compat-checker/1.x`, `mode-detect/1.x`, `validator/1.x`. The integrator itself emits no JSON.
 

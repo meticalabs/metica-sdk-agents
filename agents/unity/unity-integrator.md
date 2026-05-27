@@ -1,5 +1,5 @@
 ---
-name: metica-unity-integrator
+name: unity-integrator
 description: Integrate MeticaSDK into a Unity project. Auto-detects whether MaxSDK is present and chooses Fresh mode (no existing ad SDK → standalone install) or Side-by-side adapter mode (MaxSDK present → add a separate MeticaAdapter, never modify Max code). Always runs compat-checker first and validator last. Uses Claude Code plan mode before any file change. MeticaSDK installation is enforced by the compat-checker's `metica_sdk` row — the integrator never downloads or imports the SDK itself; the user does that once after the compat-check BLOCK message, then re-runs.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
 model: sonnet
@@ -92,11 +92,15 @@ extract_json() {
 
 Use `printf '%s' "$SUBAGENT_OUTPUT" | extract_json` then parse the JSON to read `.status`, `.checks`, etc.
 
+## Invoking sub-agents (name resolution)
+
+The `@agent-unity-*` names below are the **bare** agent names used by the one-line installer (symlinks into `.claude/agents/`). A marketplace install namespaces them under the plugin instead — `metica-sdk-agents:unity-compat-checker`, `metica-sdk-agents:unity-validator`. If a sub-agent invocation fails with `Agent type '...' not found`, retry once with the `metica-sdk-agents:` prefix before treating it as a real error. Do **not** hardcode either form — resolve per install.
+
 ## Workflow (in order — do not skip steps)
 
 ### Step 1 — Compat preflight (fresh subagent context)
 
-Invoke `@agent-metica-unity-compat-checker` with the project path. Extract the JSON.
+Invoke `@agent-unity-compat-checker` with the project path. Extract the JSON.
 
 - `status: PASS` (with possible WARN rows) → continue.
 - `status: BLOCK` → check whether the **only** FAIL row is `metica_sdk` (see "MeticaSDK auto-install" below). If so, offer to install it. Otherwise render the BLOCK remediation block and exit non-zero. Do **not** prompt the user to override non-fixable failures.
@@ -123,7 +127,7 @@ On `y`, run:
 bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$VERSION" --import
 ```
 
-The script verifies the SHA-256 checksum from `metica-versions.yaml`, places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-metica-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
+The script verifies the SHA-256 checksum from `metica-versions.yaml`, places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
 
 If Unity headless is not available (no `UNITY_PATH` set, no Hub-installed Unity matching the project version), the download script will fall back to placing the `.unitypackage` in `Assets/` and printing "double-click to import in the Editor". Surface that to the user with one extra step: "Unity isn't on PATH for headless import — open the project and double-click `Assets/MeticaSDK-<version>.unitypackage`, then re-run me."
 
@@ -140,7 +144,7 @@ Compat-check found 1 blocking issue:
     Fix: Set AndroidMinSdkVersion: 23 in ProjectSettings/ProjectSettings.asset,
          or Edit > Project Settings > Player > Android > Minimum API Level.
 
-After applying the fix, re-run @agent-metica-unity-integrator.
+After applying the fix, re-run the integrator.
 ```
 
 Rules for the rendering:
@@ -682,7 +686,7 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 
 ### Step 6 — Validator (fresh subagent context, always)
 
-Invoke `@agent-metica-unity-validator` with the project path and the chosen mode. Concretely, the wrapped bash command is:
+Invoke `@agent-unity-validator` with the project path and the chosen mode. Concretely, the wrapped bash command is:
 
 ```bash
 bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" --mode="$MODE"

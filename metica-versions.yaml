@@ -1,6 +1,6 @@
 # Single source of truth for MeticaSDK version compatibility.
 # Auto-updated by a workflow in the SDK source repo on every release.
-# Read by: metica-unity-compat-checker, metica-unity-integrator, download-metica-sdk.sh.
+# Read by: unity-compat-checker, unity-integrator, download-metica-sdk.sh.
 
 schema: "metica-versions/1.0.0"
 

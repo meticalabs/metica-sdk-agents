@@ -53,6 +53,16 @@ fi
 
 mkdir -p "$AGENTS_DEST"
 
+# Remove symlinks left by a previous install of THIS plugin (their targets live
+# inside our clone dir) so renamed or deleted agents don't linger as stale or
+# dangling links. Symlinks from other tools sharing this dir are left untouched.
+for dest in "$AGENTS_DEST"/*.md; do
+    [ -L "$dest" ] || continue
+    case "$(readlink "$dest")" in
+        "$CLONE_DIR"/agents/unity/*) rm -f "$dest" ;;
+    esac
+done
+
 linked=0
 for src in "$CLONE_DIR"/agents/unity/*.md; do
     name="$(basename "$src")"
@@ -67,5 +77,5 @@ done
 echo "Linked $linked agents into $AGENTS_DEST"
 echo ""
 echo "Done. Open Claude Code in a Unity project and run:"
-echo "    @agent-metica-unity-integrator"
+echo "    @agent-unity-integrator"
 echo "    PROJECT=/absolute/path/to/your/unity/project"
