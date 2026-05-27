@@ -14,7 +14,7 @@
 
 set -eu
 
-is_root() { [ -f "$1/.claude-plugin/plugin.json" ] && [ -d "$1/agents/unity" ]; }
+is_root() { [ -f "$1/.claude-plugin/plugin.json" ] && [ -d "$1/agents" ]; }
 
 # 1. Marketplace-set env var
 if [ "${CLAUDE_PLUGIN_ROOT:-}" != "" ] && is_root "$CLAUDE_PLUGIN_ROOT"; then

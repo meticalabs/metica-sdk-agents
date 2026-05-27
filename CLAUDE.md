@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is **not application code** — it is a Claude Code *plugin* that ships three Unity sub-agents. The "source" is:
 
-- **Agent definitions** — markdown-with-frontmatter under `agents/unity/`. The frontmatter (`name`, `description`, `tools`, `model`) is the agent's contract; the body is its prompt.
+- **Agent definitions** — markdown-with-frontmatter directly under `agents/` (`unity-integrator.md`, `unity-validator.md`, `unity-compat-checker.md`). The frontmatter (`name`, `description`, `tools`, `model`) is the agent's contract; the body is its prompt. They live in `agents/` itself, **not** a subfolder, on purpose: a plugin subfolder becomes a scope segment in the mention token, so `agents/unity/unity-integrator.md` would register as `@agent-metica-sdk-agents:unity:unity-integrator`. Keeping them flat preserves the documented `@agent-metica-sdk-agents:unity-integrator`.
 - **Scripts** — `scripts/*.sh` hold all deterministic logic. Agents are thin: they run a script and relay its output. Editing behavior almost always means editing a script, not prose.
 - **Reference docs** — `agents/contracts.md` (the inter-agent JSON contracts) and `references/` (MaxSdk↔MeticaSdk API parity).
 
@@ -29,7 +29,7 @@ Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/mode
 
 **Agents talk to the orchestrator in versioned JSON.** Each sub-agent's final message ends with a fenced ` ```json ` block. The orchestrator parses **the last** such block (regex in `agents/contracts.md`), never the prose. Schemas are versioned `<name>/<major>.<minor>.<patch>`; the orchestrator accepts any minor/patch within an accepted major. **If you add a field to a script's JSON output, bump the minor and update `agents/contracts.md` — these three move together.** Contracts: `compat-checker/1.x`, `mode-detect/1.x`, `validator/1.x`. The integrator itself emits no JSON.
 
-**`PLUGIN_DIR` resolution is mandatory.** Every agent's first bash command resolves the plugin root via `scripts/resolve-plugin-dir.sh` (checks `$CLAUDE_PLUGIN_ROOT`, `$METICA_SDK_AGENTS_DIR`, agent-symlink targets, known install paths). Scripts are always invoked as `"$PLUGIN_DIR/scripts/..."` — never with relative paths. `resolve-plugin-dir.sh`'s `is_root()` identifies the root by the presence of **`.claude-plugin/plugin.json`** and `agents/unity/`; if you move the manifest, that check (and marketplace install) breaks.
+**`PLUGIN_DIR` resolution is mandatory.** Every agent's first bash command resolves the plugin root via `scripts/resolve-plugin-dir.sh` (checks `$CLAUDE_PLUGIN_ROOT`, `$METICA_SDK_AGENTS_DIR`, agent-symlink targets, known install paths). Scripts are always invoked as `"$PLUGIN_DIR/scripts/..."` — never with relative paths. `resolve-plugin-dir.sh`'s `is_root()` identifies the root by the presence of **`.claude-plugin/plugin.json`** and an `agents/` directory; if you move the manifest, that check (and marketplace install) breaks.
 
 **The integrator's two modes** are the central branch. `scripts/detect-mode.sh` looks for three MaxSDK signals (`Assets/MaxSdk/` folder, `MaxSdk.Initialize(` symbol, AppLovin manifest); two-of-three → **side-by-side**, else **fresh**. Fresh writes a single `MeticaBootstrap.cs`. Side-by-side writes an `IAdService`-based adapter set under `Assets/Scripts/Metica/` (`namespace Metica.AbTest`) and **never touches existing `Assets/MaxSdk/` or game code** — call-site rewrites are only ever *proposed* in the final report, never applied automatically.
 

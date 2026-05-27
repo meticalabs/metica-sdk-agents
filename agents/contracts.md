@@ -84,7 +84,7 @@ Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose betwee
 
 ## Max-callsite inventory (no JSON contract)
 
-The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity/unity-integrator.md` (Step 5, side-by-side branch) for the canonical scan snippet.
+The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5, side-by-side branch) for the canonical scan snippet.
 
 ---
 

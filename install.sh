@@ -46,8 +46,8 @@ else
     git -C "$CLONE_DIR" reset --hard origin/main
 fi
 
-if [ ! -d "$CLONE_DIR/agents/unity" ]; then
-    echo "Error: agents/unity not found under $CLONE_DIR" >&2
+if ! ls "$CLONE_DIR"/agents/unity-*.md >/dev/null 2>&1; then
+    echo "Error: no agents/unity-*.md found under $CLONE_DIR" >&2
     exit 1
 fi
 
@@ -59,12 +59,12 @@ mkdir -p "$AGENTS_DEST"
 for dest in "$AGENTS_DEST"/*.md; do
     [ -L "$dest" ] || continue
     case "$(readlink "$dest")" in
-        "$CLONE_DIR"/agents/unity/*) rm -f "$dest" ;;
+        "$CLONE_DIR"/agents/unity-*) rm -f "$dest" ;;
     esac
 done
 
 linked=0
-for src in "$CLONE_DIR"/agents/unity/*.md; do
+for src in "$CLONE_DIR"/agents/unity-*.md; do
     name="$(basename "$src")"
     dest="$AGENTS_DEST/$name"
     if [ -L "$dest" ] || [ -e "$dest" ]; then
