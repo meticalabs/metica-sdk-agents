@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Print the absolute path of the metica-sdk-agents plugin root (the directory
-# containing plugin.json) on stdout, or exit non-zero with a diagnostic on stderr.
+# containing .claude-plugin/plugin.json) on stdout, or exit non-zero with a
+# diagnostic on stderr.
 #
 # Resolution order:
-#   1. $CLAUDE_PLUGIN_ROOT, if set and contains plugin.json (marketplace install).
-#   2. $METICA_SDK_AGENTS_DIR, if set and contains plugin.json (env override).
+#   1. $CLAUDE_PLUGIN_ROOT, if set and is a plugin root (marketplace install).
+#   2. $METICA_SDK_AGENTS_DIR, if set and is a plugin root (env override).
 #   3. The symlink target of either .claude/agents/metica-unity-integrator.md
 #      (project-local install) or ~/.claude/agents/metica-unity-integrator.md
 #      (global symlink install).
@@ -13,7 +14,7 @@
 
 set -eu
 
-is_root() { [ -f "$1/plugin.json" ] && [ -d "$1/agents/unity" ]; }
+is_root() { [ -f "$1/.claude-plugin/plugin.json" ] && [ -d "$1/agents/unity" ]; }
 
 # 1. Marketplace-set env var
 if [ "${CLAUDE_PLUGIN_ROOT:-}" != "" ] && is_root "$CLAUDE_PLUGIN_ROOT"; then
