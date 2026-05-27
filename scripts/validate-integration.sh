@@ -1,8 +1,8 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
 #
-# Usage: validate-integration.sh --project=<path> [--mode=fresh|side-by-side]
+# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap|side-by-side]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 
 set -u
@@ -34,7 +34,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.0.0",\n'
+    printf '  "schema": "validator/1.1.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -62,8 +62,8 @@ done
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
 case "$MODE" in
-    ""|fresh|side-by-side) ;;
-    *) die_json "Invalid --mode: $MODE (allowed: fresh, side-by-side)" ;;
+    ""|fresh|straight-swap|side-by-side) ;;
+    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap, side-by-side)" ;;
 esac
 
 # ---- discover C# sources ---------------------------------------------------
@@ -125,6 +125,40 @@ first_loc() {
 
 line_in_file() {
     clean_cs "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
+}
+
+# ---- RAW helpers (no string/comment stripping) -----------------------------
+# A few checks must inspect literal string values (placeholder keys, the userId
+# argument). clean-cs.awk blanks string literals, so the cleaned helpers above
+# can't see them — these scan the raw source instead.
+
+raw_count() {
+    local pat="$1" total=0 c
+    while IFS= read -r f; do
+        c="$(grep -cF -- "$pat" "$f" 2>/dev/null)" || c=0
+        total=$((total + c))
+    done < "$CS_LIST"
+    printf '%d' "$total"
+}
+
+raw_first_loc() {
+    local pat="$1" n
+    while IFS= read -r f; do
+        n="$(grep -nF -- "$pat" "$f" 2>/dev/null | head -1 | awk -F: '{ print $1 }')"
+        if [ -n "$n" ]; then
+            printf '%s:%s' "$f" "$n"
+            return
+        fi
+    done < "$CS_LIST"
+}
+
+# First raw line (whole text) containing a pattern, across all sources.
+raw_first_line() {
+    local pat="$1" line
+    while IFS= read -r f; do
+        line="$(grep -F -- "$pat" "$f" 2>/dev/null | head -1)"
+        if [ -n "$line" ]; then printf '%s' "$line"; return; fi
+    done < "$CS_LIST"
 }
 
 # ---- mode detection ---------------------------------------------------------
@@ -316,6 +350,37 @@ check_load_show_parity "banner"       "MeticaSdk.Ads.LoadBanner("       "MeticaS
 check_load_show_parity "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaSdk.Ads.ShowInterstitial("
 check_load_show_parity "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaSdk.Ads.ShowRewarded("
 
+# 7b. reload_on_hidden: interstitial/rewarded must subscribe OnAdHidden so the
+# next ad is loaded when the current one is dismissed (the canonical show →
+# hidden → reload loop). Banners are persistent and are excluded.
+check_reload_on_hidden() {
+    local fmt="$1" load_pat="$2" hidden_pat="$3"
+    local rule="${fmt}_reload_on_hidden"
+    [ "$(count_lit "$load_pat")" = "0" ] && return
+    if [ "$(count_lit "$hidden_pat")" = "0" ]; then
+        add_check "$rule" "" "FAIL" "$fmt used but $hidden_pat not subscribed; load the next ad from the hidden callback (auto-reload)."
+    else
+        add_check "$rule" "" "PASS" "$fmt auto-reload-on-hidden callback subscribed."
+    fi
+}
+check_reload_on_hidden "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaAdsCallbacks.Interstitial.OnAdHidden"
+check_reload_on_hidden "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaAdsCallbacks.Rewarded.OnAdHidden"
+
+# 7c. show_ready_guard (ADVISORY): when an interstitial/rewarded Show is called,
+# an IsReady check should exist so Show() never fires on a not-loaded ad.
+check_ready_guard() {
+    local fmt="$1" show_pat="$2" ready_pat="$3"
+    local rule="${fmt}_show_ready_guard"
+    [ "$(count_lit "$show_pat")" = "0" ] && return
+    if [ "$(count_lit "$ready_pat")" = "0" ]; then
+        add_check "$rule" "" "ADVISORY" "$fmt Show called but $ready_pat never used; guard Show() with the ready check."
+    else
+        add_check "$rule" "" "PASS" "$fmt Show is guarded by a ready check."
+    fi
+}
+check_ready_guard "interstitial" "MeticaSdk.Ads.ShowInterstitial(" "MeticaSdk.Ads.IsInterstitialReady("
+check_ready_guard "rewarded"     "MeticaSdk.Ads.ShowRewarded("     "MeticaSdk.Ads.IsRewardedReady("
+
 # 8. revenue_callback_subscribed (ADVISORY)
 REV_COUNT="$(count_lit 'OnAdRevenuePaid')"
 if [ "$REV_COUNT" = "0" ]; then
@@ -324,19 +389,57 @@ else
     add_check "revenue_callback_subscribed" "" "PASS" "Revenue callback subscribed."
 fi
 
-# Side-by-side specific
-if [ "$MODE" = "side-by-side" ]; then
-    if [ "$HAS_ROUTER" = "1" ]; then
-        add_check "ad_service_router_present" "" "PASS" "AdServiceRouter referenced in project."
-    else
-        add_check "ad_service_router_present" "" "FAIL" "Side-by-side mode but no AdServiceRouter found."
-    fi
+# 9. placeholder_ids_replaced (FAIL): the integrator emits YOUR_* placeholders
+# when keys are not supplied. A shippable integration must replace them. Scanned
+# on RAW source — the literals live inside string arguments that clean-cs blanks.
+PLACEHOLDERS_FOUND=""
+for ph in YOUR_METICA_API_KEY YOUR_METICA_APP_ID YOUR_MAX_SDK_KEY; do
+    [ "$(raw_count "$ph")" != "0" ] && PLACEHOLDERS_FOUND="$PLACEHOLDERS_FOUND $ph"
+done
+if [ -n "$PLACEHOLDERS_FOUND" ]; then
+    PH_FIRST="${PLACEHOLDERS_FOUND#" "}"; PH_FIRST="${PH_FIRST%% *}"
+    add_check "placeholder_ids_replaced" "$(raw_first_loc "$PH_FIRST")" "FAIL" \
+        "Unreplaced placeholder credential(s):${PLACEHOLDERS_FOUND}. Replace with real keys before shipping."
+else
+    add_check "placeholder_ids_replaced" "" "PASS" "No placeholder credential markers found."
+fi
+
+# 10. user_id_not_test (FAIL): the 3rd arg of new MeticaInitConfig(apiKey, appId,
+# userId) must not be a hardcoded test literal. null/unset and variable
+# expressions are acceptable (the value comes from the host app's identity). Only
+# a literal test value fails. Parsed from RAW source (the value is a string arg).
+CFG_LINE="$(raw_first_line 'new MeticaInitConfig(')"
+if [ -n "$CFG_LINE" ]; then
+    # Extract args inside the first MeticaInitConfig(...) and take the 3rd field.
+    UID_ARG="$(printf '%s' "$CFG_LINE" \
+        | sed -n 's/.*new MeticaInitConfig(\([^)]*\)).*/\1/p' \
+        | awk -F',' '{ print $3 }' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    case "$UID_ARG" in
+        ""|null)
+            add_check "user_id_not_test" "" "PASS" "User ID is null/unset (acceptable; resolved from host identity)." ;;
+        \"*\")
+            UID_VAL="${UID_ARG%\"}"; UID_VAL="${UID_VAL#\"}"
+            UID_LC="$(printf '%s' "$UID_VAL" | tr '[:upper:]' '[:lower:]')"
+            if [ -z "$UID_VAL" ]; then
+                add_check "user_id_not_test" "" "FAIL" "User ID is an empty string literal; pass the host app's real user identifier."
+            elif printf '%s' "$UID_LC" | grep -qE 'test|debug|dummy'; then
+                add_check "user_id_not_test" "" "FAIL" "User ID \"$UID_VAL\" looks like a test/debug literal; use the host app's real user identity."
+            elif printf '%s' "$UID_VAL" | grep -qE '^[0-9]+$'; then
+                add_check "user_id_not_test" "" "FAIL" "User ID \"$UID_VAL\" is a numeric test literal; use the host app's real user identity."
+            else
+                add_check "user_id_not_test" "" "PASS" "User ID is a non-test string literal."
+            fi ;;
+        *)
+            add_check "user_id_not_test" "" "PASS" "User ID supplied from a variable/expression (not a hardcoded test value)." ;;
+    esac
 fi
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
-#   - interstitial_show_callback:   OnAdShowSuccess/OnAdHidden subscribed when interstitial used
-#   - rewarded_show_callback:       OnAdShowSuccess/OnAdHidden subscribed when rewarded used
+#   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
+#                                   format is still showing. Needs call-graph/scope awareness to detect
+#                                   without false positives; deferred until a reliable heuristic exists.
 #   - banner_create_before_load:    CreateBanner precedes LoadBanner/ShowBanner
 # Side-by-side mode additional rules:
 #   - single_init_per_session:      MaxSdk.InitializeSdk gated by router; not called unconditionally
@@ -344,6 +447,12 @@ fi
 #   - max_adapter_present:          a MaxAdService (or equivalent) wraps Max calls
 #   - metica_adapter_present:       a MeticaAdService (or equivalent) wraps Metica calls
 #   - max_callsites_routed:         game code uses AdServiceRouter.Instance.AdService.* not MaxSdk.* directly
+#
+# REMOVED: ad_service_router_present — router presence is no longer a reliable
+# signal. With the three-way matrix (fresh / straight-swap / side-by-side), the
+# straight-swap path intentionally has no router, and mode auto-detection cannot
+# distinguish straight-swap from side-by-side. The check produced false FAILs, so
+# it was dropped; the router is only generated when remote-config drives an A/B.
 
 # ---- determine status ------------------------------------------------------
 
@@ -354,7 +463,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.0.0",\n'
+printf '  "schema": "validator/1.1.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'

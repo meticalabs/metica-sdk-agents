@@ -65,6 +65,16 @@ Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose betwee
 
 **Decision rule:** two-of-three signals present → `side-by-side`, else `fresh`.
 
+**Note — three-way integrator mode.** `mode-detect` reports only whether MaxSDK is present: `side-by-side` means "MaxSDK present", `fresh` means "no ad SDK". The integrator then sub-divides the `side-by-side` (Max-present) verdict using the remote-config provider detected in its Step 2.5 — a prose judgment, not a script output:
+
+| `mode-detect` | Remote-config provider | Integrator mode |
+|---|---|---|
+| `fresh` | — | `fresh` |
+| `side-by-side` | `none` | `straight-swap` (remove Max from app code, no router) |
+| `side-by-side` | `firebase`/`appmetrica`/`unity-remote-config` | `side-by-side` (full router stack) |
+
+`straight-swap` is therefore an integrator/validator mode, not a `mode-detect` output — the `mode-detect` schema is unchanged.
+
 **Concrete example:**
 
 ```json
@@ -88,15 +98,22 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.0.0`
+## `validator/1.1.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
-- `mode`: `fresh`, `side-by-side`, `unknown`
+- `mode`: `fresh`, `straight-swap`, `side-by-side`, `unknown`
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
-- `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callback_subscribed`).
+- `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
 - `checks[].detail`: one-line message describing what was found.
+
+**Rules emitted** (see `scripts/validate-integration.sh` for exact conditions): `init_count`, `privacy_before_init`, `<format>_callbacks_subscribed`, `rewarded_reward_callback`, `<format>_load_show_parity`, `revenue_callback_subscribed` (ADVISORY), and — added in 1.1.0 — `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` (FAIL when the format is used but `OnAdHidden` is not subscribed), `interstitial_show_ready_guard` / `rewarded_show_ready_guard` (ADVISORY when `Show` is called without an `IsReady` check), `placeholder_ids_replaced` (FAIL on unreplaced `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY`), and `user_id_not_test` (FAIL when the `MeticaInitConfig` userId is a hardcoded test literal; `null`/unset and variable expressions PASS).
+
+**Changes in 1.1.0** (minor, backward-compatible — the orchestrator reads `.status` and iterates `.checks`):
+- Added the `straight-swap` mode value (Max present, no remote-config provider).
+- Added the lifecycle, placeholder, and user-id rules listed above.
+- **Removed** `ad_service_router_present`. Router presence is no longer a reliable signal: the `straight-swap` path intentionally has no router, and mode auto-detection cannot distinguish it from `side-by-side`. The check produced false FAILs; the router is required only when remote-config drives an A/B.
 
 **Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.
 
@@ -104,7 +121,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ```json
 {
-  "schema": "validator/1.0.0",
+  "schema": "validator/1.1.0",
   "status": "FAIL",
   "mode": "side-by-side",
   "error": null,

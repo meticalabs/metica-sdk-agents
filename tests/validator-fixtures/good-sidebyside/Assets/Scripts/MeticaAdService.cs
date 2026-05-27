@@ -7,6 +7,7 @@ public class MeticaAdService : IAdService
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("loaded");
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
         MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("revenue");
+        MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial(ad.adUnitId);
 
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);

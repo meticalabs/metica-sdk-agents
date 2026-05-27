@@ -12,7 +12,7 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
-- `MODE` — optional `fresh` or `side-by-side`. When omitted, the script auto-detects from project contents.
+- `MODE` — optional `fresh`, `straight-swap`, or `side-by-side`. When omitted, the script auto-detects from project contents. (`straight-swap` cannot be auto-detected — the integrator passes it explicitly; it is validated like `fresh` plus there is no router requirement.)
 
 ## What to do — run this single bash command
 
@@ -50,9 +50,14 @@ The validator must run in a **fresh subagent context** — it must not see the i
 ## Rule set (current scope)
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize`
+- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering in `fresh`/`straight-swap`; router-bootstrap ordering in `side-by-side`)
 - `<format>_callbacks_subscribed` — for each used ad format, OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
 - `<format>_load_show_parity` — every Load has a matching Show somewhere
+- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
+- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
+- `placeholder_ids_replaced` — FAIL on unreplaced `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY`
+- `user_id_not_test` — FAIL when the `MeticaInitConfig` userId is a hardcoded test literal (`null`/unset and variable expressions PASS)
 - `revenue_callback_subscribed` — ADVISORY only
-- `ad_service_router_present` — only checked in side-by-side mode
+
+`ad_service_router_present` was removed in `validator/1.1.0` — see `agents/contracts.md`.

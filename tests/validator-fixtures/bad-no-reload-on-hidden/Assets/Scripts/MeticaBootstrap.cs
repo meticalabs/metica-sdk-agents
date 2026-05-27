@@ -1,18 +1,17 @@
 using UnityEngine;
 
+// Otherwise valid, but the interstitial never reloads on hidden (no OnAdHidden).
 public class MeticaBootstrap : MonoBehaviour
 {
     void Start()
     {
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("loaded");
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
-        MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("revenue");
-        MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial("inter_main");
 
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
 
-        MeticaSdk.Initialize(new MeticaInitConfig("API_KEY", "APP_ID", null), null, response => {});
+        MeticaSdk.Initialize(new MeticaInitConfig("real-api-key", "real-app-id", null), null, r => {});
 
         MeticaSdk.Ads.LoadInterstitial("inter_main");
     }
