@@ -152,12 +152,16 @@ raw_first_loc() {
     done < "$CS_LIST"
 }
 
-# First raw line (whole text) containing a pattern, across all sources.
-raw_first_line() {
-    local pat="$1" line
+# Print the userId (3rd) argument of the first `new MeticaInitConfig(...)` across
+# all sources, string-/multi-line-aware (see scripts/lib/extract-init-arg.awk).
+EXTRACT_ARG_AWK="$SCRIPT_DIR/lib/extract-init-arg.awk"
+extract_init_userid() {
+    local f
     while IFS= read -r f; do
-        line="$(grep -F -- "$pat" "$f" 2>/dev/null | head -1)"
-        if [ -n "$line" ]; then printf '%s' "$line"; return; fi
+        if grep -qF -- 'new MeticaInitConfig(' "$f" 2>/dev/null; then
+            awk -v WANT=3 -f "$EXTRACT_ARG_AWK" "$f"
+            return
+        fi
     done < "$CS_LIST"
 }
 
@@ -407,14 +411,12 @@ fi
 # 10. user_id_not_test (FAIL): the 3rd arg of new MeticaInitConfig(apiKey, appId,
 # userId) must not be a hardcoded test literal. null/unset and variable
 # expressions are acceptable (the value comes from the host app's identity). Only
-# a literal test value fails. Parsed from RAW source (the value is a string arg).
-CFG_LINE="$(raw_first_line 'new MeticaInitConfig(')"
-if [ -n "$CFG_LINE" ]; then
-    # Extract args inside the first MeticaInitConfig(...) and take the 3rd field.
-    UID_ARG="$(printf '%s' "$CFG_LINE" \
-        | sed -n 's/.*new MeticaInitConfig(\([^)]*\)).*/\1/p' \
-        | awk -F',' '{ print $3 }' \
-        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+# a literal test value fails. The arg is extracted from RAW source with a
+# string-/multi-line-aware parser so commas inside string args and a constructor
+# spanning multiple lines are handled.
+if [ "$(raw_count 'new MeticaInitConfig(')" != "0" ]; then
+    UID_ARG="$(extract_init_userid)"
+    case "$UID_ARG" in @\"*) UID_ARG="${UID_ARG#@}" ;; esac   # verbatim @"…" → treat as string literal
     case "$UID_ARG" in
         ""|null)
             add_check "user_id_not_test" "" "PASS" "User ID is null/unset (acceptable; resolved from host identity)." ;;

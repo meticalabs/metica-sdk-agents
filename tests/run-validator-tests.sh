@@ -138,6 +138,15 @@ assert_case bad-placeholder-key           "FAIL" "fresh"        \
 assert_case bad-test-userid               "FAIL" "fresh"        \
     "user_id_not_test:FAIL"
 
+# New: test user ID still caught when a string arg contains a comma (parser must
+# not naively comma-split the MeticaInitConfig args).
+assert_case bad-userid-comma-key          "FAIL" "fresh"        \
+    "user_id_not_test:FAIL"
+
+# New: test user ID still caught when the constructor spans multiple lines.
+assert_case bad-userid-multiline          "FAIL" "fresh"        \
+    "user_id_not_test:FAIL"
+
 # New: interstitial without OnAdHidden auto-reload FAILs
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
