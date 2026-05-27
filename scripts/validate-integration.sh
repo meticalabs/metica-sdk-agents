@@ -127,39 +127,44 @@ line_in_file() {
     clean_cs "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
 
-# ---- RAW helpers (no string/comment stripping) -----------------------------
-# A few checks must inspect literal string values (placeholder keys, the userId
+# ---- comment-stripped, string-preserving helpers ---------------------------
+# A few checks must inspect literal string VALUES (placeholder keys, the userId
 # argument). clean-cs.awk blanks string literals, so the cleaned helpers above
-# can't see them — these scan the raw source instead.
+# can't see them. strip-comments.awk removes only comments and keeps strings
+# intact — so these checks see real string values but still ignore anything that
+# lives in a comment (consistent with the rest of the script).
+STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
+strip_comments() { awk -f "$STRIP_COMMENTS_AWK" "$1"; }
 
-raw_count() {
+nocomment_count() {
     local pat="$1" total=0 c
     while IFS= read -r f; do
-        c="$(grep -cF -- "$pat" "$f" 2>/dev/null)" || c=0
+        c="$(strip_comments "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
         total=$((total + c))
     done < "$CS_LIST"
     printf '%d' "$total"
 }
 
-raw_first_loc() {
+nocomment_first_loc() {
     local pat="$1" n
     while IFS= read -r f; do
-        n="$(grep -nF -- "$pat" "$f" 2>/dev/null | head -1 | awk -F: '{ print $1 }')"
+        n="$(strip_comments "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
         if [ -n "$n" ]; then
-            printf '%s:%s' "$f" "$n"
+            printf '%s:%s' "${f#"$PROJECT"/}" "$n"
             return
         fi
     done < "$CS_LIST"
 }
 
 # Print the userId (3rd) argument of the first `new MeticaInitConfig(...)` across
-# all sources, string-/multi-line-aware (see scripts/lib/extract-init-arg.awk).
+# all sources, string-/multi-line-aware (see scripts/lib/extract-init-arg.awk) and
+# comment-aware (a commented-out constructor is ignored).
 EXTRACT_ARG_AWK="$SCRIPT_DIR/lib/extract-init-arg.awk"
 extract_init_userid() {
     local f
     while IFS= read -r f; do
-        if grep -qF -- 'new MeticaInitConfig(' "$f" 2>/dev/null; then
-            awk -v WANT=3 -f "$EXTRACT_ARG_AWK" "$f"
+        if strip_comments "$f" | grep -qF -- 'new MeticaInitConfig('; then
+            strip_comments "$f" | awk -v WANT=3 -f "$EXTRACT_ARG_AWK"
             return
         fi
     done < "$CS_LIST"
@@ -178,8 +183,14 @@ if [ "$HAS_METICA" = "0" ]; then
 fi
 
 if [ -z "$MODE" ]; then
-    if [ "$HAS_ROUTER" = "1" ] || { [ "$HAS_MAX" = "1" ] && [ "$HAS_METICA" = "1" ]; }; then
+    if [ "$HAS_ROUTER" = "1" ]; then
         MODE="side-by-side"
+    elif [ "$HAS_MAX" = "1" ] && [ "$HAS_METICA" = "1" ]; then
+        # Max + Metica but no router → straight-swap (Max removed from app code,
+        # MeticaAdService called directly). Validated like fresh (same-file
+        # privacy ordering); routing it through the side-by-side router branch
+        # would skip privacy validation and false-PASS.
+        MODE="straight-swap"
     elif [ "$HAS_METICA" = "1" ]; then
         MODE="fresh"
     else
@@ -398,11 +409,11 @@ fi
 # on RAW source — the literals live inside string arguments that clean-cs blanks.
 PLACEHOLDERS_FOUND=""
 for ph in YOUR_METICA_API_KEY YOUR_METICA_APP_ID YOUR_MAX_SDK_KEY; do
-    [ "$(raw_count "$ph")" != "0" ] && PLACEHOLDERS_FOUND="$PLACEHOLDERS_FOUND $ph"
+    [ "$(nocomment_count "$ph")" != "0" ] && PLACEHOLDERS_FOUND="$PLACEHOLDERS_FOUND $ph"
 done
 if [ -n "$PLACEHOLDERS_FOUND" ]; then
     PH_FIRST="${PLACEHOLDERS_FOUND#" "}"; PH_FIRST="${PH_FIRST%% *}"
-    add_check "placeholder_ids_replaced" "$(raw_first_loc "$PH_FIRST")" "FAIL" \
+    add_check "placeholder_ids_replaced" "$(nocomment_first_loc "$PH_FIRST")" "FAIL" \
         "Unreplaced placeholder credential(s):${PLACEHOLDERS_FOUND}. Replace with real keys before shipping."
 else
     add_check "placeholder_ids_replaced" "" "PASS" "No placeholder credential markers found."
@@ -414,7 +425,7 @@ fi
 # a literal test value fails. The arg is extracted from RAW source with a
 # string-/multi-line-aware parser so commas inside string args and a constructor
 # spanning multiple lines are handled.
-if [ "$(raw_count 'new MeticaInitConfig(')" != "0" ]; then
+if [ "$(nocomment_count 'new MeticaInitConfig(')" != "0" ]; then
     UID_ARG="$(extract_init_userid)"
     case "$UID_ARG" in @\"*) UID_ARG="${UID_ARG#@}" ;; esac   # verbatim @"…" → treat as string literal
     case "$UID_ARG" in

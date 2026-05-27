@@ -151,6 +151,15 @@ assert_case bad-userid-multiline          "FAIL" "fresh"        \
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
 
+# New: commented-out config / placeholder must NOT trip the credential or
+# user-id checks (comment-aware extraction).
+assert_case good-commented-test-userid    "PASS" "fresh"        \
+    "user_id_not_test:PASS" "placeholder_ids_replaced:PASS"
+
+# New: Show without an IsReady guard → ADVISORY, still overall PASS.
+assert_case advisory-no-ready-guard       "PASS" "fresh"        \
+    "interstitial_show_ready_guard:ADVISORY"
+
 # New: straight-swap mode (Max present, no remote config). Validated with an
 # explicit --mode; no router is generated and the dropped ad_service_router_present
 # check must not appear.
@@ -161,6 +170,11 @@ if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap"
 else
     printf "  FAIL  good-straight-swap unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi
+
+# New: the same project auto-detects as straight-swap (Max wrapper + Metica, no
+# router) and gets same-file privacy validation — not a router-branch false-PASS.
+assert_case good-straight-swap            "PASS" "straight-swap" \
+    "init_count:PASS" "privacy_before_init:PASS" "interstitial_reload_on_hidden:PASS"
 
 # New: project with no Metica refs gets a structured error, not a PASS-laden report
 nometica=$(mktemp -d -t no-metica-XXXXXX)
