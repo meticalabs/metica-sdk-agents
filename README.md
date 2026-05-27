@@ -116,8 +116,9 @@ A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real
 
 ```
 metica-sdk-agents/
-├── .claude-plugin/marketplace.json    # Claude Code marketplace manifest
-├── plugin.json                        # plugin manifest
+├── .claude-plugin/
+│   ├── marketplace.json               # Claude Code marketplace manifest
+│   └── plugin.json                    # plugin manifest
 ├── install.sh                         # one-line installer
 ├── metica-versions.yaml               # compat matrix
 ├── agents/
