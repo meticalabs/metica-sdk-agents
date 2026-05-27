@@ -1,2 +1,6 @@
 # Dev-only override map; never published with the plugin.
 metica-versions.dev.yaml
+
+# Personal/local Claude Code overlay — each contributor keeps their own; never committed.
+# Shared guidance lives in the committed CLAUDE.md.
+CLAUDE.local.md
