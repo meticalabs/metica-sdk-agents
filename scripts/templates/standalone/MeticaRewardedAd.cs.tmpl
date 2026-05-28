@@ -21,6 +21,10 @@ public class MeticaRewardedAd : MonoBehaviour
 
     public void Initialize(string adUnitId)
     {
+        // Initialize MUST be called from inside MeticaAdService's OnInitialized
+        // callback — not before MeticaSdk.Initialize has fired its callback.
+        // Subscribing to MeticaAdsCallbacks.Rewarded.* before the SDK is up
+        // means events fired during init will be missed.
         if (_initialized) return;
         _initialized = true;
         _adUnitId = adUnitId;
@@ -82,7 +86,10 @@ public class MeticaRewardedAd : MonoBehaviour
     private void OnClicked(MeticaAd ad)       { Debug.Log("[Metica] rewarded clicked"); }
     // Reward granted — game should credit the user here (currency, unlock, etc.).
     private void OnRewarded(MeticaAd ad)      { Debug.Log("[Metica] rewarded reward granted"); }
-    private void OnRevenuePaid(MeticaAd ad)   { Debug.Log("[Metica] rewarded revenue"); }
+    private void OnRevenuePaid(MeticaAd ad)
+    {
+        Debug.Log($"[Metica] rewarded revenue paid - AdUnit: {ad.adUnitId}, Revenue: {ad.revenue}, Network: {ad.networkName}, Placement: {ad.placementTag}");
+    }
 }
 
 } // namespace Metica.AbTest

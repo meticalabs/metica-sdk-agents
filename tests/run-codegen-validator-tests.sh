@@ -259,6 +259,10 @@ for stem in MeticaInterstitialAd MeticaRewardedAd; do
     fi
 done
 # Banner/MRec must NOT carry retry (matches the docs: SDK handles refresh).
+# Banner/MRec must ALSO carry the canonical HomeScreen.cs behaviors:
+#   - optional placementTag arg on Create() + SetXPlacement call
+#   - _isShowing state flag
+#   - OnApplicationFocus pause/resume gated on _isShowing
 for stem in MeticaBannerAd MeticaMRecAd; do
     tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
     if grep -q '_retryAttempt' "$tmpl"; then
@@ -267,9 +271,51 @@ for stem in MeticaBannerAd MeticaMRecAd; do
     if grep -qE 'Invoke\(nameof\(Load\)' "$tmpl"; then
         echo "  shape FAIL: $stem must NOT call Invoke(nameof(Load), …)"; shape_ok=0
     fi
+    # Create() signature may span multiple lines; check the body contains a
+    # placementTag parameter ahead of the SetXPlacement call.
+    if ! awk '/public[[:space:]]+void[[:space:]]+Create\(/,/\)/' "$tmpl" | grep -q 'placementTag'; then
+        echo "  shape FAIL: $stem.Create must accept an optional placementTag parameter"; shape_ok=0
+    fi
+    if ! grep -qE 'Set(Banner|Mrec)Placement\(' "$tmpl"; then
+        echo "  shape FAIL: $stem must call SetBannerPlacement/SetMrecPlacement when placementTag provided"; shape_ok=0
+    fi
+    if ! grep -q '_isShowing' "$tmpl"; then
+        echo "  shape FAIL: $stem missing _isShowing state flag"; shape_ok=0
+    fi
+    if ! grep -qE 'OnApplicationFocus\(bool' "$tmpl"; then
+        echo "  shape FAIL: $stem missing OnApplicationFocus(bool) handler"; shape_ok=0
+    fi
+    if ! grep -qE 'Start(Banner|Mrec)AutoRefresh\(' "$tmpl"; then
+        echo "  shape FAIL: $stem missing StartBannerAutoRefresh/StartMrecAutoRefresh call (in OnApplicationFocus)"; shape_ok=0
+    fi
+    if ! grep -qE 'Stop(Banner|Mrec)AutoRefresh\(' "$tmpl"; then
+        echo "  shape FAIL: $stem missing StopBannerAutoRefresh/StopMrecAutoRefresh call (in OnApplicationFocus)"; shape_ok=0
+    fi
 done
+
+# All four templates: diagnostic revenue log carries adUnitId / revenue /
+# networkName / placementTag (matches the canonical HomeScreen.cs revenue log).
+for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    # The revenue handler body must reference all four diagnostic fields.
+    for field in 'ad\.adUnitId' 'ad\.revenue' 'ad\.networkName' 'ad\.placementTag'; do
+        if ! grep -qE "$field" "$tmpl"; then
+            echo "  shape FAIL: $stem revenue log missing ${field//\\/} field"; shape_ok=0
+        fi
+    done
+done
+
+# All four templates: init-ordering comment on Initialize() so users don't
+# call it before MeticaSdk.Initialize fires its callback.
+for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if ! grep -qE 'OnInitialized callback|MeticaAdService' "$tmpl"; then
+        echo "  shape FAIL: $stem missing the init-ordering comment on Initialize()"; shape_ok=0
+    fi
+done
+
 if [ "$shape_ok" = "1" ]; then
-    echo "  PASS  per-format templates: named handlers + docs-aligned retry shape"
+    echo "  PASS  per-format templates: named handlers + docs-aligned retry shape + canonical lifecycle"
     pass=$((pass+1))
 else
     fail=$((fail+1))
