@@ -55,17 +55,22 @@ A single fenced ```` ```json ```` block. No human pre-summary at this stage — 
 
 The validator must run in a **fresh subagent context** — it must not see the integrator's reasoning. Input is the file tree only.
 
-## Rule set (current scope)
+## Rule set (current scope — `validator/1.4.0`)
+
+For the full canonical schema with version history, see [`agents/contracts.md`](contracts.md#validator14).
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`
 - `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, both modes)
-- `<format>_callbacks_subscribed` — for each used ad format, OnAdLoadSuccess + OnAdLoadFailed subscribed
+- `<format>_callbacks_subscribed` — for each used ad format (banner/interstitial/rewarded/mrec), OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
-- `<format>_load_show_parity` — every Load has a matching Show somewhere
+- `<format>_load_show_parity` — every Load has a matching Show somewhere (banner/interstitial/rewarded/mrec)
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
+- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` *(1.4.0)* — FAIL if the format is used but `OnAdShowFailed` is not subscribed (the reload-on-hidden loop stalls on show-fail because `OnAdHidden` doesn't fire then)
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
 - `revenue_callback_subscribed` — ADVISORY only
-- `placeholder_ids_replaced` — FAIL when `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY` / `REPLACE_ME` literals appear in source (comments stripped)
-- `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder`, or is a digits-only string
+- `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appear as string literal values (comments stripped, identifier names ignored)
+- `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder` as a delimited word, or is digits-only. Handles `@"..."`, `$"..."`, `$@"..."`, `@$"..."` verbatim/interpolated forms too
+- `mrec_callbacks_subscribed` / `mrec_load_show_parity` *(1.3.0)* — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
+- `legacy_router_files_present` *(1.3.0)* — FAIL when any source declares `class AdServiceRouter` or `class MeticaRolloutBinding` (unique to the retired v0.4 router stack — identified by class declaration, NOT by filename, so user-owned `IAdService.cs` does not false-positive)
 
-These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output. `ad_service_router_present` was removed in `validator/1.1.0` and the router stack was retired entirely in v0.5.0.
+These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output. `ad_service_router_present` was removed in `validator/1.1.0` and the router stack was retired entirely in v0.5.0; the new `legacy_router_files_present` rule catches half-migrated v0.4→v0.5 upgrades by class-declaration content.

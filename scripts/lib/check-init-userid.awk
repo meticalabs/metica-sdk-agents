@@ -25,18 +25,26 @@ function trim(s) {
     return s
 }
 
-function flag(arg, line,    a) {
+function flag(arg, line,    a, normalized) {
     a = trim(arg)
+    # Normalize C# verbatim (@"...") and interpolated ($"...", $@"...", @$"...")
+    # string-literal prefixes so the test-value regex catches them too. Without
+    # this, `@"test"` and `$"test"` bypass the check entirely.
+    normalized = a
+    sub(/^\$?@/, "", normalized)   # strip leading @ or $@
+    sub(/^@?\$/, "", normalized)   # strip leading $ or @$ (already partly stripped above)
     if (a == "null") {
         printf "%s\t%d\tnull\tnull\n", FNAME, line
-    } else if (a == "\"\"") {
-        printf "%s\t%d\tempty\t\"\"\n", FNAME, line
-    } else if (a ~ /^"(.*[-_])?([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])([-_].*)?"$/) {
+    } else if (a == "\"\"" || normalized == "\"\"") {
+        printf "%s\t%d\tempty\t%s\n", FNAME, line, a
+    } else if (normalized ~ /^"(.*[-_])?([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])([-_].*)?"$/) {
         # 'test'/'debug'/'dummy'/'placeholder' as a standalone word — bounded by
         # the surrounding quotes or by - / _ separators. Avoids false positives
-        # on legitimate ids like "contest-user-42" or "latest-build".
+        # on legitimate ids like "contest-user-42" or "latest-build". The
+        # verbatim/interpolated sigil is stripped above so @"test" and $"test"
+        # are caught too.
         printf "%s\t%d\ttest-value\t%s\n", FNAME, line, a
-    } else if (a ~ /^"[0-9]+"$/) {
+    } else if (normalized ~ /^"[0-9]+"$/) {
         printf "%s\t%d\tdigits-only\t%s\n", FNAME, line, a
     }
 }

@@ -174,8 +174,15 @@ assert_case bad-mrec-no-callbacks         "FAIL" "fresh"        \
 
 # New: legacy router-stack files from v0.4.x → FAIL on validate (forces the
 # user to clean up half-migrated projects rather than ship double-init).
+# The check looks for `class AdServiceRouter` / `class MeticaRolloutBinding`
+# declarations, NOT filenames — so user-owned `IAdService.cs` does not false-positive.
 assert_case bad-legacy-router-files       "FAIL" "fresh"        \
     "legacy_router_files_present:FAIL"
+
+# Regression: a user-owned ad abstraction named IAdService.cs (no AdServiceRouter
+# / MeticaRolloutBinding declaration) must NOT trip legacy_router_files_present.
+assert_case good-user-owned-iadservice    "PASS" "fresh"        \
+    "legacy_router_files_present:PASS"
 
 # New: straight-swap mode (Max present, no remote config). Validated with an
 # explicit --mode; no router is generated and the dropped ad_service_router_present

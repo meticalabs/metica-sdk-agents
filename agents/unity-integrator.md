@@ -386,7 +386,7 @@ MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterLoaded;
 // ... more callback subscriptions ...
 
 // after:
-_ads = new MeticaAdService(this);   // pass this MonoBehaviour as the coroutine runner for retry
+_ads = new MeticaAdService(this);   // pass this MonoBehaviour — orchestrator AddComponent's per-format adapters onto its GameObject
 _ads.Initialize();                  // privacy + MeticaSdk.Initialize live inside MeticaAdService
 // Delete the MaxSdkCallbacks.* subscriptions entirely — the per-format
 // objects (MeticaInterstitialAd, etc.) own those, including auto-reload.
@@ -527,8 +527,8 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
 
 **Files to generate** (under `$ADAPTER_FOLDER`, plus the bootstrap under `Assets/Scripts/`):
 
-1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (filenames: `MeticaBannerAd.cs.tmpl`, `MeticaInterstitialAd.cs.tmpl`, `MeticaRewardedAd.cs.tmpl`, `MeticaMRecAd.cs.tmpl`), apply the namespace transform from the rule above, and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. These own the format's callbacks (named methods, not lambdas — game can extend by adding lines), auto-reload-on-hidden (interstitial/rewarded), `IsReady`-guarded `Show()`, and **exponential-backoff retry on `OnAdLoadFailed`** (1→2→4→8s … capped at 64s) routed through the bootstrap MonoBehaviour passed as the `runner` constructor arg.
-2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — standalone (no `IAdService`). Privacy precedes `MeticaSdk.Initialize` **in this file**; fresh mode passes `null` mediation (no MAX). Construct the per-format objects in the init callback, threading the bootstrap MonoBehaviour as the runner. Expose `Show<Format>()` delegators. Substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim. Reference shape (mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
+1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (filenames: `MeticaBannerAd.cs.tmpl`, `MeticaInterstitialAd.cs.tmpl`, `MeticaRewardedAd.cs.tmpl`, `MeticaMRecAd.cs.tmpl`), apply the namespace transform from the rule above, and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. **All four are `MonoBehaviour`s** so Interstitial/Rewarded can host the docs.metica.com `Invoke(nameof(Load), …)` retry (Invoke is MonoBehaviour-only). They own the format's callbacks (named methods, not lambdas — game can extend by adding lines), auto-reload-on-hidden + `OnAdShowFailed`-recovery (interstitial/rewarded), `IsReady`-guarded `Show()`, and **exponential-backoff retry on `OnAdLoadFailed`** (`Math.Pow(2, Math.Min(6, attempt))` → 2→4→8…→64s) — interstitial/rewarded only. Banner and MRec have no app-side retry (SDK refreshes them internally) but carry `OnApplicationFocus` pause/resume and an `_isShowing` state flag.
+2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — standalone (no `IAdService`). Privacy precedes `MeticaSdk.Initialize` **in this file**; fresh mode passes `null` mediation (no MAX). In the init callback, `AddComponent` each per-format adapter onto the runner's `gameObject` and then call `Initialize(adUnitId)` on it — the adapter auto-loads inside `Initialize`. Expose `Show<Format>()` delegators. Substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim. Reference shape (mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
@@ -543,15 +543,19 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
            MeticaSdk.Ads.SetDoNotSell(false);
            var config = new MeticaInitConfig("<API_KEY_ESCAPED>", "<APP_ID_ESCAPED>", <USER_ID_EXPR>);
            MeticaSdk.Initialize(config, null, response => {
-               _interstitial = new MeticaInterstitialAd("interstitial_main", _runner); _interstitial.Load();
-               // … one constructor + Load() per format (banner/mrec: Create(); Load(); Show();)
+               // Per-format adapters are MonoBehaviours — AddComponent onto the runner's
+               // GameObject, then call Initialize(adUnitId) (auto-loads inside).
+               _interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>();
+               _interstitial.Initialize("interstitial_main");
+               // banner/mrec: also call .Create(position, placementTag) and .Show() after Initialize.
+               // … one AddComponent + Initialize per format in $FORMATS
            });
        }
        public void ShowInterstitial() { _interstitial?.Show(); }   // one delegator per format
    }
    }
    ```
-3. **Thin bootstrap `Assets/Scripts/MeticaBootstrap.cs`** — a MonoBehaviour that in `Start()` does `_ads = new MeticaAdService(this); _ads.Initialize();` (passes `this` so the per-format objects can host retry coroutines), and exposes `ShowInterstitial()`/`ShowRewarded()` for UI hookup. Add `using <NAMESPACE>;` when the namespace is non-empty.
+3. **Thin bootstrap `Assets/Scripts/MeticaBootstrap.cs`** — a MonoBehaviour that in `Start()` does `_ads = new MeticaAdService(this); _ads.Initialize();` (passes `this` so the orchestrator can `AddComponent` the per-format adapters onto this same GameObject), and exposes `ShowInterstitial()`/`ShowRewarded()` for UI hookup. Add `using <NAMESPACE>;` when the namespace is non-empty.
 
 **Hard correctness invariants** (validator-enforced):
 

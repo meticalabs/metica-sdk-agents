@@ -396,6 +396,13 @@ fi
 # (`new MeticaInitConfig { UserId = … }`) is NOT covered — the integrator
 # emits the positional form; if it ever switches, extend check-init-userid.awk.
 USERID_CHECK_AWK="$SCRIPT_DIR/lib/check-init-userid.awk"
+# Same self-test pattern as clean-cs.awk / strip-comments.awk above. Without
+# this, a missing/broken check-init-userid.awk silently makes USERID_HITS empty
+# (errors are redirected to /dev/null in the pipeline below) and the rule
+# falsely reports `user_id_not_test_value:PASS` on every project.
+[ -f "$USERID_CHECK_AWK" ]                                       || die_json "Missing helper: $USERID_CHECK_AWK"
+awk -v FNAME=/dev/null -f "$USERID_CHECK_AWK" </dev/null >/dev/null 2>&1 \
+                                                                 || die_json "check-init-userid.awk failed self-test (awk error or syntax issue)"
 USERID_HITS=""
 while IFS= read -r f; do
     # Run the file through strip-comments first, then through the userId checker.
@@ -417,24 +424,24 @@ else
 fi
 
 # 11. legacy_router_files_present — FAIL when the retired v0.4 router-stack
-# artifacts (IAdService.cs / MaxAdService.cs / AdServiceRouter.cs /
-# MeticaRolloutBinding.cs) are still present in the project after a v0.5.0
-# upgrade. Without this rule, a half-migrated project (new MeticaAdService +
-# stale router files) silently passes validation and ships with both code paths
-# active. Mirrors the integrator's Step 5 codegen tripwire so the same
-# guarantee holds on every CI re-validation, not just at codegen time.
+# artifacts are still present in the project after a v0.5.0 upgrade. We
+# identify the retired stack by **content**, not just filename — searching
+# for the two class names that are unique to our retired codegen
+# (`AdServiceRouter`, `MeticaRolloutBinding`) — so user-owned ad abstractions
+# named `IAdService.cs` are not falsely flagged. Mirrors the integrator's
+# Step 5 codegen tripwire so the same guarantee holds on every CI re-validation.
 LEGACY_HIT=""
 while IFS= read -r f; do
-    case "$(basename "$f")" in
-        IAdService.cs|MaxAdService.cs|AdServiceRouter.cs|MeticaRolloutBinding.cs)
-            LEGACY_HIT="$f"; break ;;
-    esac
+    # Match the canonical class declarations from the retired templates.
+    if clean_cs "$f" 2>/dev/null | grep -qE 'class[[:space:]]+(AdServiceRouter|MeticaRolloutBinding)\b'; then
+        LEGACY_HIT="$f"; break
+    fi
 done < "$CS_LIST"
 if [ -n "$LEGACY_HIT" ]; then
     add_check "legacy_router_files_present" "$LEGACY_HIT" "FAIL" \
-        "Retired router-stack file present (router stack was removed in v0.5.0). Delete IAdService.cs / MaxAdService.cs / AdServiceRouter.cs / MeticaRolloutBinding.cs and use the standalone MeticaAdService instead."
+        "Retired router-stack class declared (AdServiceRouter or MeticaRolloutBinding — both removed in v0.5.0). Delete the file and migrate to the standalone MeticaAdService."
 else
-    add_check "legacy_router_files_present" "" "PASS" "No retired router-stack files present."
+    add_check "legacy_router_files_present" "" "PASS" "No retired router-stack classes declared."
 fi
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
