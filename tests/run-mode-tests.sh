@@ -37,14 +37,14 @@ echo "== mode-detect golden eval =="
 assert_mode "s1-only (folder only)"          fresh         "$FIX/s1-only"
 assert_mode "s2-only (symbol only)"          fresh         "$FIX/s2-only"
 assert_mode "s3-only (manifest only)"        fresh         "$FIX/s3-only"
-assert_mode "s1+s2 (folder + symbol)"        side-by-side  "$FIX/s1-s2"
-assert_mode "s2+s3 (symbol + manifest)"      side-by-side  "$FIX/s2-s3"
+assert_mode "s1+s2 (folder + symbol)"        straight-swap  "$FIX/s1-s2"
+assert_mode "s2+s3 (symbol + manifest)"      straight-swap  "$FIX/s2-s3"
 assert_mode "stringlit (symbol in string)"   fresh         "$FIX/stringlit"
 
-# Real project: MaxSDK demo → side-by-side (all 3 signals)
+# Real project: MaxSDK demo → straight-swap (all 3 signals)
 REAL="$(cd "$SCRIPT_DIR/../../max-agent-test/DemoApp" 2>/dev/null && pwd)"
 if [ -d "$REAL" ]; then
-    assert_mode "real DemoApp"               side-by-side  "$REAL"
+    assert_mode "real DemoApp"               straight-swap  "$REAL"
 fi
 
 # Validator's good-fresh fixture (no Max) → fresh

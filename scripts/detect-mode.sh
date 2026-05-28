@@ -1,9 +1,10 @@
 #!/bin/bash
 # detect-mode.sh — decide whether MeticaSDK integration into a Unity project
-# should run in "fresh" mode (no existing ad SDK) or "side-by-side" mode
-# (MaxSDK already present, never modify Max code; add a MeticaAdapter beside it).
+# should run in "fresh" mode (no existing ad SDK) or "straight-swap" mode
+# (MaxSDK present; replace it in the game's direct call sites with MeticaSDK,
+# leaving any dedicated Max-wrapper file alone — see integrator.md Step 5).
 #
-# Multi-signal rule (two-of-three → side-by-side):
+# Multi-signal rule (two-of-three → straight-swap):
 #   S1: Assets/MaxSdk/ directory exists
 #   S2: a .cs file contains a MaxSdk.Initialize(... call (not in strings/comments)
 #   S3: an Android manifest contains the applovin namespace, OR an applovin
@@ -98,8 +99,8 @@ count=0
 [ "$S3" = true ] && count=$((count + 1))
 
 if [ "$count" -ge 2 ]; then
-    MODE="side-by-side"
-    REASON="$count of 3 signals present (>=2 → side-by-side)."
+    MODE="straight-swap"
+    REASON="$count of 3 signals present (>=2 → straight-swap)."
 else
     MODE="fresh"
     REASON="$count of 3 signals present (<2 → fresh)."
@@ -108,7 +109,7 @@ fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "mode-detect/1.0.0",\n'
+printf '  "schema": "mode-detect/2.0.0",\n'
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "signals": {\n'
 printf '    "maxsdk_folder":       { "present": %s, "location": "%s" },\n' "$S1" "$( [ "$S1" = true ] && printf '%s' 'Assets/MaxSdk/' )"

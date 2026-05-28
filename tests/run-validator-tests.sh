@@ -87,9 +87,6 @@ assert_case good-fresh                    "PASS" "fresh"        \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS" \
     "interstitial_reload_on_hidden:PASS"
 
-assert_case good-sidebyside               "PASS" "side-by-side" \
-    "init_count:PASS" "interstitial_reload_on_hidden:PASS"
-
 assert_case bad-no-init                   "FAIL" "fresh"        \
     "init_count:FAIL"
 
@@ -138,6 +135,22 @@ assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
 assert_case advisory-no-ready-guard       "PASS" "fresh"        \
     "interstitial_show_ready_guard:ADVISORY"
 
+# Credential-hygiene checks (validator/1.2.0 — reinstating what e42d709 removed).
+# Validator is an integration linter for human code, not just our codegen smoke
+# test, so these checks belong in the script — not just in the integrator report.
+assert_case bad-placeholder-key           "FAIL" "fresh"        \
+    "placeholder_ids_replaced:FAIL"
+
+assert_case bad-test-userid               "FAIL" "fresh"        \
+    "user_id_not_test_value:FAIL"
+
+assert_case bad-userid-multiline          "FAIL" "fresh"        \
+    "user_id_not_test_value:FAIL"
+
+# Commented-out test value must NOT trip the check (strip-comments.awk gates).
+assert_case good-commented-test-userid    "PASS" "fresh"        \
+    "placeholder_ids_replaced:PASS" "user_id_not_test_value:PASS"
+
 # New: straight-swap mode (Max present, no remote config). Validated with an
 # explicit --mode; no router is generated and the dropped ad_service_router_present
 # check must not appear.
@@ -167,8 +180,17 @@ else
 fi
 rm -rf "$nometica"
 
+# Deprecated alias: --mode=side-by-side maps to straight-swap (v0.3.x back-compat).
+# The router stack is no longer generated, so SBS and straight-swap validate identically.
+out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1) || true
+if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ]; then
+    printf "  ok    --mode=side-by-side alias maps to straight-swap\n"; pass=$((pass+1))
+else
+    printf "  FAIL  --mode=side-by-side alias unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+fi
+
 # Assert all-fixtures JSON parses (no syntax errors)
-for fx in good-fresh good-sidebyside bad-no-init bad-double-init bad-privacy-after-init \
+for fx in good-fresh bad-no-init bad-double-init bad-privacy-after-init \
           bad-no-interstitial-callback bad-load-no-show bad-no-reward-callback advisory-no-revenue \
           good-string-literal-mention good-block-comment-mention bad-cross-file-privacy; do
     out=$(bash "$VALIDATE" --project="$FIX/$fx" 2>&1) || true

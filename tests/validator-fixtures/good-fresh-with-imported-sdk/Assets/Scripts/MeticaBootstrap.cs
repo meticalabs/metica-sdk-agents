@@ -6,7 +6,7 @@ public class MeticaBootstrap : MonoBehaviour {
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial("inter");
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
-        MeticaSdk.Initialize(new MeticaInitConfig("K", "A", null), null, r => {});
+        MeticaSdk.Initialize(new MeticaInitConfig("K", "A", "u-abc-123"), null, r => {});
         MeticaSdk.Ads.LoadInterstitial("inter");
     }
     void Show() { MeticaSdk.Ads.ShowInterstitial("inter"); }

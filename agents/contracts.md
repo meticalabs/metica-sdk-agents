@@ -54,39 +54,33 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 ---
 
-## `mode-detect/1.0.0`
+## `mode-detect/2.0.0`
 
-Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose between fresh-mode and side-by-side codegen.
+Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose between fresh-mode and straight-swap codegen.
 
 **Allowed values:**
-- `mode`: `fresh`, `side-by-side`
+- `mode`: `fresh`, `straight-swap`
 - `signals[<id>].present`: boolean
 - `signals[<id>].location`: relative path (or `file:line`); empty when not present
 
-**Decision rule:** two-of-three signals present → `side-by-side`, else `fresh`.
+**Decision rule:** two-of-three Max signals present → `straight-swap`, else `fresh`. The script emits the **final mode label** directly — no integrator-side prose interpretation step. When `straight-swap` is selected, Step 2.5's remote-config detection runs in the integrator to drive the Step 7 cohort-gating recipe; it does NOT branch the generated artifacts.
 
-**Note — three-way integrator mode.** `mode-detect` reports only whether MaxSDK is present: `side-by-side` means "MaxSDK present", `fresh` means "no ad SDK". The integrator then sub-divides the `side-by-side` (Max-present) verdict using the remote-config provider detected in its Step 2.5 — a prose judgment, not a script output:
-
-| `mode-detect` | Remote-config provider | Integrator mode |
-|---|---|---|
-| `fresh` | — | `fresh` |
-| `side-by-side` | `none` | `straight-swap` (remove Max from app code, no router) |
-| `side-by-side` | `firebase`/`appmetrica`/`unity-remote-config` | `side-by-side` (full router stack) |
-
-`straight-swap` is therefore an integrator/validator mode, not a `mode-detect` output — the `mode-detect` schema is unchanged.
+**Changes in 2.0.0** (major — removed an enum value):
+- Renamed `side-by-side` → `straight-swap` (the router stack was retired in plugin v0.5.0; the only Max-present codegen path now is straight-swap, which is what the script emits directly).
+- No new fields, no new flags. The integrator no longer has to combine `mode-detect` output with a separate provider judgment — the v0.3.x three-way matrix collapsed.
 
 **Concrete example:**
 
 ```json
 {
-  "schema": "mode-detect/1.0.0",
-  "mode": "side-by-side",
+  "schema": "mode-detect/2.0.0",
+  "mode": "straight-swap",
   "signals": {
     "maxsdk_folder":      { "present": true,  "location": "Assets/MaxSdk/" },
     "maxsdk_init_symbol": { "present": true,  "location": "Assets/Scripts/HomeScreen.cs:60" },
     "applovin_manifest":  { "present": true,  "location": "Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" }
   },
-  "decision": "3 of 3 signals present (>=2 → side-by-side)."
+  "decision": "3 of 3 signals present (>=2 → straight-swap)."
 }
 ```
 
@@ -94,15 +88,15 @@ Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose betwee
 
 ## Max-callsite inventory (no JSON contract)
 
-The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5, side-by-side branch) for the canonical scan snippet.
+The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5, straight-swap branch) for the canonical scan snippet.
 
 ---
 
-## `validator/1.1.0`
+## `validator/1.2.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
-- `mode`: `fresh`, `straight-swap`, `side-by-side`, `unknown`
+- `mode`: `fresh`, `straight-swap`, `unknown`
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
@@ -111,20 +105,20 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 **Rules emitted** (see `scripts/validate-integration.sh` for exact conditions):
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`.
-- `privacy_before_init` — both privacy calls before `Initialize` (same-file in fresh/straight-swap; router-bootstrap in side-by-side).
+- `privacy_before_init` — both privacy calls before `Initialize` (same-file ordering in both modes).
 - `<format>_callbacks_subscribed` — for each used format, `OnAdLoadSuccess` + `OnAdLoadFailed` subscribed.
 - `rewarded_reward_callback` — when rewarded is used, `OnAdRewarded` subscribed.
 - `<format>_load_show_parity` — every Load has a matching Show.
-- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` *(added in 1.1.0)* — FAIL when the format is used but `OnAdHidden` is not subscribed.
-- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` *(added in 1.1.0)* — ADVISORY when `Show` is called without an `IsReady` check.
+- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL when the format is used but `OnAdHidden` is not subscribed.
+- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY when `Show` is called without an `IsReady` check.
 - `revenue_callback_subscribed` — ADVISORY.
+- `placeholder_ids_replaced` *(added in 1.2.0)* — FAIL when `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY` / `REPLACE_ME` literals appear in source (comments stripped via `scripts/lib/strip-comments.awk` to avoid false positives on README-style commented-out examples).
+- `user_id_not_test_value` *(added in 1.2.0)* — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string literal, or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
 
-Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is intentionally **not** in the validator's rule set — the integrator already knows which placeholders/userId it embedded into the files it generated and surfaces them as concrete reminders in its final report (`integrator.md` Step 7). Re-deriving the values from arbitrary user C# in a grep validator was costly for marginal value.
-
-**Changes in 1.1.0** (minor, backward-compatible — the orchestrator reads `.status` and iterates `.checks`):
-- Added the `straight-swap` mode value (Max present, no remote-config provider).
-- Added the lifecycle/`IsReady`-guard rules listed above.
-- **Removed** `ad_service_router_present`. Router presence is no longer a reliable signal: the `straight-swap` path intentionally has no router, and mode auto-detection cannot distinguish it from `side-by-side`. The check produced false FAILs; the router is required only when remote-config drives an A/B.
+**Changes in 1.2.0** (minor, backward-compatible):
+- Added `placeholder_ids_replaced` and `user_id_not_test_value` checks. These were briefly present in v0.2.x then removed in v0.3.0 (commit `e42d709`) on the rationale that the integrator already knew which placeholders it embedded. They are reinstated because the validator's role is to lint **any** MeticaSDK integration (hand-rolled code, post-edit drift, CI checks) — not just the integrator's fresh output — so the checks have to live in the validator regardless of what the integrator reports.
+- The side-by-side validation branch (router-bootstrap ordering) was removed alongside the v0.5.0 retirement of the router stack. Same-file privacy ordering is the universal rule now.
+- `--mode=side-by-side` is accepted as a deprecated alias for `--mode=straight-swap` for v0.3.x back-compat; the `mode` field in the output is `straight-swap` regardless of which alias was passed.
 
 **Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.
 
@@ -132,17 +126,17 @@ Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is intent
 
 ```json
 {
-  "schema": "validator/1.1.0",
+  "schema": "validator/1.2.0",
   "status": "FAIL",
-  "mode": "side-by-side",
+  "mode": "straight-swap",
   "error": null,
   "warnings": [],
   "checks": [
-    { "rule": "init_count",                     "location": "",                                      "level": "PASS",     "detail": "MeticaSdk.Initialize called exactly once." },
-    { "rule": "privacy_before_init",            "location": "Assets/Scripts/MeticaBootstrap.cs:42",  "level": "FAIL",     "detail": "SetHasUserConsent called after Initialize." },
-    { "rule": "rewarded_callbacks_subscribed",  "location": "Assets/Scripts/MeticaAdapter.cs",       "level": "PASS",     "detail": "" },
-    { "rule": "rewarded_reward_callback",       "location": "",                                      "level": "PASS",     "detail": "" },
-    { "rule": "revenue_callback_subscribed",    "location": "",                                      "level": "ADVISORY", "detail": "OnAdRevenuePaid not subscribed; attribution will be incomplete." }
+    { "rule": "init_count",                     "location": "Assets/Scripts/Metica/MeticaAdService.cs:14",  "level": "PASS",     "detail": "MeticaSdk.Initialize called exactly once." },
+    { "rule": "privacy_before_init",            "location": "Assets/Scripts/Metica/MeticaAdService.cs:14",  "level": "PASS",     "detail": "SetHasUserConsent and SetDoNotSell called before Initialize." },
+    { "rule": "interstitial_callbacks_subscribed", "location": "",                                          "level": "PASS",     "detail": "" },
+    { "rule": "placeholder_ids_replaced",       "location": "Assets/Scripts/Metica/MeticaAdService.cs:18",  "level": "FAIL",     "detail": "Placeholder credential leaked into source (YOUR_* / REPLACE_ME). Replace with real values before shipping." },
+    { "rule": "user_id_not_test_value",         "location": "Assets/Scripts/Metica/MeticaAdService.cs:14",  "level": "FAIL",     "detail": "MeticaInitConfig userId argument is a null value (null). Replace with your real user-identity source before shipping." }
   ]
 }
 ```
@@ -153,12 +147,13 @@ Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is intent
 
 The integrator does not emit JSON — it is the orchestrator. Its final message to the user includes:
 
-1. Mode used (`fresh` | `side-by-side`).
+1. Mode used (`fresh` | `straight-swap`).
 2. SDK version installed.
 3. Files created / edited (list).
 4. Compat-checker summary (one line).
 5. Validator summary (one line + `PASS`/`FAIL`).
 6. Rollback command (`git reset --hard pre-metica-integration`) when validator returned `FAIL`.
+7. (Straight-swap + remote-config provider detected) Cohort-gating recipe — see `agents/unity-integrator.md` Step 7.
 
 The `pre-metica-integration` git tag is created by the integrator before any file change (see integrator.md, workflow step 4).
 
@@ -174,4 +169,4 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 - Bump minor (`1.0.0` → `1.1.0`) when adding optional fields. Orchestrator must remain backward-compatible.
 - Bump major (`1.0.0` → `2.0.0`) when removing or renaming required fields. Orchestrator and producers update in lockstep.
-- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `validator/1.x`).
+- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `mode-detect/2.x`, `validator/1.x`).

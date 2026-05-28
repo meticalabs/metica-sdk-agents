@@ -1,9 +1,13 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.2.0 schema (see agents/contracts.md).
 #
-# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap|side-by-side]
+# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
+#
+# `--mode=side-by-side` is accepted as a deprecated alias for `straight-swap`
+# (kept for backward-compat with v0.3.x callers; the router stack is no longer
+# generated, so both modes validate identically).
 
 set -u
 set -o pipefail
@@ -34,7 +38,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.1.0",\n'
+    printf '  "schema": "validator/1.2.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -62,8 +66,12 @@ done
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
 case "$MODE" in
-    ""|fresh|straight-swap|side-by-side) ;;
-    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap, side-by-side)" ;;
+    ""|fresh|straight-swap) ;;
+    side-by-side)
+        # Deprecated alias kept for v0.3.x backward compat; the router stack is
+        # no longer generated, so SBS and straight-swap validate identically.
+        MODE="straight-swap" ;;
+    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap)" ;;
 esac
 
 # ---- discover C# sources ---------------------------------------------------
@@ -131,7 +139,6 @@ line_in_file() {
 
 HAS_MAX=0;    [ "$(count_lit 'MaxSdk.')"   != "0" ] && HAS_MAX=1
 HAS_METICA=0; [ "$(count_lit 'MeticaSdk.')" != "0" ] && HAS_METICA=1
-HAS_ROUTER=0; [ "$(count_lit 'AdServiceRouter')" != "0" ] && HAS_ROUTER=1
 
 # Refuse to validate if there are no MeticaSdk references at all — this is not
 # a Metica integration, just a Unity project. Emit a contract-shaped error.
@@ -140,18 +147,11 @@ if [ "$HAS_METICA" = "0" ]; then
 fi
 
 if [ -z "$MODE" ]; then
-    if [ "$HAS_ROUTER" = "1" ]; then
-        MODE="side-by-side"
-    elif [ "$HAS_MAX" = "1" ] && [ "$HAS_METICA" = "1" ]; then
-        # Max + Metica but no router → straight-swap (Max removed from app code,
-        # MeticaAdService called directly). Validated like fresh (same-file
-        # privacy ordering); routing it through the side-by-side router branch
-        # would skip privacy validation and false-PASS.
+    if [ "$HAS_MAX" = "1" ]; then
+        # Max + Metica → straight-swap (Max being removed from app code).
         MODE="straight-swap"
-    elif [ "$HAS_METICA" = "1" ]; then
-        MODE="fresh"
     else
-        MODE="unknown"
+        MODE="fresh"
     fi
 fi
 
@@ -176,53 +176,10 @@ case "$INIT_COUNT" in
     *) add_check "init_count" "$INIT_LOC" "FAIL" "MeticaSdk.Initialize called $INIT_COUNT times; expected exactly 1." ;;
 esac
 
-# 2. privacy_before_init:
-#    - In FRESH mode: validate same-file ordering of privacy calls before Initialize.
-#    - In SIDE-BY-SIDE mode: find bootstrap files (those that reference
-#      AdServiceRouter.Instance AND call .Initialize()) and verify line-ordering
-#      of .SetHasUserConsent + .SetDoNotSell before .Initialize. If no bootstrap
-#      file exists yet, ADVISORY (codegen just landed; user hasn't written the
-#      bootstrap call sites).
+# 2. privacy_before_init: validate same-file ordering of privacy calls before
+# Initialize. Both modes (fresh / straight-swap) require this — same logic.
 INIT_FILE="${INIT_LOC%:*}"
-if [ "$MODE" = "side-by-side" ]; then
-    # Files using the router instance — these are bootstrap-style callsites.
-    ROUTER_FILES=$(files_with 'AdServiceRouter.Instance')
-    BOOTSTRAP_HIT=""
-    BOOTSTRAP_BAD=""
-    BOOTSTRAP_BAD_REASON=""
-    if [ -n "$ROUTER_FILES" ]; then
-        while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            # Bootstrap = file with both AdServiceRouter.Instance and a .Initialize( call.
-            if ! clean_cs "$f" | grep -qF -- '.Initialize('; then continue; fi
-            BOOTSTRAP_HIT=1
-            init_l=$(clean_cs "$f" | grep -nF -- '.Initialize(' | head -1 | awk -F: '{print $1}')
-            consent_l=$(clean_cs "$f" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
-            dns_l=$(clean_cs "$f" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
-            if [ -z "$consent_l" ] || [ -z "$dns_l" ]; then
-                BOOTSTRAP_BAD="$f"
-                BOOTSTRAP_BAD_REASON="missing SetHasUserConsent or SetDoNotSell"
-                break
-            fi
-            if [ "$consent_l" -ge "$init_l" ] || [ "$dns_l" -ge "$init_l" ]; then
-                BOOTSTRAP_BAD="$f"
-                BOOTSTRAP_BAD_REASON="SetHasUserConsent/SetDoNotSell must precede .Initialize"
-                break
-            fi
-        done <<< "$ROUTER_FILES"
-    fi
-
-    if [ -z "$BOOTSTRAP_HIT" ]; then
-        add_check "privacy_before_init" "" "ADVISORY" \
-            "No bootstrap file found yet (AdServiceRouter.Instance + .Initialize). When you write the bootstrap, call SetHasUserConsent and SetDoNotSell before Initialize."
-    elif [ -n "$BOOTSTRAP_BAD" ]; then
-        add_check "privacy_before_init" "$BOOTSTRAP_BAD" "FAIL" \
-            "Side-by-side bootstrap: $BOOTSTRAP_BAD_REASON."
-    else
-        add_check "privacy_before_init" "" "PASS" \
-            "Side-by-side bootstrap: privacy calls precede .Initialize."
-    fi
-elif [ -n "$INIT_FILE" ]; then
+if [ -n "$INIT_FILE" ]; then
     INIT_LINE="$(line_in_file 'MeticaSdk.Initialize(' "$INIT_FILE")"
     # Privacy calls may be in same file or another; check both files-set + line order when in-file.
     CONSENT_FILES="$(files_with 'SetHasUserConsent(')"
@@ -363,12 +320,58 @@ else
     add_check "revenue_callback_subscribed" "" "PASS" "Revenue callback subscribed."
 fi
 
-# Credential hygiene (placeholder keys, test user IDs) is intentionally NOT
-# scripted: the integrator generates these files itself and already knows
-# which placeholders/userId it embedded. It surfaces them as concrete reminders
-# in the final report (integrator.md Step 7). Re-deriving the values from
-# arbitrary C# in a grep validator forced a comment-stripping awk + an arg
-# parser for marginal value; deleted in favour of integrator-side reporting.
+# 9. placeholder_ids_replaced — fail if YOUR_*/REPLACE_ME placeholders leaked
+# into source. Comments are stripped via strip-comments.awk so leftover docs
+# referencing the placeholder names (e.g. in a README-style comment block)
+# don't false-positive; string literal contents are preserved so an actual
+# `"YOUR_METICA_API_KEY"` value in code is caught.
+STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
+PLACEHOLDER_PATTERN='YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY|REPLACE_ME'
+PLACEHOLDER_HITS=""
+while IFS= read -r f; do
+    hit="$(awk -f "$STRIP_COMMENTS_AWK" "$f" 2>/dev/null \
+            | grep -nE "$PLACEHOLDER_PATTERN" \
+            | head -1 \
+            | awk -F: '{ print $1 }')"
+    if [ -n "$hit" ]; then
+        PLACEHOLDER_HITS="$f:$hit"
+        break
+    fi
+done < "$CS_LIST"
+if [ -n "$PLACEHOLDER_HITS" ]; then
+    add_check "placeholder_ids_replaced" "$PLACEHOLDER_HITS" "FAIL" \
+        "Placeholder credential leaked into source (YOUR_* / REPLACE_ME). Replace with real values before shipping."
+else
+    add_check "placeholder_ids_replaced" "" "PASS" "No YOUR_*/REPLACE_ME placeholders found."
+fi
+
+# 10. user_id_not_test_value — fail if the userId arg passed to
+# MeticaInitConfig(api, app, userId) is null, empty string, or a test/debug/
+# dummy/placeholder literal, or a digits-only string. Handles multi-line
+# constructor calls via the awk parser. Object-initializer form
+# (`new MeticaInitConfig { UserId = … }`) is NOT covered — the integrator
+# emits the positional form; if it ever switches, extend check-init-userid.awk.
+USERID_CHECK_AWK="$SCRIPT_DIR/lib/check-init-userid.awk"
+USERID_HITS=""
+while IFS= read -r f; do
+    # Run the file through strip-comments first, then through the userId checker.
+    out="$(awk -f "$STRIP_COMMENTS_AWK" "$f" 2>/dev/null \
+            | awk -v FNAME="$f" -f "$USERID_CHECK_AWK" 2>/dev/null)"
+    if [ -n "$out" ]; then
+        USERID_HITS="$out"
+        break
+    fi
+done < "$CS_LIST"
+if [ -n "$USERID_HITS" ]; then
+    # USERID_HITS format: <file>:<line>:<reason>:<value>
+    HIT_FILE_LINE="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ print $1 ":" $2 }')"
+    HIT_REASON="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ print $3 }')"
+    HIT_VALUE="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ for (i=4;i<NF;i++) printf "%s:", $i; print $NF }')"
+    add_check "user_id_not_test_value" "$HIT_FILE_LINE" "FAIL" \
+        "MeticaInitConfig userId argument is a $HIT_REASON value ($HIT_VALUE). Replace with your real user-identity source before shipping."
+else
+    add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
+fi
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
@@ -376,18 +379,6 @@ fi
 #                                   format is still showing. Needs call-graph/scope awareness to detect
 #                                   without false positives; deferred until a reliable heuristic exists.
 #   - banner_create_before_load:    CreateBanner precedes LoadBanner/ShowBanner
-# Side-by-side mode additional rules:
-#   - single_init_per_session:      MaxSdk.InitializeSdk gated by router; not called unconditionally
-#   - iadservice_interface_present: an IAdService (or equivalent) interface exists
-#   - max_adapter_present:          a MaxAdService (or equivalent) wraps Max calls
-#   - metica_adapter_present:       a MeticaAdService (or equivalent) wraps Metica calls
-#   - max_callsites_routed:         game code uses AdServiceRouter.Instance.AdService.* not MaxSdk.* directly
-#
-# REMOVED: ad_service_router_present — router presence is no longer a reliable
-# signal. With the three-way matrix (fresh / straight-swap / side-by-side), the
-# straight-swap path intentionally has no router, and mode auto-detection cannot
-# distinguish straight-swap from side-by-side. The check produced false FAILs, so
-# it was dropped; the router is only generated when remote-config drives an A/B.
 
 # ---- determine status ------------------------------------------------------
 
@@ -398,7 +389,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.1.0",\n'
+printf '  "schema": "validator/1.2.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'
