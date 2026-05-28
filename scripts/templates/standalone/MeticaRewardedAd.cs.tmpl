@@ -26,6 +26,7 @@ public class MeticaRewardedAd
         MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess += OnLoadSuccess;
         MeticaAdsCallbacks.Rewarded.OnAdLoadFailed  += OnLoadFailed;
         MeticaAdsCallbacks.Rewarded.OnAdShowSuccess += OnShowSuccess;
+        MeticaAdsCallbacks.Rewarded.OnAdShowFailed  += OnShowFailed;
         MeticaAdsCallbacks.Rewarded.OnAdHidden      += OnHidden;
         MeticaAdsCallbacks.Rewarded.OnAdClicked     += OnClicked;
         MeticaAdsCallbacks.Rewarded.OnAdRewarded    += OnRewarded;
@@ -60,6 +61,14 @@ public class MeticaRewardedAd
     }
 
     private void OnShowSuccess(MeticaAd ad)   { Debug.Log("[Metica] rewarded displayed"); }
+    private void OnShowFailed(MeticaAd ad, MeticaAdError err)
+    {
+        Debug.LogError($"[Metica] rewarded show failed: {err.message}");
+        // Show-failed fires when a loaded ad fails to display (expiry / network blip).
+        // OnAdHidden does NOT fire on show-failure, so the canonical reload-on-hidden
+        // loop would stall without this. Reload to keep the loop alive.
+        Load();
+    }
     // Auto-reload: load the next rewarded as soon as the current one is dismissed.
     private void OnHidden(MeticaAd ad)        { Load(); }
     private void OnClicked(MeticaAd ad)       { Debug.Log("[Metica] rewarded clicked"); }

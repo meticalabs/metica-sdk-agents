@@ -82,7 +82,7 @@ emit_standalone() {
 
     # Mediation: fresh = none; straight-swap = MAX (Metica mediates via AppLovin).
     local mediation='null'
-    [ "$mode" = "straight-swap" ] && mediation='new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "MAXKEY99")'
+    [ "$mode" = "straight-swap" ] && mediation='new MeticaMediationInfo(MeticaMediationType.MAX, "MAXKEY99")'
 
     # Orchestrator: privacy precedes Initialize in this same file; constructs the
     # per-format objects in the init callback; exposes Show* delegators.

@@ -4,6 +4,7 @@ public class MeticaBootstrap : MonoBehaviour {
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("loaded");
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.LogWarning("failed");
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial("inter");
+        MeticaAdsCallbacks.Interstitial.OnAdShowFailed += (ad, err) => MeticaSdk.Ads.LoadInterstitial("inter");
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
         MeticaSdk.Initialize(new MeticaInitConfig("K", "A", "u-abc-123"), null, r => {});

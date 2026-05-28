@@ -1,6 +1,6 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.3.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.4.0 schema (see agents/contracts.md).
 #
 # Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -38,7 +38,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.3.0",\n'
+    printf '  "schema": "validator/1.4.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -319,6 +319,25 @@ check_reload_on_hidden() {
 check_reload_on_hidden "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaAdsCallbacks.Interstitial.OnAdHidden"
 check_reload_on_hidden "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaAdsCallbacks.Rewarded.OnAdHidden"
 
+# 7b2. show_failed_subscribed: interstitial/rewarded must subscribe OnAdShowFailed
+# so the reload loop survives a failed-to-display ad. OnAdHidden does NOT fire on
+# show-failure, so the reload-on-hidden loop alone is incomplete — without this
+# subscription, the next ad never loads after a single show-failure (network
+# blip, expired ad, mediated SDK failure). Per the docs.metica.com Unity SDK
+# example, both Interstitial and Rewarded subscribe OnAdShowFailed.
+check_show_failed_subscribed() {
+    local fmt="$1" load_pat="$2" show_failed_pat="$3"
+    local rule="${fmt}_show_failed_subscribed"
+    [ "$(count_lit "$load_pat")" = "0" ] && return
+    if [ "$(count_lit "$show_failed_pat")" = "0" ]; then
+        add_check "$rule" "" "FAIL" "$fmt used but $show_failed_pat not subscribed; show-failure does not fire OnAdHidden, so the reload loop stalls. Subscribe and reload from this handler."
+    else
+        add_check "$rule" "" "PASS" "$fmt OnAdShowFailed subscribed."
+    fi
+}
+check_show_failed_subscribed "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaAdsCallbacks.Interstitial.OnAdShowFailed"
+check_show_failed_subscribed "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaAdsCallbacks.Rewarded.OnAdShowFailed"
+
 # 7c. show_ready_guard (ADVISORY): when an interstitial/rewarded Show is called,
 # an IsReady check should exist so Show() never fires on a not-loaded ad.
 check_ready_guard() {
@@ -434,7 +453,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.3.0",\n'
+printf '  "schema": "validator/1.4.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'

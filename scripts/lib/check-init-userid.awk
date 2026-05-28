@@ -98,7 +98,7 @@ function is_identifier_start(line, p,    prev) {
     while (pos <= length($0)) {
         if (!collecting) {
             rest = substr($0, pos)
-            idx = index(rest, "MeticaInitConfig(")
+            idx = index(rest, "MeticaInitConfig")
             if (idx == 0) break
             # absolute column where the 'M' starts in the original line
             mpos = pos + idx - 1
@@ -107,7 +107,18 @@ function is_identifier_start(line, p,    prev) {
                 pos = mpos + 1
                 continue
             }
-            pos = mpos + length("MeticaInitConfig(")
+            # `MeticaInitConfig` must be followed (after optional whitespace) by `(`
+            # — `new MeticaInitConfig (x, y, z)` and `new MeticaInitConfig(x, y, z)`
+            # are both valid C# constructor calls. `MeticaInitConfig` followed by
+            # anything else (e.g. `MeticaInitConfig.Default`, `MeticaInitConfig {`)
+            # is not a positional constructor; skip past and keep looking.
+            ppos = mpos + length("MeticaInitConfig")
+            while (ppos <= length($0) && substr($0, ppos, 1) ~ /[[:space:]]/) ppos++
+            if (ppos > length($0) || substr($0, ppos, 1) != "(") {
+                pos = mpos + 1
+                continue
+            }
+            pos = ppos + 1   # advance past the `(`
             collecting = 1
             depth = 1
             buf = ""

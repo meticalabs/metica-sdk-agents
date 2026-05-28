@@ -395,7 +395,7 @@ _ads.Initialize();                  // privacy + MeticaSdk.Initialize live insid
 **Method calls (receiver swap + casing/name remap per references/max-vs-metica-2.4.0-api.md):**
 
 ```csharp
-MaxSdk.LoadInterstitial(adUnitId)        →  _ads.ShowInterstitial(placement, customData)  // load is automatic
+MaxSdk.LoadInterstitial(adUnitId)        →  drop — load is automatic (init + reload-on-hidden own it)
 MaxSdk.IsInterstitialReady(adUnitId)     →  drop — Show() guards internally
 MaxSdk.ShowInterstitial(adUnitId, p, c)  →  _ads.ShowInterstitial(p, c)
 MaxSdk.LoadRewardedAd(adUnitId)          →  drop — load is automatic
@@ -404,6 +404,8 @@ MaxSdk.ShowRewardedAd(adUnitId, p, c)    →  _ads.ShowRewarded(p, c)
 MaxSdk.CreateBanner / LoadBanner / ShowBanner / HideBanner / DestroyBanner → _ads.*Banner
 MaxSdk.CreateMRec / LoadMRec / ShowMRec / HideMRec / DestroyMRec           → _ads.*Mrec  // note casing: MRec → Mrec
 ```
+
+**Critical**: do NOT rewrite `MaxSdk.LoadInterstitial(id)` to `_ads.ShowInterstitial(...)` — that changes behavior. `LoadInterstitial` is a preload (no display); `_ads.ShowInterstitial(...)` displays an ad. Games typically call `LoadInterstitial` at level-start to preload and `ShowInterstitial` at level-end to display — rewriting Load → Show would display the ad at level-start. The correct mapping is to **drop** the explicit Load call entirely: the per-format adapter auto-loads in the init callback and again on every `OnAdHidden` / `OnAdShowFailed`, so explicit Load calls are redundant.
 
 Reuse the game's existing Max ad unit IDs when constructing the per-format objects (per the migration guide; they pass through unchanged).
 
@@ -465,7 +467,7 @@ Then generate:
 
 1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (note: `mrec` maps to `MeticaMRecAd.cs.tmpl`), apply the namespace transform (see below), and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. Construct each per-format object from the orchestrator using the **game's existing Max ad unit ID** for that format (reuse — per the migration guide they pass through unchanged). Pass the bootstrap MonoBehaviour as the `runner` argument so the per-format object can host its exp-backoff retry coroutine.
 
-2. **Orchestrator `MeticaAdService.cs`** — privacy (`SetHasUserConsent`/`SetDoNotSell`) **immediately precedes** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<MAX_KEY_ESC>"), …)` in this same file. Construct the per-format objects in the init callback. Expose `Show<Format>()` delegators. Include only the formats in `$FORMATS`.
+2. **Orchestrator `MeticaAdService.cs`** — privacy (`SetHasUserConsent`/`SetDoNotSell`) **immediately precedes** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationType.MAX, "<MAX_KEY_ESC>"), …)` in this same file (note: `MeticaMediationType` is a **top-level** enum in `Metica.Ads`, not nested under `MeticaMediationInfo` — see the docs.metica.com Unity SDK example). Construct the per-format objects in the init callback. Expose `Show<Format>()` delegators. Include only the formats in `$FORMATS`.
 
 3. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (the per-format objects own them).
 

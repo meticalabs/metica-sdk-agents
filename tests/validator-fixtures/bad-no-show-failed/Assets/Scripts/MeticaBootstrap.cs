@@ -1,5 +1,10 @@
 using UnityEngine;
 
+// Fixture: interstitial integration that subscribes the canonical reload-on-hidden
+// loop but NOT OnAdShowFailed. Without OnAdShowFailed, a single show-failure
+// (network blip, ad expired, mediated SDK failure) stalls the loop — OnAdHidden
+// does not fire, so the next ad is never loaded.
+
 public class MeticaBootstrap : MonoBehaviour
 {
     void Start()
@@ -7,19 +12,12 @@ public class MeticaBootstrap : MonoBehaviour
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("loaded");
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial("inter_main");
-        MeticaAdsCallbacks.Interstitial.OnAdShowFailed += (ad, err) => MeticaSdk.Ads.LoadInterstitial("inter_main");
+        // BUG: OnAdShowFailed not subscribed — the reload loop stalls on show-failure.
 
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
 
-        // Old debugging line — commented out, must NOT trigger user_id_not_test_value:
-        // MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", "test"), null, r => {});
-
-        /* Block comment with a placeholder reference:
-           MeticaSdk.Initialize(new MeticaInitConfig("YOUR_METICA_API_KEY", "...", null), ...);
-           Must NOT trigger placeholder_ids_replaced either. */
-
-        MeticaSdk.Initialize(new MeticaInitConfig("real-key", "real-app", "u-abc-123"), null, response => {});
+        MeticaSdk.Initialize(new MeticaInitConfig("real-api", "real-app", "u-abc-123"), null, response => {});
 
         MeticaSdk.Ads.LoadInterstitial("inter_main");
     }

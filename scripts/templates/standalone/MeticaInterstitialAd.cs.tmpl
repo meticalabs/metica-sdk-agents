@@ -27,6 +27,7 @@ public class MeticaInterstitialAd
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += OnLoadSuccess;
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed  += OnLoadFailed;
         MeticaAdsCallbacks.Interstitial.OnAdShowSuccess += OnShowSuccess;
+        MeticaAdsCallbacks.Interstitial.OnAdShowFailed  += OnShowFailed;
         MeticaAdsCallbacks.Interstitial.OnAdHidden      += OnHidden;
         MeticaAdsCallbacks.Interstitial.OnAdClicked     += OnClicked;
         MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += OnRevenuePaid;
@@ -60,6 +61,14 @@ public class MeticaInterstitialAd
     }
 
     private void OnShowSuccess(MeticaAd ad)   { Debug.Log("[Metica] interstitial displayed"); }
+    private void OnShowFailed(MeticaAd ad, MeticaAdError err)
+    {
+        Debug.LogError($"[Metica] interstitial show failed: {err.message}");
+        // Show-failed fires when a loaded ad fails to display (expiry / network blip).
+        // OnAdHidden does NOT fire on show-failure, so the canonical reload-on-hidden
+        // loop would stall without this. Reload to keep the loop alive.
+        Load();
+    }
     // Auto-reload: load the next interstitial as soon as the current one is dismissed.
     private void OnHidden(MeticaAd ad)        { Load(); }
     private void OnClicked(MeticaAd ad)       { Debug.Log("[Metica] interstitial clicked"); }

@@ -131,6 +131,11 @@ assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
 
+# New (1.4.0): interstitial without OnAdShowFailed FAILs — show-failure does not
+# fire OnAdHidden, so the reload loop alone is incomplete.
+assert_case bad-no-show-failed            "FAIL" "fresh"        \
+    "interstitial_show_failed_subscribed:FAIL"
+
 # New: Show without an IsReady guard → ADVISORY, still overall PASS.
 assert_case advisory-no-ready-guard       "PASS" "fresh"        \
     "interstitial_show_ready_guard:ADVISORY"

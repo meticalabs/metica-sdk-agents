@@ -92,7 +92,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.3.0`
+## `validator/1.4.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
@@ -117,6 +117,11 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string (matched as a delimited word — `-`/`_` boundaries or quote anchors — so legitimate ids like `"contest-user-42"` or `"latest-build"` do not false-positive), or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. The check's outer collector is string-aware, so a test value containing `(` or `)` (`"test)hacker"`) cannot bypass the check. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
 - `legacy_router_files_present` *(added in 1.3.0)* — FAIL when any retired v0.4 router-stack artifact (`IAdService.cs` / `MaxAdService.cs` / `AdServiceRouter.cs` / `MeticaRolloutBinding.cs`) is still present in the project. Catches half-migrated upgrades that the integrator's codegen tripwire (`unity-integrator.md` Step 5) only checks at write-time. Mirrors the same filename list so the two stay in lockstep.
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` *(added in 1.3.0)* — same shape as the banner/interstitial/rewarded rules. The new MRec template shipped without validator coverage in 1.2.0 (broken MRec integrations silently passed); 1.3.0 closes that gap. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
+- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` *(added in 1.4.0)* — FAIL when the format is used but `OnAdShowFailed` is not subscribed. Per the docs.metica.com Unity SDK example, both Interstitial and Rewarded subscribe `OnAdShowFailed` (signature `Action<MeticaAd, MeticaAdError>`). Without it the canonical reload-on-hidden loop stalls on the first show-failure: `OnAdHidden` does NOT fire after a show-fail, so the next ad is never loaded.
+
+**Changes in 1.4.0** (minor, backward-compatible):
+- Added `interstitial_show_failed_subscribed` and `rewarded_show_failed_subscribed` rules. The previous templates were missing the `OnAdShowFailed` subscription that the docs.metica.com Unity SDK example shows for both formats.
+- `check-init-userid.awk` now tolerates whitespace (space, tab) between the `MeticaInitConfig` identifier and its `(` — `new MeticaInitConfig ("k","a",null)` is valid C# and was previously bypassed by the parser's exact-substring match. The check is also stricter: `MeticaInitConfig.Default` and similar non-constructor references no longer start the accumulator.
 
 **Changes in 1.3.0** (minor, backward-compatible):
 - Added `legacy_router_files_present`, `mrec_callbacks_subscribed`, `mrec_load_show_parity` rules.
@@ -141,7 +146,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ```json
 {
-  "schema": "validator/1.3.0",
+  "schema": "validator/1.4.0",
   "status": "FAIL",
   "mode": "straight-swap",
   "error": null,

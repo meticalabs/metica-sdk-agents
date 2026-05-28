@@ -12,6 +12,7 @@ public class MeticaInterstitialAd
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.LogWarning("[Metica] interstitial failed");
         MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("[Metica] interstitial revenue");
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => Load();
+        MeticaAdsCallbacks.Interstitial.OnAdShowFailed += (ad, err) => Load();
     }
 
     public void Load() { MeticaSdk.Ads.LoadInterstitial(_adUnitId); }
