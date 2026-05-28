@@ -712,13 +712,15 @@ Then the standard summary (mode, SDK version, files changed, compat-checker one-
 
 #### Credential hygiene (always — concrete, in the integrator)
 
-The validator does **not** check credential values (it would need a full C# parser, and the integrator already knows what it embedded). The integrator runs this scan over the files it just wrote and surfaces the result in every report:
+The validator does **not** check credential values (it would need a full C# parser, and the integrator already knows what it embedded). The integrator runs this scan over the files it just wrote and surfaces the result in every report. `nullglob` ensures an empty adapter folder collapses to no args instead of passing a literal glob to `grep`; the trailing `2>/dev/null || true` swallows the still-missing `MeticaBootstrap.cs` in non-fresh modes:
 
 ```bash
-# Replace placeholders + the bootstrap path with the values resolved in Steps 2.5 / 5.
+# Replace the bootstrap path with the actual location resolved in Step 5.
+shopt -s nullglob
 grep -nE 'YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY' \
     "$PROJECT/$ADAPTER_FOLDER"/*.cs \
     "$PROJECT/Assets/Scripts/MeticaBootstrap.cs" 2>/dev/null || true
+shopt -u nullglob
 ```
 
 - For each hit, render one bullet in the report: `<file>:<line>  <placeholder>  — replace with your real <kind> before shipping.`

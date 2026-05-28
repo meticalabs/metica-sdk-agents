@@ -393,6 +393,44 @@ else
 fi
 rm -rf "$p"
 
+# 8/9. integrator Step 7 credential-hygiene grep (documented prose). Asserts
+# the snippet in agents/unity-integrator.md actually locates YOUR_* placeholders
+# in the files the integrator writes, and produces zero matches on a clean run.
+# Mirrors the snippet verbatim — if anyone edits one and not the other, this fails.
+step7_grep() {
+    local proj="$1" out
+    shopt -s nullglob
+    out=$(grep -nE 'YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY' \
+        "$proj/Assets/Scripts/Metica"/*.cs \
+        "$proj/Assets/Scripts/MeticaBootstrap.cs" 2>/dev/null || true)
+    shopt -u nullglob
+    printf '%s' "$out"
+}
+
+# 8. unsubstituted placeholder → grep locates it.
+p="$(make_fresh_project)"
+emit_standalone "$p" "Metica.AbTest" "interstitial" "YOUR_METICA_API_KEY" "real-app-id" "fresh"
+if printf '%s' "$(step7_grep "$p")" | grep -q 'YOUR_METICA_API_KEY'; then
+    echo "  PASS  step 7 grep locates YOUR_* placeholder"
+    pass=$((pass+1))
+else
+    echo "  FAIL  step 7 grep did not locate YOUR_METICA_API_KEY in generated files"
+    fail=$((fail+1))
+fi
+rm -rf "$p"
+
+# 9. real keys substituted → grep is silent.
+p="$(make_fresh_project)"
+emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" "fresh"
+if [ -z "$(step7_grep "$p")" ]; then
+    echo "  PASS  step 7 grep emits no placeholders on a clean run"
+    pass=$((pass+1))
+else
+    echo "  FAIL  step 7 grep matched on a clean run: $(step7_grep "$p")"
+    fail=$((fail+1))
+fi
+rm -rf "$p"
+
 echo
 echo "Pass: $pass   Fail: $fail"
 [ "$fail" = "0" ] || exit 1

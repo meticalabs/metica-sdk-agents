@@ -190,25 +190,27 @@ if [ "$MODE" = "side-by-side" ]; then
     BOOTSTRAP_HIT=""
     BOOTSTRAP_BAD=""
     BOOTSTRAP_BAD_REASON=""
-    while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        # Bootstrap = file with both AdServiceRouter.Instance and a .Initialize( call.
-        if ! clean_cs "$f" | grep -qF -- '.Initialize('; then continue; fi
-        BOOTSTRAP_HIT=1
-        init_l=$(clean_cs "$f" | grep -nF -- '.Initialize(' | head -1 | awk -F: '{print $1}')
-        consent_l=$(clean_cs "$f" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
-        dns_l=$(clean_cs "$f" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
-        if [ -z "$consent_l" ] || [ -z "$dns_l" ]; then
-            BOOTSTRAP_BAD="$f"
-            BOOTSTRAP_BAD_REASON="missing SetHasUserConsent or SetDoNotSell"
-            break
-        fi
-        if [ "$consent_l" -ge "$init_l" ] || [ "$dns_l" -ge "$init_l" ]; then
-            BOOTSTRAP_BAD="$f"
-            BOOTSTRAP_BAD_REASON="SetHasUserConsent/SetDoNotSell must precede .Initialize"
-            break
-        fi
-    done <<< "$ROUTER_FILES"
+    if [ -n "$ROUTER_FILES" ]; then
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            # Bootstrap = file with both AdServiceRouter.Instance and a .Initialize( call.
+            if ! clean_cs "$f" | grep -qF -- '.Initialize('; then continue; fi
+            BOOTSTRAP_HIT=1
+            init_l=$(clean_cs "$f" | grep -nF -- '.Initialize(' | head -1 | awk -F: '{print $1}')
+            consent_l=$(clean_cs "$f" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
+            dns_l=$(clean_cs "$f" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
+            if [ -z "$consent_l" ] || [ -z "$dns_l" ]; then
+                BOOTSTRAP_BAD="$f"
+                BOOTSTRAP_BAD_REASON="missing SetHasUserConsent or SetDoNotSell"
+                break
+            fi
+            if [ "$consent_l" -ge "$init_l" ] || [ "$dns_l" -ge "$init_l" ]; then
+                BOOTSTRAP_BAD="$f"
+                BOOTSTRAP_BAD_REASON="SetHasUserConsent/SetDoNotSell must precede .Initialize"
+                break
+            fi
+        done <<< "$ROUTER_FILES"
+    fi
 
     if [ -z "$BOOTSTRAP_HIT" ]; then
         add_check "privacy_before_init" "" "ADVISORY" \
