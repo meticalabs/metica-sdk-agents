@@ -31,13 +31,20 @@ Optional (all auto-detected or placeholdered when omitted):
 Resolve the plugin root automatically; do **not** ask the user for it. The first bash command of every run is:
 
 ```bash
-PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
-    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null \
-    || bash "$(pwd)/.claude/agents/../../scripts/resolve-plugin-dir.sh" 2>/dev/null)"
+PLUGIN_DIR=""
+for cand in "${CLAUDE_PLUGIN_ROOT:-}" "${METICA_SDK_AGENTS_DIR:-}" \
+            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
+            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ \
+            "$HOME/.claude/plugins/marketplaces/metica-sdk-agents" \
+            "$HOME/.claude/plugins/metica-sdk-agents" \
+            "$HOME/.metica-sdk-agents" "$HOME/dev/metica-sdk-agents"; do
+    [ -n "$cand" ] && [ -f "$cand/scripts/resolve-plugin-dir.sh" ] || continue
+    PLUGIN_DIR="$(bash "$cand/scripts/resolve-plugin-dir.sh" 2>/dev/null)" && [ -n "$PLUGIN_DIR" ] && break
+done
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Reinstall with the marketplace install (preferred) or set METICA_SDK_AGENTS_DIR." >&2; exit 1; }
 ```
 
-`scripts/resolve-plugin-dir.sh` checks `$CLAUDE_PLUGIN_ROOT` (set by Claude Code for marketplace-installed plugins), `$METICA_SDK_AGENTS_DIR`, symlink targets under `.claude/agents/`, and known install paths. If it fails, abort — do not run scripts with relative paths.
+The loop searches known install locations for `resolve-plugin-dir.sh`, then runs it. The marketplace cache lives at `~/.claude/plugins/cache/*/metica-sdk-agents/<version>`, so the loop first tries the **version-sorted newest** cached copy (`ls … | sort -V | tail -1`) and keeps the raw cache glob as a fallback for hosts whose `sort` lacks `-V`. `$CLAUDE_PLUGIN_ROOT` is **not** reliably exported into an agent's bash environment, so it is only the first candidate, not the sole path. Once found, `resolve-plugin-dir.sh` self-verifies the root (it self-locates from its own script path, then falls back to `$METICA_SDK_AGENTS_DIR`, symlink targets, and known install paths). If the loop fails, abort — do not run scripts with relative paths.
 
 ## Setup — resolve `PROJECT`
 
