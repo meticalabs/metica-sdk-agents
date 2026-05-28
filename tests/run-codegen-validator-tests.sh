@@ -107,10 +107,13 @@ emit_standalone() {
         printf '        var config = new MeticaInitConfig("%s", "%s", %s);\n' "$api" "$app" "$userid"
         printf '        MeticaSdk.Initialize(config, %s, response =>\n' "$mediation"
         echo '        {'
-        [ "$has_banner" = 1 ] && echo '            _banner = new MeticaBannerAd("banner_main", _runner); _banner.Create(); _banner.Load(); _banner.Show();'
-        [ "$has_inter"  = 1 ] && echo '            _interstitial = new MeticaInterstitialAd("interstitial_main", _runner); _interstitial.Load();'
-        [ "$has_rew"    = 1 ] && echo '            _rewarded = new MeticaRewardedAd("rewarded_main", _runner); _rewarded.Load();'
-        [ "$has_mrec"   = 1 ] && echo '            _mrec = new MeticaMRecAd("mrec_main", _runner); _mrec.Create(); _mrec.Load(); _mrec.Show();'
+        # Per-format adapters are MonoBehaviours so they can host the docs.metica.com
+        # Invoke-based retry for interstitial/rewarded. Orchestrator AddComponent's
+        # each onto the runner's GameObject and calls Initialize(adUnitId).
+        [ "$has_banner" = 1 ] && echo '            _banner = _runner.gameObject.AddComponent<MeticaBannerAd>(); _banner.Initialize("banner_main"); _banner.Create(); _banner.Load(); _banner.Show();'
+        [ "$has_inter"  = 1 ] && echo '            _interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("interstitial_main");'
+        [ "$has_rew"    = 1 ] && echo '            _rewarded = _runner.gameObject.AddComponent<MeticaRewardedAd>(); _rewarded.Initialize("rewarded_main");'
+        [ "$has_mrec"   = 1 ] && echo '            _mrec = _runner.gameObject.AddComponent<MeticaMRecAd>(); _mrec.Initialize("mrec_main"); _mrec.Create(); _mrec.Load(); _mrec.Show();'
         echo '        });'
         echo '    }'
         [ "$has_inter" = 1 ] && echo '    public void ShowInterstitial() { _interstitial?.Show(); }'
@@ -219,9 +222,13 @@ else
     rm -rf "$p"
 fi
 
-# 5. Named handlers + retry shape — every per-format template uses named methods
-# (OnLoadSuccess, OnLoadFailed, etc.) instead of inline lambdas, and includes the
-# exponential-backoff retry scaffold (the _retryDelay state + RetryAfter coroutine).
+# 5. Named handlers + docs-aligned retry shape — every per-format template uses
+# named handler methods (OnLoadSuccess, OnLoadFailed, etc.). Interstitial and
+# Rewarded carry the docs.metica.com retry pattern (int _retryAttempt counter,
+# Math.Pow(2, Math.Min(6, attempt)) backoff, Invoke(nameof(Load), …)) and so are
+# MonoBehaviours (Invoke is MonoBehaviour-only). Banner and MRec do NOT carry
+# retry — per the docs example, those rely on the SDK's internal refresh and
+# only log on OnLoadFailed.
 shape_ok=1
 for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
     tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
@@ -232,16 +239,37 @@ for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; d
     if ! grep -qE 'private[[:space:]]+void[[:space:]]+OnLoadFailed' "$tmpl"; then
         echo "  shape FAIL: $stem missing named OnLoadFailed handler"; shape_ok=0
     fi
-    # Retry scaffold — _retryDelay state + RetryAfter coroutine.
-    if ! grep -q '_retryDelay' "$tmpl"; then
-        echo "  shape FAIL: $stem missing _retryDelay backoff state"; shape_ok=0
+    # All four templates are now MonoBehaviours (so the orchestrator can
+    # AddComponent uniformly and interstitial/rewarded can host Invoke-based retry).
+    if ! grep -qE 'class[[:space:]]+'"$stem"'[[:space:]]*:[[:space:]]*MonoBehaviour' "$tmpl"; then
+        echo "  shape FAIL: $stem must be a MonoBehaviour"; shape_ok=0
     fi
-    if ! grep -q 'RetryAfter' "$tmpl"; then
-        echo "  shape FAIL: $stem missing RetryAfter coroutine"; shape_ok=0
+done
+# Retry scaffold lives only in interstitial + rewarded (matches the docs example).
+for stem in MeticaInterstitialAd MeticaRewardedAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if ! grep -q '_retryAttempt' "$tmpl"; then
+        echo "  shape FAIL: $stem missing _retryAttempt counter (docs retry pattern)"; shape_ok=0
+    fi
+    if ! grep -qE 'System\.Math\.Pow\(2,[[:space:]]*System\.Math\.Min\(6' "$tmpl"; then
+        echo "  shape FAIL: $stem missing Math.Pow(2, Math.Min(6, …)) backoff formula"; shape_ok=0
+    fi
+    if ! grep -qE 'Invoke\(nameof\(Load\)' "$tmpl"; then
+        echo "  shape FAIL: $stem missing Invoke(nameof(Load), …) retry call"; shape_ok=0
+    fi
+done
+# Banner/MRec must NOT carry retry (matches the docs: SDK handles refresh).
+for stem in MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if grep -q '_retryAttempt' "$tmpl"; then
+        echo "  shape FAIL: $stem must NOT carry retry — docs example doesn't retry banner/MRec"; shape_ok=0
+    fi
+    if grep -qE 'Invoke\(nameof\(Load\)' "$tmpl"; then
+        echo "  shape FAIL: $stem must NOT call Invoke(nameof(Load), …)"; shape_ok=0
     fi
 done
 if [ "$shape_ok" = "1" ]; then
-    echo "  PASS  per-format templates: named handlers + retry scaffold present"
+    echo "  PASS  per-format templates: named handlers + docs-aligned retry shape"
     pass=$((pass+1))
 else
     fail=$((fail+1))

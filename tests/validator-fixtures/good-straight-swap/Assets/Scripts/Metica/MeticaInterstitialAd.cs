@@ -1,21 +1,35 @@
 using UnityEngine;
 
-// Per-format object: owns the interstitial callbacks + the show → hidden → reload loop.
-public class MeticaInterstitialAd
+// Per-format object: MonoBehaviour so the docs-style Invoke retry works.
+// Owns the interstitial callbacks + the show → hidden → reload loop.
+public class MeticaInterstitialAd : MonoBehaviour
 {
-    private readonly string _adUnitId;
+    private string _adUnitId;
+    private int _retryAttempt = 0;
+    private bool _initialized = false;
 
-    public MeticaInterstitialAd(string adUnitId)
+    public void Initialize(string adUnitId)
     {
+        if (_initialized) return;
+        _initialized = true;
         _adUnitId = adUnitId;
-        MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("[Metica] interstitial loaded");
-        MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.LogWarning("[Metica] interstitial failed");
+
+        MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => { _retryAttempt = 0; Debug.Log("[Metica] interstitial loaded"); };
+        MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err =>
+        {
+            _retryAttempt++;
+            double delay = System.Math.Pow(2, System.Math.Min(6, _retryAttempt));
+            Debug.LogWarning("[Metica] interstitial failed");
+            Invoke(nameof(Load), (float)delay);
+        };
         MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad => Debug.Log("[Metica] interstitial revenue");
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => Load();
         MeticaAdsCallbacks.Interstitial.OnAdShowFailed += (ad, err) => Load();
+
+        Load();
     }
 
-    public void Load() { MeticaSdk.Ads.LoadInterstitial(_adUnitId); }
+    private void Load() { MeticaSdk.Ads.LoadInterstitial(_adUnitId); }
 
     public void Show()
     {
