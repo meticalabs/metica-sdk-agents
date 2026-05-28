@@ -1,8 +1,8 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
 #
-# Usage: validate-integration.sh --project=<path> [--mode=fresh|side-by-side]
+# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap|side-by-side]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 
 set -u
@@ -34,7 +34,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.0.0",\n'
+    printf '  "schema": "validator/1.1.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -62,8 +62,8 @@ done
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
 case "$MODE" in
-    ""|fresh|side-by-side) ;;
-    *) die_json "Invalid --mode: $MODE (allowed: fresh, side-by-side)" ;;
+    ""|fresh|straight-swap|side-by-side) ;;
+    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap, side-by-side)" ;;
 esac
 
 # ---- discover C# sources ---------------------------------------------------
@@ -140,8 +140,14 @@ if [ "$HAS_METICA" = "0" ]; then
 fi
 
 if [ -z "$MODE" ]; then
-    if [ "$HAS_ROUTER" = "1" ] || { [ "$HAS_MAX" = "1" ] && [ "$HAS_METICA" = "1" ]; }; then
+    if [ "$HAS_ROUTER" = "1" ]; then
         MODE="side-by-side"
+    elif [ "$HAS_MAX" = "1" ] && [ "$HAS_METICA" = "1" ]; then
+        # Max + Metica but no router → straight-swap (Max removed from app code,
+        # MeticaAdService called directly). Validated like fresh (same-file
+        # privacy ordering); routing it through the side-by-side router branch
+        # would skip privacy validation and false-PASS.
+        MODE="straight-swap"
     elif [ "$HAS_METICA" = "1" ]; then
         MODE="fresh"
     else
@@ -184,25 +190,27 @@ if [ "$MODE" = "side-by-side" ]; then
     BOOTSTRAP_HIT=""
     BOOTSTRAP_BAD=""
     BOOTSTRAP_BAD_REASON=""
-    while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        # Bootstrap = file with both AdServiceRouter.Instance and a .Initialize( call.
-        if ! clean_cs "$f" | grep -qF -- '.Initialize('; then continue; fi
-        BOOTSTRAP_HIT=1
-        init_l=$(clean_cs "$f" | grep -nF -- '.Initialize(' | head -1 | awk -F: '{print $1}')
-        consent_l=$(clean_cs "$f" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
-        dns_l=$(clean_cs "$f" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
-        if [ -z "$consent_l" ] || [ -z "$dns_l" ]; then
-            BOOTSTRAP_BAD="$f"
-            BOOTSTRAP_BAD_REASON="missing SetHasUserConsent or SetDoNotSell"
-            break
-        fi
-        if [ "$consent_l" -ge "$init_l" ] || [ "$dns_l" -ge "$init_l" ]; then
-            BOOTSTRAP_BAD="$f"
-            BOOTSTRAP_BAD_REASON="SetHasUserConsent/SetDoNotSell must precede .Initialize"
-            break
-        fi
-    done <<< "$ROUTER_FILES"
+    if [ -n "$ROUTER_FILES" ]; then
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            # Bootstrap = file with both AdServiceRouter.Instance and a .Initialize( call.
+            if ! clean_cs "$f" | grep -qF -- '.Initialize('; then continue; fi
+            BOOTSTRAP_HIT=1
+            init_l=$(clean_cs "$f" | grep -nF -- '.Initialize(' | head -1 | awk -F: '{print $1}')
+            consent_l=$(clean_cs "$f" | grep -nF -- '.SetHasUserConsent(' | head -1 | awk -F: '{print $1}')
+            dns_l=$(clean_cs "$f" | grep -nF -- '.SetDoNotSell(' | head -1 | awk -F: '{print $1}')
+            if [ -z "$consent_l" ] || [ -z "$dns_l" ]; then
+                BOOTSTRAP_BAD="$f"
+                BOOTSTRAP_BAD_REASON="missing SetHasUserConsent or SetDoNotSell"
+                break
+            fi
+            if [ "$consent_l" -ge "$init_l" ] || [ "$dns_l" -ge "$init_l" ]; then
+                BOOTSTRAP_BAD="$f"
+                BOOTSTRAP_BAD_REASON="SetHasUserConsent/SetDoNotSell must precede .Initialize"
+                break
+            fi
+        done <<< "$ROUTER_FILES"
+    fi
 
     if [ -z "$BOOTSTRAP_HIT" ]; then
         add_check "privacy_before_init" "" "ADVISORY" \
@@ -316,6 +324,37 @@ check_load_show_parity "banner"       "MeticaSdk.Ads.LoadBanner("       "MeticaS
 check_load_show_parity "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaSdk.Ads.ShowInterstitial("
 check_load_show_parity "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaSdk.Ads.ShowRewarded("
 
+# 7b. reload_on_hidden: interstitial/rewarded must subscribe OnAdHidden so the
+# next ad is loaded when the current one is dismissed (the canonical show →
+# hidden → reload loop). Banners are persistent and are excluded.
+check_reload_on_hidden() {
+    local fmt="$1" load_pat="$2" hidden_pat="$3"
+    local rule="${fmt}_reload_on_hidden"
+    [ "$(count_lit "$load_pat")" = "0" ] && return
+    if [ "$(count_lit "$hidden_pat")" = "0" ]; then
+        add_check "$rule" "" "FAIL" "$fmt used but $hidden_pat not subscribed; load the next ad from the hidden callback (auto-reload)."
+    else
+        add_check "$rule" "" "PASS" "$fmt auto-reload-on-hidden callback subscribed."
+    fi
+}
+check_reload_on_hidden "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaAdsCallbacks.Interstitial.OnAdHidden"
+check_reload_on_hidden "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaAdsCallbacks.Rewarded.OnAdHidden"
+
+# 7c. show_ready_guard (ADVISORY): when an interstitial/rewarded Show is called,
+# an IsReady check should exist so Show() never fires on a not-loaded ad.
+check_ready_guard() {
+    local fmt="$1" show_pat="$2" ready_pat="$3"
+    local rule="${fmt}_show_ready_guard"
+    [ "$(count_lit "$show_pat")" = "0" ] && return
+    if [ "$(count_lit "$ready_pat")" = "0" ]; then
+        add_check "$rule" "" "ADVISORY" "$fmt Show called but $ready_pat never used; guard Show() with the ready check."
+    else
+        add_check "$rule" "" "PASS" "$fmt Show is guarded by a ready check."
+    fi
+}
+check_ready_guard "interstitial" "MeticaSdk.Ads.ShowInterstitial(" "MeticaSdk.Ads.IsInterstitialReady("
+check_ready_guard "rewarded"     "MeticaSdk.Ads.ShowRewarded("     "MeticaSdk.Ads.IsRewardedReady("
+
 # 8. revenue_callback_subscribed (ADVISORY)
 REV_COUNT="$(count_lit 'OnAdRevenuePaid')"
 if [ "$REV_COUNT" = "0" ]; then
@@ -324,19 +363,18 @@ else
     add_check "revenue_callback_subscribed" "" "PASS" "Revenue callback subscribed."
 fi
 
-# Side-by-side specific
-if [ "$MODE" = "side-by-side" ]; then
-    if [ "$HAS_ROUTER" = "1" ]; then
-        add_check "ad_service_router_present" "" "PASS" "AdServiceRouter referenced in project."
-    else
-        add_check "ad_service_router_present" "" "FAIL" "Side-by-side mode but no AdServiceRouter found."
-    fi
-fi
+# Credential hygiene (placeholder keys, test user IDs) is intentionally NOT
+# scripted: the integrator generates these files itself and already knows
+# which placeholders/userId it embedded. It surfaces them as concrete reminders
+# in the final report (integrator.md Step 7). Re-deriving the values from
+# arbitrary C# in a grep validator forced a comment-stripping awk + an arg
+# parser for marginal value; deleted in favour of integrator-side reporting.
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
-#   - interstitial_show_callback:   OnAdShowSuccess/OnAdHidden subscribed when interstitial used
-#   - rewarded_show_callback:       OnAdShowSuccess/OnAdHidden subscribed when rewarded used
+#   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
+#                                   format is still showing. Needs call-graph/scope awareness to detect
+#                                   without false positives; deferred until a reliable heuristic exists.
 #   - banner_create_before_load:    CreateBanner precedes LoadBanner/ShowBanner
 # Side-by-side mode additional rules:
 #   - single_init_per_session:      MaxSdk.InitializeSdk gated by router; not called unconditionally
@@ -344,6 +382,12 @@ fi
 #   - max_adapter_present:          a MaxAdService (or equivalent) wraps Max calls
 #   - metica_adapter_present:       a MeticaAdService (or equivalent) wraps Metica calls
 #   - max_callsites_routed:         game code uses AdServiceRouter.Instance.AdService.* not MaxSdk.* directly
+#
+# REMOVED: ad_service_router_present — router presence is no longer a reliable
+# signal. With the three-way matrix (fresh / straight-swap / side-by-side), the
+# straight-swap path intentionally has no router, and mode auto-detection cannot
+# distinguish straight-swap from side-by-side. The check produced false FAILs, so
+# it was dropped; the router is only generated when remote-config drives an A/B.
 
 # ---- determine status ------------------------------------------------------
 
@@ -354,7 +398,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.0.0",\n'
+printf '  "schema": "validator/1.1.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'

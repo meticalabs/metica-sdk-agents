@@ -84,10 +84,11 @@ assert_case() {
 echo "== validator golden eval =="
 
 assert_case good-fresh                    "PASS" "fresh"        \
-    "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS"
+    "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS" \
+    "interstitial_reload_on_hidden:PASS"
 
 assert_case good-sidebyside               "PASS" "side-by-side" \
-    "init_count:PASS" "ad_service_router_present:PASS"
+    "init_count:PASS" "interstitial_reload_on_hidden:PASS"
 
 assert_case bad-no-init                   "FAIL" "fresh"        \
     "init_count:FAIL"
@@ -128,6 +129,30 @@ assert_case good-fresh-with-imported-sdk  "PASS" "fresh"        \
 # New: cross-file privacy is FAIL with explicit hint
 assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
     "privacy_before_init:FAIL"
+
+# New: interstitial without OnAdHidden auto-reload FAILs
+assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
+    "interstitial_reload_on_hidden:FAIL"
+
+# New: Show without an IsReady guard → ADVISORY, still overall PASS.
+assert_case advisory-no-ready-guard       "PASS" "fresh"        \
+    "interstitial_show_ready_guard:ADVISORY"
+
+# New: straight-swap mode (Max present, no remote config). Validated with an
+# explicit --mode; no router is generated and the dropped ad_service_router_present
+# check must not appear.
+out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=straight-swap 2>&1) || true
+if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ] \
+   && ! printf '%s' "$out" | grep -q 'ad_service_router_present'; then
+    printf "  ok    good-straight-swap (mode=straight-swap, no router check)\n"; pass=$((pass+1))
+else
+    printf "  FAIL  good-straight-swap unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+fi
+
+# New: the same project auto-detects as straight-swap (Max wrapper + Metica, no
+# router) and gets same-file privacy validation — not a router-branch false-PASS.
+assert_case good-straight-swap            "PASS" "straight-swap" \
+    "init_count:PASS" "privacy_before_init:PASS" "interstitial_reload_on_hidden:PASS"
 
 # New: project with no Metica refs gets a structured error, not a PASS-laden report
 nometica=$(mktemp -d -t no-metica-XXXXXX)

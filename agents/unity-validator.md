@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, and side-by-side router presence. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone.
+description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, and IsReady-guarded show. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone.
 tools: Bash
 model: sonnet
 ---
@@ -12,7 +12,7 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
-- `MODE` — optional `fresh` or `side-by-side`. When omitted, the script auto-detects from project contents.
+- `MODE` — optional `fresh`, `straight-swap`, or `side-by-side`. When omitted, the script auto-detects from project contents. (`straight-swap` cannot be auto-detected — the integrator passes it explicitly; it is validated like `fresh` plus there is no router requirement.)
 
 ## What to do — run this single bash command
 
@@ -24,7 +24,7 @@ PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agent
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root." >&2; exit 1; }
 
 PROJECT="<absolute_project_path>"
-MODE_ARG=""   # or "--mode=fresh" / "--mode=side-by-side"
+MODE_ARG=""   # or "--mode=fresh" / "--mode=straight-swap" / "--mode=side-by-side"
 
 JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" $MODE_ARG)
 printf '```json\n%s\n```\n' "$JSON"
@@ -50,9 +50,12 @@ The validator must run in a **fresh subagent context** — it must not see the i
 ## Rule set (current scope)
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize`
+- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering in `fresh`/`straight-swap`; router-bootstrap ordering in `side-by-side`)
 - `<format>_callbacks_subscribed` — for each used ad format, OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
 - `<format>_load_show_parity` — every Load has a matching Show somewhere
+- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
+- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
 - `revenue_callback_subscribed` — ADVISORY only
-- `ad_service_router_present` — only checked in side-by-side mode
+
+Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is **not** in this validator's scope. The integrator already knows which credentials and userId it embedded into the files it just generated and surfaces them as concrete reminders in its final report — see `integrator.md` Step 7. `ad_service_router_present` was removed in `validator/1.1.0` (see `agents/contracts.md`).
