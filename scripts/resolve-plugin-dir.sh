@@ -51,7 +51,13 @@ resolve_symlink() {
             /*) ;;
             *)  target="$(dirname "$1")/$target" ;;
         esac
-        candidate=$(cd "$(dirname "$target")/../.." 2>/dev/null && pwd || true)
+        # install.sh symlinks <project_or_~>/.claude/agents/unity-*.md to
+        # <plugin_root>/agents/unity-*.md, so dirname(target) is <plugin_root>/
+        # agents and one '..' lands on the plugin root. (Pre-2026-05 this said
+        # '/../..' and resolved to the parent dir instead — bug masked because
+        # self-location now runs first; tests/run-resolver-tests.sh exercises
+        # this path explicitly.)
+        candidate=$(cd "$(dirname "$target")/.." 2>/dev/null && pwd || true)
         if [ -n "$candidate" ] && is_root "$candidate"; then
             printf '%s' "$candidate"
             return 0

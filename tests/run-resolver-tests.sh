@@ -97,15 +97,16 @@ else
 fi
 rm -rf "$T"
 
-# Bootstrap loop end-to-end. run_bootstrap mirrors verbatim the snippet the
-# agents run (unity-{integrator,validator,compat-checker}.md); keep the two in
-# sync. Runs with env unset and a fake HOME so only the cache path can match.
+# Bootstrap loop end-to-end. run_bootstrap mirrors verbatim the snippet that
+# lives in all three agent files (unity-{integrator,validator,compat-checker}.md);
+# keep all four copies in sync. Runs with env unset and a fake HOME so only the
+# cache path can match.
 run_bootstrap() {  # $1 = HOME
     env -u CLAUDE_PLUGIN_ROOT -u METICA_SDK_AGENTS_DIR HOME="$1" bash -c '
 PLUGIN_DIR=""
 for cand in "${CLAUDE_PLUGIN_ROOT:-}" "${METICA_SDK_AGENTS_DIR:-}" \
-            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
-            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ \
+            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
+            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* \
             "$HOME/.claude/plugins/marketplaces/metica-sdk-agents" \
             "$HOME/.claude/plugins/metica-sdk-agents" \
             "$HOME/.metica-sdk-agents" "$HOME/dev/metica-sdk-agents"; do
@@ -143,6 +144,22 @@ done
 NEWEST="$T/.claude/plugins/cache/metica-sdk-agents/metica-sdk-agents/0.10.0"
 assert_eq "bootstrap picks newest with 2-digit minor (0.10.0 > 0.9.0)" \
     "$(cd "$NEWEST" && pwd)" "$(run_bootstrap "$T")"
+rm -rf "$T"
+
+# 10. Symlink-resolution branch (install.sh project-local / global layouts):
+#     a .claude/agents/unity-integrator.md symlinking into <plugin_root>/agents/
+#     must resolve back to <plugin_root>. Self-location is forced to fail by
+#     running a copy of the resolver from a non-root dir; HOME points at an
+#     empty dir so the known-install-paths fallback can't accidentally match.
+T=$(mktemp -d)
+REAL="$T/realroot"; make_root "$REAL"
+PROJ="$T/proj"; mkdir -p "$PROJ/.claude/agents"
+ln -s "$REAL/agents/unity-integrator.md" "$PROJ/.claude/agents/unity-integrator.md"
+mkdir -p "$T/loose/scripts"; cp "$RESOLVER" "$T/loose/scripts/resolve-plugin-dir.sh"
+got=$(cd "$PROJ" && env -u CLAUDE_PLUGIN_ROOT -u METICA_SDK_AGENTS_DIR HOME="$T/emptyhome" \
+        bash "$T/loose/scripts/resolve-plugin-dir.sh" 2>/dev/null)
+assert_eq "symlink-resolution finds plugin root via project .claude/agents/<symlink>" \
+    "$(cd "$REAL" && pwd)" "$got"
 rm -rf "$T"
 
 echo "----"

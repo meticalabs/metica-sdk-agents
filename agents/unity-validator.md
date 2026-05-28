@@ -21,8 +21,8 @@ Resolve `PLUGIN_DIR` automatically via the shared resolver. Do not ask the user 
 ```bash
 PLUGIN_DIR=""
 for cand in "${CLAUDE_PLUGIN_ROOT:-}" "${METICA_SDK_AGENTS_DIR:-}" \
-            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
-            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/*/ \
+            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
+            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* \
             "$HOME/.claude/plugins/marketplaces/metica-sdk-agents" \
             "$HOME/.claude/plugins/metica-sdk-agents" \
             "$HOME/.metica-sdk-agents" "$HOME/dev/metica-sdk-agents"; do
