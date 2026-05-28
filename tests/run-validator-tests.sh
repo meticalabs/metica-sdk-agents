@@ -85,7 +85,7 @@ echo "== validator golden eval =="
 
 assert_case good-fresh                    "PASS" "fresh"        \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS" \
-    "interstitial_reload_on_hidden:PASS" "placeholder_ids_replaced:PASS" "user_id_not_test:PASS"
+    "interstitial_reload_on_hidden:PASS"
 
 assert_case good-sidebyside               "PASS" "side-by-side" \
     "init_count:PASS" "interstitial_reload_on_hidden:PASS"
@@ -130,31 +130,9 @@ assert_case good-fresh-with-imported-sdk  "PASS" "fresh"        \
 assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
     "privacy_before_init:FAIL"
 
-# New: unreplaced placeholder credentials FAIL
-assert_case bad-placeholder-key           "FAIL" "fresh"        \
-    "placeholder_ids_replaced:FAIL"
-
-# New: hardcoded test user ID FAILs (null/unset is acceptable — see good-fresh)
-assert_case bad-test-userid               "FAIL" "fresh"        \
-    "user_id_not_test:FAIL"
-
-# New: test user ID still caught when a string arg contains a comma (parser must
-# not naively comma-split the MeticaInitConfig args).
-assert_case bad-userid-comma-key          "FAIL" "fresh"        \
-    "user_id_not_test:FAIL"
-
-# New: test user ID still caught when the constructor spans multiple lines.
-assert_case bad-userid-multiline          "FAIL" "fresh"        \
-    "user_id_not_test:FAIL"
-
 # New: interstitial without OnAdHidden auto-reload FAILs
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
-
-# New: commented-out config / placeholder must NOT trip the credential or
-# user-id checks (comment-aware extraction).
-assert_case good-commented-test-userid    "PASS" "fresh"        \
-    "user_id_not_test:PASS" "placeholder_ids_replaced:PASS"
 
 # New: Show without an IsReady guard → ADVISORY, still overall PASS.
 assert_case advisory-no-ready-guard       "PASS" "fresh"        \

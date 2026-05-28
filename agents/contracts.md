@@ -108,11 +108,13 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
 - `checks[].detail`: one-line message describing what was found.
 
-**Rules emitted** (see `scripts/validate-integration.sh` for exact conditions): `init_count`, `privacy_before_init`, `<format>_callbacks_subscribed`, `rewarded_reward_callback`, `<format>_load_show_parity`, `revenue_callback_subscribed` (ADVISORY), and — added in 1.1.0 — `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` (FAIL when the format is used but `OnAdHidden` is not subscribed), `interstitial_show_ready_guard` / `rewarded_show_ready_guard` (ADVISORY when `Show` is called without an `IsReady` check), `placeholder_ids_replaced` (FAIL on unreplaced `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY`), and `user_id_not_test` (FAIL when the `MeticaInitConfig` userId is a hardcoded test literal; `null`/unset and variable expressions PASS).
+**Rules emitted** (see `scripts/validate-integration.sh` for exact conditions): `init_count`, `privacy_before_init`, `<format>_callbacks_subscribed`, `rewarded_reward_callback`, `<format>_load_show_parity`, `revenue_callback_subscribed` (ADVISORY), and — added in 1.1.0 — `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` (FAIL when the format is used but `OnAdHidden` is not subscribed), `interstitial_show_ready_guard` / `rewarded_show_ready_guard` (ADVISORY when `Show` is called without an `IsReady` check).
+
+Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is intentionally **not** in the validator's rule set — the integrator already knows which placeholders/userId it embedded into the files it generated and surfaces them as concrete reminders in its final report (`integrator.md` Step 7). Re-deriving the values from arbitrary user C# in a grep validator was costly for marginal value.
 
 **Changes in 1.1.0** (minor, backward-compatible — the orchestrator reads `.status` and iterates `.checks`):
 - Added the `straight-swap` mode value (Max present, no remote-config provider).
-- Added the lifecycle, placeholder, and user-id rules listed above.
+- Added the lifecycle/`IsReady`-guard rules listed above.
 - **Removed** `ad_service_router_present`. Router presence is no longer a reliable signal: the `straight-swap` path intentionally has no router, and mode auto-detection cannot distinguish it from `side-by-side`. The check produced false FAILs; the router is required only when remote-config drives an A/B.
 
 **Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.

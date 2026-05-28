@@ -127,49 +127,6 @@ line_in_file() {
     clean_cs "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
 
-# ---- comment-stripped, string-preserving helpers ---------------------------
-# A few checks must inspect literal string VALUES (placeholder keys, the userId
-# argument). clean-cs.awk blanks string literals, so the cleaned helpers above
-# can't see them. strip-comments.awk removes only comments and keeps strings
-# intact — so these checks see real string values but still ignore anything that
-# lives in a comment (consistent with the rest of the script).
-STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
-strip_comments() { awk -f "$STRIP_COMMENTS_AWK" "$1"; }
-
-nocomment_count() {
-    local pat="$1" total=0 c
-    while IFS= read -r f; do
-        c="$(strip_comments "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
-        total=$((total + c))
-    done < "$CS_LIST"
-    printf '%d' "$total"
-}
-
-nocomment_first_loc() {
-    local pat="$1" n
-    while IFS= read -r f; do
-        n="$(strip_comments "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
-        if [ -n "$n" ]; then
-            printf '%s:%s' "${f#"$PROJECT"/}" "$n"
-            return
-        fi
-    done < "$CS_LIST"
-}
-
-# Print the userId (3rd) argument of the first `new MeticaInitConfig(...)` across
-# all sources, string-/multi-line-aware (see scripts/lib/extract-init-arg.awk) and
-# comment-aware (a commented-out constructor is ignored).
-EXTRACT_ARG_AWK="$SCRIPT_DIR/lib/extract-init-arg.awk"
-extract_init_userid() {
-    local f
-    while IFS= read -r f; do
-        if strip_comments "$f" | grep -qF -- 'new MeticaInitConfig('; then
-            strip_comments "$f" | awk -v WANT=3 -f "$EXTRACT_ARG_AWK"
-            return
-        fi
-    done < "$CS_LIST"
-}
-
 # ---- mode detection ---------------------------------------------------------
 
 HAS_MAX=0;    [ "$(count_lit 'MaxSdk.')"   != "0" ] && HAS_MAX=1
@@ -404,49 +361,12 @@ else
     add_check "revenue_callback_subscribed" "" "PASS" "Revenue callback subscribed."
 fi
 
-# 9. placeholder_ids_replaced (FAIL): the integrator emits YOUR_* placeholders
-# when keys are not supplied. A shippable integration must replace them. Scanned
-# on RAW source — the literals live inside string arguments that clean-cs blanks.
-PLACEHOLDERS_FOUND=""
-for ph in YOUR_METICA_API_KEY YOUR_METICA_APP_ID YOUR_MAX_SDK_KEY; do
-    [ "$(nocomment_count "$ph")" != "0" ] && PLACEHOLDERS_FOUND="$PLACEHOLDERS_FOUND $ph"
-done
-if [ -n "$PLACEHOLDERS_FOUND" ]; then
-    PH_FIRST="${PLACEHOLDERS_FOUND#" "}"; PH_FIRST="${PH_FIRST%% *}"
-    add_check "placeholder_ids_replaced" "$(nocomment_first_loc "$PH_FIRST")" "FAIL" \
-        "Unreplaced placeholder credential(s):${PLACEHOLDERS_FOUND}. Replace with real keys before shipping."
-else
-    add_check "placeholder_ids_replaced" "" "PASS" "No placeholder credential markers found."
-fi
-
-# 10. user_id_not_test (FAIL): the 3rd arg of new MeticaInitConfig(apiKey, appId,
-# userId) must not be a hardcoded test literal. null/unset and variable
-# expressions are acceptable (the value comes from the host app's identity). Only
-# a literal test value fails. The arg is extracted from RAW source with a
-# string-/multi-line-aware parser so commas inside string args and a constructor
-# spanning multiple lines are handled.
-if [ "$(nocomment_count 'new MeticaInitConfig(')" != "0" ]; then
-    UID_ARG="$(extract_init_userid)"
-    case "$UID_ARG" in @\"*) UID_ARG="${UID_ARG#@}" ;; esac   # verbatim @"…" → treat as string literal
-    case "$UID_ARG" in
-        ""|null)
-            add_check "user_id_not_test" "" "PASS" "User ID is null/unset (acceptable; resolved from host identity)." ;;
-        \"*\")
-            UID_VAL="${UID_ARG%\"}"; UID_VAL="${UID_VAL#\"}"
-            UID_LC="$(printf '%s' "$UID_VAL" | tr '[:upper:]' '[:lower:]')"
-            if [ -z "$UID_VAL" ]; then
-                add_check "user_id_not_test" "" "FAIL" "User ID is an empty string literal; pass the host app's real user identifier."
-            elif printf '%s' "$UID_LC" | grep -qE 'test|debug|dummy'; then
-                add_check "user_id_not_test" "" "FAIL" "User ID \"$UID_VAL\" looks like a test/debug literal; use the host app's real user identity."
-            elif printf '%s' "$UID_VAL" | grep -qE '^[0-9]+$'; then
-                add_check "user_id_not_test" "" "FAIL" "User ID \"$UID_VAL\" is a numeric test literal; use the host app's real user identity."
-            else
-                add_check "user_id_not_test" "" "PASS" "User ID is a non-test string literal."
-            fi ;;
-        *)
-            add_check "user_id_not_test" "" "PASS" "User ID supplied from a variable/expression (not a hardcoded test value)." ;;
-    esac
-fi
+# Credential hygiene (placeholder keys, test user IDs) is intentionally NOT
+# scripted: the integrator generates these files itself and already knows
+# which placeholders/userId it embedded. It surfaces them as concrete reminders
+# in the final report (integrator.md Step 7). Re-deriving the values from
+# arbitrary C# in a grep validator forced a comment-stripping awk + an arg
+# parser for marginal value; deleted in favour of integrator-side reporting.
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null

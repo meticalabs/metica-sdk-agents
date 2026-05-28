@@ -710,6 +710,21 @@ Failures:
 
 Then the standard summary (mode, SDK version, files changed, compat-checker one-liner, validator one-liner).
 
+#### Credential hygiene (always — concrete, in the integrator)
+
+The validator does **not** check credential values (it would need a full C# parser, and the integrator already knows what it embedded). The integrator runs this scan over the files it just wrote and surfaces the result in every report:
+
+```bash
+# Replace placeholders + the bootstrap path with the values resolved in Steps 2.5 / 5.
+grep -nE 'YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY' \
+    "$PROJECT/$ADAPTER_FOLDER"/*.cs \
+    "$PROJECT/Assets/Scripts/MeticaBootstrap.cs" 2>/dev/null || true
+```
+
+- For each hit, render one bullet in the report: `<file>:<line>  <placeholder>  — replace with your real <kind> before shipping.`
+- The userId argument of `MeticaInitConfig(...)` in the generated `MeticaAdService.cs` orchestrator is always `null` (the integrator does not ask for it). Emit a single reminder regardless of mode: `User ID is null in MeticaInitConfig — for production, replace it with your real user-identity source (e.g. SystemInfo.deviceUniqueIdentifier or your account system's user id).`
+- These reminders are advisory; they do not flip status. They appear under "Manual steps remaining" in the PASS path AND under the FAIL path's manual-steps section.
+
 When validator returned **PASS**, emit the standard summary only, optionally followed by reminders if `API_KEY` / `APP_ID` / `MAX_SDK_KEY` placeholders were used.
 
 In **side-by-side mode**, the PASS summary must also include:

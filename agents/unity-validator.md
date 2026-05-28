@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, placeholder/test-credential hygiene, and IsReady-guarded show. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone.
+description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, and IsReady-guarded show. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone.
 tools: Bash
 model: sonnet
 ---
@@ -56,8 +56,6 @@ The validator must run in a **fresh subagent context** — it must not see the i
 - `<format>_load_show_parity` — every Load has a matching Show somewhere
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
-- `placeholder_ids_replaced` — FAIL on unreplaced `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY`
-- `user_id_not_test` — FAIL when the `MeticaInitConfig` userId is a hardcoded test literal (`null`/unset and variable expressions PASS)
 - `revenue_callback_subscribed` — ADVISORY only
 
-`ad_service_router_present` was removed in `validator/1.1.0` — see `agents/contracts.md`.
+Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is **not** in this validator's scope. The integrator already knows which credentials and userId it embedded into the files it just generated and surfaces them as concrete reminders in its final report — see `integrator.md` Step 7. `ad_service_router_present` was removed in `validator/1.1.0` (see `agents/contracts.md`).
