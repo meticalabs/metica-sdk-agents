@@ -4,6 +4,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 any_fail=0
+bash "$SCRIPT_DIR/run-resolver-tests.sh"   || any_fail=1; echo
 bash "$SCRIPT_DIR/run-compat-tests.sh"     || any_fail=1; echo
 bash "$SCRIPT_DIR/run-format-tests.sh"     || any_fail=1; echo
 bash "$SCRIPT_DIR/run-download-tests.sh"   || any_fail=1; echo

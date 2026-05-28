@@ -18,12 +18,20 @@ You receive a project path and optionally a target SDK version. Build:
 
 ## What to do — run this single bash command
 
-Resolve `PLUGIN_DIR` automatically via the shared resolver (checks `$CLAUDE_PLUGIN_ROOT`, `$METICA_SDK_AGENTS_DIR`, symlink targets, and known install paths). Do not ask the user for it.
+Resolve `PLUGIN_DIR` automatically via the shared resolver. Do not ask the user for it. `$CLAUDE_PLUGIN_ROOT` is **not** reliably present in an agent's bash environment, so the loop below searches known install locations (including the **newest** cached marketplace version) for the resolver, then lets it self-verify the root.
 
 ```bash
-PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agents}/scripts/resolve-plugin-dir.sh" 2>/dev/null \
-    || bash "$HOME/.metica-sdk-agents/scripts/resolve-plugin-dir.sh" 2>/dev/null)"
-[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root." >&2; exit 1; }
+PLUGIN_DIR=""
+for cand in "${CLAUDE_PLUGIN_ROOT:-}" "${METICA_SDK_AGENTS_DIR:-}" \
+            "$(ls -d "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* 2>/dev/null | sort -V 2>/dev/null | tail -1)" \
+            "$HOME"/.claude/plugins/cache/*/metica-sdk-agents/* \
+            "$HOME/.claude/plugins/marketplaces/metica-sdk-agents" \
+            "$HOME/.claude/plugins/metica-sdk-agents" \
+            "$HOME/.metica-sdk-agents" "$HOME/dev/metica-sdk-agents"; do
+    [ -n "$cand" ] && [ -f "$cand/scripts/resolve-plugin-dir.sh" ] || continue
+    PLUGIN_DIR="$(bash "$cand/scripts/resolve-plugin-dir.sh" 2>/dev/null)" && [ -n "$PLUGIN_DIR" ] && break
+done
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Set METICA_SDK_AGENTS_DIR to the plugin path and retry." >&2; exit 1; }
 
 PROJECT="<absolute_project_path>"
 VERSION_ARG=""   # or "--version=2.4.0"
