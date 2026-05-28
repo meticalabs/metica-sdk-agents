@@ -6,8 +6,9 @@
 # Does NOT cover the object-initializer form (`new MeticaInitConfig { UserId = ... }`)
 # — that's a documented limitation; the integrator emits the positional form.
 #
-# Each emitted line:
-#   <FNAME>:<start_line>:<reason>:<arg_value>
+# Each emitted line is TAB-separated (so file paths containing ':' do not
+# corrupt downstream parsing):
+#   <FNAME>\t<start_line>\t<reason>\t<arg_value>
 # reason ∈ {null, empty, test-value, digits-only}. Empty output = no problems.
 #
 # Input MUST be the source AFTER strip-comments.awk so commented-out test
@@ -16,7 +17,7 @@
 #
 # Usage: awk -f strip-comments.awk file.cs | awk -v FNAME=file.cs -f check-init-userid.awk
 
-BEGIN { collecting = 0; depth = 0; buf = ""; start_line = 0 }
+BEGIN { collecting = 0; depth = 0; buf = ""; start_line = 0; coll_in_str = 0 }
 
 function trim(s) {
     sub(/^[[:space:]]+/, "", s)
@@ -27,34 +28,45 @@ function trim(s) {
 function flag(arg, line,    a) {
     a = trim(arg)
     if (a == "null") {
-        printf "%s:%d:null:null\n", FNAME, line
+        printf "%s\t%d\tnull\tnull\n", FNAME, line
     } else if (a == "\"\"") {
-        printf "%s:%d:empty:\"\"\n", FNAME, line
-    } else if (a ~ /^"[^"]*([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])[^"]*"$/) {
-        printf "%s:%d:test-value:%s\n", FNAME, line, a
+        printf "%s\t%d\tempty\t\"\"\n", FNAME, line
+    } else if (a ~ /^"(.*[-_])?([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])([-_].*)?"$/) {
+        # 'test'/'debug'/'dummy'/'placeholder' as a standalone word — bounded by
+        # the surrounding quotes or by - / _ separators. Avoids false positives
+        # on legitimate ids like "contest-user-42" or "latest-build".
+        printf "%s\t%d\ttest-value\t%s\n", FNAME, line, a
     } else if (a ~ /^"[0-9]+"$/) {
-        printf "%s:%d:digits-only:%s\n", FNAME, line, a
+        printf "%s\t%d\tdigits-only\t%s\n", FNAME, line, a
     }
 }
 
 # Split the captured arg-list on top-level commas (respect nested parens and
 # string literals). Flag the 3rd arg if it looks like a test value.
-function parse_args(s,    j, ch, d, in_str, n, args, prev) {
+function parse_args(s,    j, ch, d, in_str, n, args) {
     n = 1
     args[1] = ""
     d = 0
     in_str = 0
-    prev = ""
     for (j = 1; j <= length(s); j++) {
         ch = substr(s, j, 1)
         if (in_str) {
             args[n] = args[n] ch
             if (ch == "\\") {
-                # consume escaped char
+                # consume escaped char (\\, \", etc.)
                 args[n] = args[n] substr(s, j+1, 1)
                 j++
             } else if (ch == "\"") {
-                in_str = 0
+                # C# verbatim "" escape: a doubled quote inside a verbatim
+                # string stays in-string. We don't distinguish verbatim from
+                # regular here because the outer collector strips the leading
+                # @, so verbatim "" can appear at this layer too.
+                if (substr(s, j+1, 1) == "\"") {
+                    args[n] = args[n] "\""
+                    j++
+                } else {
+                    in_str = 0
+                }
             }
         } else if (ch == "\"") {
             args[n] = args[n] ch
@@ -72,6 +84,15 @@ function parse_args(s,    j, ch, d, in_str, n, args, prev) {
     if (n >= 3) flag(args[3], start_line)
 }
 
+# Identifier-boundary check: the char preceding the M of MeticaInitConfig must
+# not be an identifier char ([A-Za-z0-9_]) — otherwise we'd match wrappers like
+# OtherMeticaInitConfig(.
+function is_identifier_start(line, p,    prev) {
+    if (p <= 1) return 1
+    prev = substr(line, p - 1, 1)
+    return (prev !~ /[A-Za-z0-9_]/)
+}
+
 {
     pos = 1
     while (pos <= length($0)) {
@@ -79,16 +100,43 @@ function parse_args(s,    j, ch, d, in_str, n, args, prev) {
             rest = substr($0, pos)
             idx = index(rest, "MeticaInitConfig(")
             if (idx == 0) break
-            pos = pos + idx + length("MeticaInitConfig(") - 1
+            # absolute column where the 'M' starts in the original line
+            mpos = pos + idx - 1
+            if (!is_identifier_start($0, mpos)) {
+                # advance past this hit and keep looking
+                pos = mpos + 1
+                continue
+            }
+            pos = mpos + length("MeticaInitConfig(")
             collecting = 1
             depth = 1
             buf = ""
+            coll_in_str = 0
             start_line = NR
         } else {
             c = substr($0, pos, 1)
             pos++
-            if (c == "(") { depth++; buf = buf c }
-            else if (c == ")") {
+            if (coll_in_str) {
+                buf = buf c
+                if (c == "\\") {
+                    # consume the escaped character (\\, \", etc.)
+                    buf = buf substr($0, pos, 1)
+                    pos++
+                } else if (c == "\"") {
+                    # C# verbatim doubled "" → stay in string
+                    if (substr($0, pos, 1) == "\"") {
+                        buf = buf "\""
+                        pos++
+                    } else {
+                        coll_in_str = 0
+                    }
+                }
+            } else if (c == "\"") {
+                coll_in_str = 1
+                buf = buf c
+            } else if (c == "(") {
+                depth++; buf = buf c
+            } else if (c == ")") {
                 depth--
                 if (depth == 0) {
                     parse_args(buf)

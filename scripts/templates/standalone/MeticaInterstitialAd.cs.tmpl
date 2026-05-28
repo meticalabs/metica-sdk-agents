@@ -26,7 +26,7 @@ public class MeticaInterstitialAd
         _runner = runner;
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += OnLoadSuccess;
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed  += OnLoadFailed;
-        MeticaAdsCallbacks.Interstitial.OnAdDisplayed   += OnDisplayed;
+        MeticaAdsCallbacks.Interstitial.OnAdShowSuccess += OnShowSuccess;
         MeticaAdsCallbacks.Interstitial.OnAdHidden      += OnHidden;
         MeticaAdsCallbacks.Interstitial.OnAdClicked     += OnClicked;
         MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += OnRevenuePaid;
@@ -59,7 +59,7 @@ public class MeticaInterstitialAd
         _retryDelay = Mathf.Min(_retryDelay * 2f, _retryDelayMax);
     }
 
-    private void OnDisplayed(MeticaAd ad)     { Debug.Log("[Metica] interstitial displayed"); }
+    private void OnShowSuccess(MeticaAd ad)   { Debug.Log("[Metica] interstitial displayed"); }
     // Auto-reload: load the next interstitial as soon as the current one is dismissed.
     private void OnHidden(MeticaAd ad)        { Load(); }
     private void OnClicked(MeticaAd ad)       { Debug.Log("[Metica] interstitial clicked"); }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.2.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.3.0 schema (see agents/contracts.md).
 #
 # Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -38,7 +38,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.2.0",\n'
+    printf '  "schema": "validator/1.3.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -65,12 +65,17 @@ done
 [ -d "$PROJECT" ]            || die_json "Project not found: $PROJECT"
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
+WARNINGS=""
 case "$MODE" in
     ""|fresh|straight-swap) ;;
     side-by-side)
         # Deprecated alias kept for v0.3.x backward compat; the router stack is
         # no longer generated, so SBS and straight-swap validate identically.
-        MODE="straight-swap" ;;
+        # Emit a warning so callers (CI scripts) see a migration signal in their
+        # output rather than the alias silently changing semantics behind their
+        # back.
+        MODE="straight-swap"
+        WARNINGS='"--mode=side-by-side is deprecated; use --mode=straight-swap. The router stack was retired in v0.5.0 and the two modes validate identically."' ;;
     *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap)" ;;
 esac
 
@@ -101,6 +106,12 @@ find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
 # line comments, block comments stripped. Line numbers preserved.
 CLEAN_CS_AWK="$SCRIPT_DIR/lib/clean-cs.awk"
 clean_cs() { awk -f "$CLEAN_CS_AWK" "$1"; }
+
+# Smoke-test the helper before relying on it. If awk or the script is broken,
+# bail loudly with a contract-shaped error rather than silently returning 0
+# matches everywhere (which would emit a misleading all-PASS report).
+[ -f "$CLEAN_CS_AWK" ]                                || die_json "Missing helper: $CLEAN_CS_AWK"
+clean_cs /dev/null >/dev/null 2>&1                    || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
 
 files_with() {
     local pat="$1"
@@ -160,8 +171,11 @@ fi
 CHECKS=""
 add_check() {
     # rule location level detail
+    # Build with a real newline separator (not the literal "\n" + printf %b)
+    # because %b interprets backslashes and breaks JSON when a field contains
+    # an odd number of '\' chars (Windows paths, user-id values with escapes).
     local sep=""
-    [ -n "$CHECKS" ] && sep=",\n"
+    [ -n "$CHECKS" ] && sep=$',\n'
     CHECKS="$CHECKS$sep    { \"rule\": \"$1\", \"location\": \"$(json_escape "$2")\", \"level\": \"$3\", \"detail\": \"$(json_escape "$4")\" }"
 }
 
@@ -252,6 +266,13 @@ check_format_callbacks "rewarded" \
     "MeticaAdsCallbacks.Rewarded.OnAdLoadFailed" \
     "MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess"
 
+# 5b. mrec_callbacks_subscribed — MRec is a persistent format like banner.
+# Note: MeticaSDK casing is `Mrec` (lowercase r), not `MRec`.
+check_format_callbacks "mrec" \
+    "MeticaSdk.Ads.LoadMrec(" \
+    "MeticaAdsCallbacks.Mrec.OnAdLoadFailed" \
+    "MeticaAdsCallbacks.Mrec.OnAdLoadSuccess"
+
 # 6. rewarded_reward_callback (conditional FAIL): if Rewarded used, OnAdRewarded subscribed
 REWARDED_LOAD_COUNT="$(count_lit 'MeticaSdk.Ads.LoadRewarded(')"
 if [ "$REWARDED_LOAD_COUNT" != "0" ]; then
@@ -280,6 +301,7 @@ check_load_show_parity() {
 check_load_show_parity "banner"       "MeticaSdk.Ads.LoadBanner("       "MeticaSdk.Ads.ShowBanner("
 check_load_show_parity "interstitial" "MeticaSdk.Ads.LoadInterstitial(" "MeticaSdk.Ads.ShowInterstitial("
 check_load_show_parity "rewarded"     "MeticaSdk.Ads.LoadRewarded("     "MeticaSdk.Ads.ShowRewarded("
+check_load_show_parity "mrec"         "MeticaSdk.Ads.LoadMrec("         "MeticaSdk.Ads.ShowMrec("
 
 # 7b. reload_on_hidden: interstitial/rewarded must subscribe OnAdHidden so the
 # next ad is loaded when the current one is dismissed (the canonical show →
@@ -320,13 +342,16 @@ else
     add_check "revenue_callback_subscribed" "" "PASS" "Revenue callback subscribed."
 fi
 
-# 9. placeholder_ids_replaced — fail if YOUR_*/REPLACE_ME placeholders leaked
-# into source. Comments are stripped via strip-comments.awk so leftover docs
-# referencing the placeholder names (e.g. in a README-style comment block)
-# don't false-positive; string literal contents are preserved so an actual
-# `"YOUR_METICA_API_KEY"` value in code is caught.
+# 9. placeholder_ids_replaced — fail if YOUR_*/REPLACE_ME placeholders appear as
+# STRING LITERAL VALUES in source. Comments are stripped via strip-comments.awk
+# so commented-out examples don't false-positive. The pattern requires the
+# placeholder to be enclosed in `"..."` so a user constant named
+# `YOUR_METICA_API_KEY` holding a real key is not flagged.
 STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
-PLACEHOLDER_PATTERN='YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY|REPLACE_ME'
+[ -f "$STRIP_COMMENTS_AWK" ]                          || die_json "Missing helper: $STRIP_COMMENTS_AWK"
+awk -f "$STRIP_COMMENTS_AWK" /dev/null >/dev/null 2>&1 || die_json "strip-comments.awk failed self-test (awk error or syntax issue)"
+
+PLACEHOLDER_PATTERN='"(YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY|REPLACE_ME)"'
 PLACEHOLDER_HITS=""
 while IFS= read -r f; do
     hit="$(awk -f "$STRIP_COMMENTS_AWK" "$f" 2>/dev/null \
@@ -363,14 +388,34 @@ while IFS= read -r f; do
     fi
 done < "$CS_LIST"
 if [ -n "$USERID_HITS" ]; then
-    # USERID_HITS format: <file>:<line>:<reason>:<value>
-    HIT_FILE_LINE="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ print $1 ":" $2 }')"
-    HIT_REASON="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ print $3 }')"
-    HIT_VALUE="$(printf '%s' "$USERID_HITS" | head -1 | awk -F: '{ for (i=4;i<NF;i++) printf "%s:", $i; print $NF }')"
-    add_check "user_id_not_test_value" "$HIT_FILE_LINE" "FAIL" \
+    # USERID_HITS format: <file>\t<line>\t<reason>\t<value>  (tab-delimited so file
+    # paths containing ':' don't corrupt parsing).
+    IFS=$'\t' read -r HIT_FILE HIT_LINE HIT_REASON HIT_VALUE <<< "$(printf '%s' "$USERID_HITS" | head -1)"
+    add_check "user_id_not_test_value" "$HIT_FILE:$HIT_LINE" "FAIL" \
         "MeticaInitConfig userId argument is a $HIT_REASON value ($HIT_VALUE). Replace with your real user-identity source before shipping."
 else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
+fi
+
+# 11. legacy_router_files_present — FAIL when the retired v0.4 router-stack
+# artifacts (IAdService.cs / MaxAdService.cs / AdServiceRouter.cs /
+# MeticaRolloutBinding.cs) are still present in the project after a v0.5.0
+# upgrade. Without this rule, a half-migrated project (new MeticaAdService +
+# stale router files) silently passes validation and ships with both code paths
+# active. Mirrors the integrator's Step 5 codegen tripwire so the same
+# guarantee holds on every CI re-validation, not just at codegen time.
+LEGACY_HIT=""
+while IFS= read -r f; do
+    case "$(basename "$f")" in
+        IAdService.cs|MaxAdService.cs|AdServiceRouter.cs|MeticaRolloutBinding.cs)
+            LEGACY_HIT="$f"; break ;;
+    esac
+done < "$CS_LIST"
+if [ -n "$LEGACY_HIT" ]; then
+    add_check "legacy_router_files_present" "$LEGACY_HIT" "FAIL" \
+        "Retired router-stack file present (router stack was removed in v0.5.0). Delete IAdService.cs / MaxAdService.cs / AdServiceRouter.cs / MeticaRolloutBinding.cs and use the standalone MeticaAdService instead."
+else
+    add_check "legacy_router_files_present" "" "PASS" "No retired router-stack files present."
 fi
 
 # DEFERRED to a follow-up patch (tracked in Notion log §11):
@@ -389,13 +434,13 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.2.0",\n'
+printf '  "schema": "validator/1.3.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'
-printf '  "warnings": [],\n'
+printf '  "warnings": [%s],\n' "$WARNINGS"
 printf '  "checks": [\n'
-printf '%b' "$CHECKS"
+printf '%s' "$CHECKS"
 printf '\n  ]\n}\n'
 
 [ "$STATUS" = "PASS" ] && exit 0 || exit 1

@@ -151,6 +151,27 @@ assert_case bad-userid-multiline          "FAIL" "fresh"        \
 assert_case good-commented-test-userid    "PASS" "fresh"        \
     "placeholder_ids_replaced:PASS" "user_id_not_test_value:PASS"
 
+# Regression: userId containing the substring 'test' as part of a word
+# (contest-user-42) must NOT trip user_id_not_test_value. The pre-fix regex
+# matched 'test' anywhere; the tightened pattern requires - / _ boundaries.
+assert_case good-legitimate-userid-with-test-substring "PASS" "fresh" \
+    "user_id_not_test_value:PASS"
+
+# Regression: a constant NAMED YOUR_METICA_API_KEY (holding the real value) must
+# NOT trip placeholder_ids_replaced — the placeholder check matches only string
+# literal values, not identifier names.
+assert_case good-placeholder-named-constant "PASS" "fresh" \
+    "placeholder_ids_replaced:PASS"
+
+# New: MRec format coverage — broken MRec integration FAILs
+assert_case bad-mrec-no-callbacks         "FAIL" "fresh"        \
+    "mrec_callbacks_subscribed:FAIL" "mrec_load_show_parity:FAIL"
+
+# New: legacy router-stack files from v0.4.x → FAIL on validate (forces the
+# user to clean up half-migrated projects rather than ship double-init).
+assert_case bad-legacy-router-files       "FAIL" "fresh"        \
+    "legacy_router_files_present:FAIL"
+
 # New: straight-swap mode (Max present, no remote config). Validated with an
 # explicit --mode; no router is generated and the dropped ad_service_router_present
 # check must not appear.
@@ -180,11 +201,13 @@ else
 fi
 rm -rf "$nometica"
 
-# Deprecated alias: --mode=side-by-side maps to straight-swap (v0.3.x back-compat).
-# The router stack is no longer generated, so SBS and straight-swap validate identically.
+# Deprecated alias: --mode=side-by-side maps to straight-swap (v0.3.x back-compat),
+# AND must emit a deprecation entry in warnings[] so CI callers see a migration
+# signal instead of the alias silently coercing behind their back.
 out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1) || true
-if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ]; then
-    printf "  ok    --mode=side-by-side alias maps to straight-swap\n"; pass=$((pass+1))
+if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ] \
+   && printf '%s' "$out" | grep -q 'side-by-side is deprecated'; then
+    printf "  ok    --mode=side-by-side alias maps to straight-swap + emits deprecation warning\n"; pass=$((pass+1))
 else
     printf "  FAIL  --mode=side-by-side alias unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi

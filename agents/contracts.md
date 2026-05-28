@@ -92,11 +92,12 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.2.0`
+## `validator/1.3.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
 - `mode`: `fresh`, `straight-swap`, `unknown`
+- `warnings`: array of human-readable deprecation/migration strings (currently emitted only by the `--mode=side-by-side` alias path).
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
@@ -106,14 +107,28 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`.
 - `privacy_before_init` — both privacy calls before `Initialize` (same-file ordering in both modes).
-- `<format>_callbacks_subscribed` — for each used format, `OnAdLoadSuccess` + `OnAdLoadFailed` subscribed.
+- `<format>_callbacks_subscribed` — for each used format (banner, interstitial, rewarded, mrec), `OnAdLoadSuccess` + `OnAdLoadFailed` subscribed.
 - `rewarded_reward_callback` — when rewarded is used, `OnAdRewarded` subscribed.
-- `<format>_load_show_parity` — every Load has a matching Show.
+- `<format>_load_show_parity` — every Load has a matching Show (banner, interstitial, rewarded, mrec).
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL when the format is used but `OnAdHidden` is not subscribed.
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY when `Show` is called without an `IsReady` check.
 - `revenue_callback_subscribed` — ADVISORY.
-- `placeholder_ids_replaced` *(added in 1.2.0)* — FAIL when `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY` / `REPLACE_ME` literals appear in source (comments stripped via `scripts/lib/strip-comments.awk` to avoid false positives on README-style commented-out examples).
-- `user_id_not_test_value` *(added in 1.2.0)* — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string literal, or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
+- `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appears as a **string literal value** in source (comments stripped via `scripts/lib/strip-comments.awk`; the regex requires surrounding `"..."` so a user constant *named* `YOUR_METICA_API_KEY` holding a real value does not false-positive).
+- `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string (matched as a delimited word — `-`/`_` boundaries or quote anchors — so legitimate ids like `"contest-user-42"` or `"latest-build"` do not false-positive), or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. The check's outer collector is string-aware, so a test value containing `(` or `)` (`"test)hacker"`) cannot bypass the check. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
+- `legacy_router_files_present` *(added in 1.3.0)* — FAIL when any retired v0.4 router-stack artifact (`IAdService.cs` / `MaxAdService.cs` / `AdServiceRouter.cs` / `MeticaRolloutBinding.cs`) is still present in the project. Catches half-migrated upgrades that the integrator's codegen tripwire (`unity-integrator.md` Step 5) only checks at write-time. Mirrors the same filename list so the two stay in lockstep.
+- `mrec_callbacks_subscribed` / `mrec_load_show_parity` *(added in 1.3.0)* — same shape as the banner/interstitial/rewarded rules. The new MRec template shipped without validator coverage in 1.2.0 (broken MRec integrations silently passed); 1.3.0 closes that gap. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
+
+**Changes in 1.3.0** (minor, backward-compatible):
+- Added `legacy_router_files_present`, `mrec_callbacks_subscribed`, `mrec_load_show_parity` rules.
+- Tightened the `user_id_not_test_value` regex to require delimiter boundaries around `test`/`debug`/`dummy`/`placeholder` (the old anywhere-substring regex flagged `contest-user-42`, `latest-build`, etc).
+- Tightened the `placeholder_ids_replaced` pattern to require the YOUR_*/REPLACE_ME match be enclosed in `"..."` (the old loose pattern flagged identifier names too).
+- The `check-init-userid.awk` outer scanner is now string-aware (matches the inner `parse_args`), so test-value userIds containing literal `(` / `)` no longer silently bypass the check. It also rejects identifier-prefix substring matches like `OtherMeticaInitConfig(`.
+- `check-init-userid.awk` now emits TAB-separated records instead of colon-separated, so file paths containing `:` do not corrupt the parsed `<file>\t<line>\t<reason>\t<value>` tuple.
+- `strip-comments.awk` now tracks `in_verbatim` across lines (matching `clean-cs.awk`) and recognises C# char literals (`'\"'`, `'\\''`, `'\\n'`, etc.) so a `"`-containing char literal doesn't put the parser into bogus string-mode.
+- Final JSON emit no longer uses `printf '%b'` for the `checks` block — that printf flag interpreted JSON-escaped `\\\\` back into `\\` and produced invalid JSON whenever a field contained an odd-count of `\` chars. Switched to `%s` plus a real-newline separator.
+- The validator now runs a startup self-test on `clean-cs.awk` / `strip-comments.awk`; if either is missing or broken, the script `die_json`s instead of silently reporting an all-PASS report (the prior `|| c=0` pattern swallowed awk failures).
+- `--mode=side-by-side` now also emits a deprecation entry in `warnings[]` (previously coerced silently).
+- `warnings` is a documented contract field (previously always emitted as `[]` but undocumented).
 
 **Changes in 1.2.0** (minor, backward-compatible):
 - Added `placeholder_ids_replaced` and `user_id_not_test_value` checks. These were briefly present in v0.2.x then removed in v0.3.0 (commit `e42d709`) on the rationale that the integrator already knew which placeholders it embedded. They are reinstated because the validator's role is to lint **any** MeticaSDK integration (hand-rolled code, post-edit drift, CI checks) — not just the integrator's fresh output — so the checks have to live in the validator regardless of what the integrator reports.
@@ -126,7 +141,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ```json
 {
-  "schema": "validator/1.2.0",
+  "schema": "validator/1.3.0",
   "status": "FAIL",
   "mode": "straight-swap",
   "error": null,

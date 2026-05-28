@@ -25,7 +25,7 @@ public class MeticaRewardedAd
         _runner = runner;
         MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess += OnLoadSuccess;
         MeticaAdsCallbacks.Rewarded.OnAdLoadFailed  += OnLoadFailed;
-        MeticaAdsCallbacks.Rewarded.OnAdDisplayed   += OnDisplayed;
+        MeticaAdsCallbacks.Rewarded.OnAdShowSuccess += OnShowSuccess;
         MeticaAdsCallbacks.Rewarded.OnAdHidden      += OnHidden;
         MeticaAdsCallbacks.Rewarded.OnAdClicked     += OnClicked;
         MeticaAdsCallbacks.Rewarded.OnAdRewarded    += OnRewarded;
@@ -59,7 +59,7 @@ public class MeticaRewardedAd
         _retryDelay = Mathf.Min(_retryDelay * 2f, _retryDelayMax);
     }
 
-    private void OnDisplayed(MeticaAd ad)     { Debug.Log("[Metica] rewarded displayed"); }
+    private void OnShowSuccess(MeticaAd ad)   { Debug.Log("[Metica] rewarded displayed"); }
     // Auto-reload: load the next rewarded as soon as the current one is dismissed.
     private void OnHidden(MeticaAd ad)        { Load(); }
     private void OnClicked(MeticaAd ad)       { Debug.Log("[Metica] rewarded clicked"); }

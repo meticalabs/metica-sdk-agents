@@ -418,7 +418,7 @@ Event-name table (Max → Metica):
 |---|---|---|
 | `OnAdLoadedEvent` | `MeticaAdsCallbacks.<Format>.OnAdLoadSuccess` | `MeticaAd` |
 | `OnAdLoadFailedEvent` | `MeticaAdsCallbacks.<Format>.OnAdLoadFailed` | `MeticaAdError` |
-| `OnAdDisplayedEvent` | `MeticaAdsCallbacks.<Format>.OnAdDisplayed` | `MeticaAd` |
+| `OnAdDisplayedEvent` | `MeticaAdsCallbacks.<Format>.OnAdShowSuccess` | `MeticaAd` |
 | `OnAdHiddenEvent` | `MeticaAdsCallbacks.<Format>.OnAdHidden` | `MeticaAd` |
 | `OnAdClickedEvent` | `MeticaAdsCallbacks.<Format>.OnAdClicked` | `MeticaAd` |
 | `OnAdRevenuePaidEvent` | `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid` | `MeticaAd` |
