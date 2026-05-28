@@ -55,12 +55,12 @@ PROJECT=/absolute/path/to/your/unity/project
 The integrator runs in 7 steps:
 
 1. **Compat-check** — Unity ≥ 2021.3, Java ≥ 11, MaxSDK ≥ 8.2.0 (when present), Android API ≥ 23, MeticaSDK installed. Any FAIL → BLOCK with a specific remediation (e.g. the GitHub Releases URL if MeticaSDK isn't imported yet).
-2. **Mode detection** — multi-signal: `Assets/MaxSdk/` folder, `MaxSdk.Initialize(` symbol, AppLovin manifest entry. Two-of-three → side-by-side; else fresh.
+2. **Mode detection** — multi-signal: `Assets/MaxSdk/` folder, `MaxSdk.Initialize(` symbol, AppLovin manifest entry. Two-of-three → MaxSDK present, else **fresh**. When Max is present, Step 2.5 sub-divides by the remote-config provider it finds: no provider → **straight-swap** (replace Max in the game's call sites with MeticaSDK, no A/B router); a real provider (Firebase / AppMetrica / Unity Remote Config) → **side-by-side** (full router stack that A/B-tests Max vs Metica, never touches Max code).
 3. **Plan presentation** — Claude Code plan mode (or plain-text fallback) lists files to create / edit. You approve.
 4. **Git snapshot** — tags `pre-metica-integration` for one-command rollback.
-5. **Codegen** — fresh mode writes `Assets/Scripts/MeticaBootstrap.cs`; side-by-side writes 5 files under `Assets/Scripts/Metica/` (`IAdService`, `MaxAdService`, `MeticaAdService`, `AdServiceRouter`, `MeticaRolloutBinding`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified.
-6. **Validator** — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `ad_service_router_present` (side-by-side), etc.
-7. **Final report** — mode, SDK version, files changed, validator summary, rollback command (if anything failed), placeholder reminders, and (side-by-side only) a Max-callsite inventory with proposed rewrites you can ask the agent to apply.
+5. **Codegen** — every mode generates a `MeticaAdService` orchestrator plus per-format objects (`MeticaInterstitialAd` / `MeticaRewardedAd` / `MeticaBannerAd`) that own each format's callbacks, auto-reload on hidden (interstitial/rewarded), and `IsReady`-guarded `Show()`. **Fresh** writes the orchestrator + per-format files under `Assets/Scripts/Metica/` plus a thin `MeticaBootstrap.cs` MonoBehaviour. **Straight-swap** writes the same standalone set and rewrites the game's direct Max call sites to call it directly. **Side-by-side** writes 8 files under `Assets/Scripts/Metica/` (the orchestrator + per-format trio + `IAdService` / `MaxAdService` / `AdServiceRouter` / `MeticaRolloutBinding`, all in `namespace Metica.AbTest`). Existing `Assets/MaxSdk/` is **never** modified; in straight-swap, dedicated Max-wrapper files (e.g. `AdManager.cs`) are also left alone — only the game's direct call sites are rewritten.
+6. **Validator** — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `<format>_reload_on_hidden`, `<format>_show_ready_guard`, etc.
+7. **Final report** — mode, SDK version, files changed, validator summary, rollback command (if anything failed), placeholder reminders (with the file:line of any `YOUR_METICA_API_KEY` / `YOUR_METICA_APP_ID` / `YOUR_MAX_SDK_KEY` still embedded), a userId reminder (the orchestrator's `MeticaInitConfig` userId is null until you wire your real identity source), and (Max-present modes) a Max-callsite inventory with proposed rewrites you can ask the agent to apply.
 
 ## Optional inputs
 
@@ -70,13 +70,13 @@ Tune behavior by passing any of these after `PROJECT=...`:
 |---|---|---|
 | `API_KEY` | `YOUR_METICA_API_KEY` | Metica API key |
 | `APP_ID` | `YOUR_METICA_APP_ID` | Metica App ID |
-| `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (side-by-side only) |
-| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh mode only) |
+| `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (Max-present modes: straight-swap and side-by-side) |
+| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded` (fresh and straight-swap; side-by-side generates all three) |
 | `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
-| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. Side-by-side only. |
+| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Drives the Max-present-mode split (no provider → straight-swap; real provider → side-by-side) and, in side-by-side, controls which provider the generated `MeticaRolloutBinding.cs` wires `AdServiceRouter.RolloutDecisionFunc` against. |
 | `REMOTE_CONFIG_KEY` | `metica_rollout` | Boolean-typed key name read from the remote-config provider. Side-by-side only. |
 | `NAMESPACE` | auto-detected | Explicit namespace for all generated files (overrides project-dominant detection). Pass an empty string to force bare/no-namespace. |
-| `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the side-by-side adapter folder (must start with `Assets/`; absolute paths and `..` segments are rejected). Side-by-side only. |
+| `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the Metica adapter folder (must start with `Assets/`; absolute paths and `..` segments are rejected). Used by fresh, straight-swap, and side-by-side. |
 
 ## The three agents
 

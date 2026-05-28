@@ -24,7 +24,7 @@ PLUGIN_DIR="$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/metica-sdk-agent
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root." >&2; exit 1; }
 
 PROJECT="<absolute_project_path>"
-MODE_ARG=""   # or "--mode=fresh" / "--mode=side-by-side"
+MODE_ARG=""   # or "--mode=fresh" / "--mode=straight-swap" / "--mode=side-by-side"
 
 JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" $MODE_ARG)
 printf '```json\n%s\n```\n' "$JSON"

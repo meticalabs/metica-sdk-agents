@@ -108,7 +108,16 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
 - `checks[].detail`: one-line message describing what was found.
 
-**Rules emitted** (see `scripts/validate-integration.sh` for exact conditions): `init_count`, `privacy_before_init`, `<format>_callbacks_subscribed`, `rewarded_reward_callback`, `<format>_load_show_parity`, `revenue_callback_subscribed` (ADVISORY), and — added in 1.1.0 — `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` (FAIL when the format is used but `OnAdHidden` is not subscribed), `interstitial_show_ready_guard` / `rewarded_show_ready_guard` (ADVISORY when `Show` is called without an `IsReady` check).
+**Rules emitted** (see `scripts/validate-integration.sh` for exact conditions):
+
+- `init_count` — exactly one `MeticaSdk.Initialize(`.
+- `privacy_before_init` — both privacy calls before `Initialize` (same-file in fresh/straight-swap; router-bootstrap in side-by-side).
+- `<format>_callbacks_subscribed` — for each used format, `OnAdLoadSuccess` + `OnAdLoadFailed` subscribed.
+- `rewarded_reward_callback` — when rewarded is used, `OnAdRewarded` subscribed.
+- `<format>_load_show_parity` — every Load has a matching Show.
+- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` *(added in 1.1.0)* — FAIL when the format is used but `OnAdHidden` is not subscribed.
+- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` *(added in 1.1.0)* — ADVISORY when `Show` is called without an `IsReady` check.
+- `revenue_callback_subscribed` — ADVISORY.
 
 Credential hygiene (placeholder `YOUR_*` keys, hardcoded test userIds) is intentionally **not** in the validator's rule set — the integrator already knows which placeholders/userId it embedded into the files it generated and surfaces them as concrete reminders in its final report (`integrator.md` Step 7). Re-deriving the values from arbitrary user C# in a grep validator was costly for marginal value.
 

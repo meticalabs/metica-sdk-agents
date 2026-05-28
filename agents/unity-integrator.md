@@ -722,7 +722,7 @@ grep -nE 'YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY' \
 ```
 
 - For each hit, render one bullet in the report: `<file>:<line>  <placeholder>  — replace with your real <kind> before shipping.`
-- The userId argument of `MeticaInitConfig(...)` in the generated `MeticaAdService.cs` orchestrator is always `null` (the integrator does not ask for it). Emit a single reminder regardless of mode: `User ID is null in MeticaInitConfig — for production, replace it with your real user-identity source (e.g. SystemInfo.deviceUniqueIdentifier or your account system's user id).`
+- The userId argument of `MeticaInitConfig(...)` in the generated orchestrator resolves to `null` (the integrator never asks for a userId; the side-by-side orchestrator threads it through the `MeticaAdService(_apiKey, _appId, _maxSdkKey)` constructor whose `userId` parameter defaults to null, and fresh/straight-swap pass `null` directly). Emit one reminder regardless of mode: `User ID is null in MeticaInitConfig — for production, replace it with your real user-identity source (e.g. SystemInfo.deviceUniqueIdentifier or your account system's user id).`
 - These reminders are advisory; they do not flip status. They appear under "Manual steps remaining" in the PASS path AND under the FAIL path's manual-steps section.
 
 When validator returned **PASS**, emit the standard summary only, optionally followed by reminders if `API_KEY` / `APP_ID` / `MAX_SDK_KEY` placeholders were used.
