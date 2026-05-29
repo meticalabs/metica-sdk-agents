@@ -167,7 +167,7 @@ After rendering a template, the integrator may apply a small set of **determinis
 
 Patch passes are **explicit, named, and pure**: each one takes a file path + a discovery field and produces an edit. They're easier to reason about than a parameterized template DSL.
 
-Per the testing decision (§9, §10/OQ-C), the patch passes remain **agent-applied prose**, not standalone scripts with per-patch goldens. They are validated *indirectly*: a fixture's correctly-integrated output must PASS the validator, so a botched patch surfaces as a validator FAIL. The accepted gap — no direct regression test of the patch mechanism itself — is documented in §9.
+Per the testing decision (§9, §10/Review-OQ C), the patch passes remain **agent-applied prose**, not standalone scripts with per-patch goldens. They are validated *indirectly*: a fixture's correctly-integrated output must PASS the validator, so a botched patch surfaces as a validator FAIL. The accepted gap — no direct regression test of the patch mechanism itself — is documented in §9.
 
 ### 6.3 `MeticaAdService.cs.tmpl` finally exists
 
@@ -217,10 +217,11 @@ Migration steps:
 4. **CLAUDE.md & README**: rewrite the "two modes" section into "discover → adapt → validate → autofix". The mode labels still appear in the validator's `mode` field, but the integrator stops branching on them — they become a property of the result, not a control-flow input.
 5. **Validator schema:** unchanged at `validator/1.4.0`. No new rules. The mode field's allowed values remain `fresh`, `straight-swap`, `unknown` — the validator still auto-detects from `HAS_MAX` and labels the result. (Removing the label from the validator output would break consumers; not worth it.)
 6. **`--mode=side-by-side` alias:** removed. v0.3.x callers have had two major versions to migrate; the alias was always a transition tool.
+7. **Integrator reaction (`agents/contracts.md`):** update the "Integrator's reaction to sub-agent results" subsection — `validator.status == FAIL` now drives the autofix loop (classify, patch with anchor re-check, re-validate, max 3 iterations) before falling back to the rollback hint. The validator contract itself is unchanged; only the integrator's documented reaction changes.
 
 ## 9. Testing
 
-**Decision (OQ-C): prose-heavy, shrink the testing surface.** Discovery and the patch passes stay as agent prose (§5, §6.2); only the *deterministic, scriptable* output — template rendering and the validator's verdict — is golden-tested in bash. The suite does **not** regex-assert the discovery Markdown block or the patch mechanism (a pure-bash harness can't observe what the agent emits or edits). Those are verified at the agent/manual level plus the plan-mode audit checkpoint. **Accepted, documented gap:** there is no direct regression test of discovery inference or patch application; the safety net is that every fixture's correctly-integrated output must PASS the validator, so a broken result surfaces as a FAIL.
+**Decision (Review-OQ C): prose-heavy, shrink the testing surface.** Discovery and the patch passes stay as agent prose (§5, §6.2); only the *deterministic, scriptable* output — template rendering and the validator's verdict — is golden-tested in bash. The suite does **not** regex-assert the discovery Markdown block or the patch mechanism (a pure-bash harness can't observe what the agent emits or edits). Those are verified at the agent/manual level plus the plan-mode audit checkpoint. **Accepted, documented gap:** there is no direct regression test of discovery inference or patch application; the safety net is that every fixture's correctly-integrated output must PASS the validator, so a broken result surfaces as a FAIL.
 
 What the suite asserts:
 
@@ -249,15 +250,15 @@ All five original open questions were resolved in the 2026-05-29 review, along w
 | OQ2 | Multiple wrapper candidates | **List + explicit pick**: one candidate auto-selected and shown for confirmation; >1 requires an explicit choice in plan mode, never a silent default. | §5 |
 | OQ3 | Autofix write races | **Surface via anchor re-check**: re-read the target before each edit, confirm the anchor line; on mismatch emit the patch + `file:line` and log it. Never retry the write. | §7 bounds |
 | OQ4 | Discovery scan cost | **Seam now, cache later**: discovery + validator read through one `clean_source()` accessor in v1.0 (awk still inline); the materialized cache is a later localized drop-in with no fixture churn. | §5 |
-| OQ5 | Plan-mode skimming | **Two-tier preview**: one-line summary + a focused "confirm these inferences" list (wrapper / namespace / adapter folder / user-id, each with its source anchor) + the full mechanical plan below. | §4, see note |
-| A | User-id collection timing | **Collect at plan time** (on the OQ5 inferences list) so run-1 validation PASSes; the reactive autofix prompt remains only as the fallback for hand-rolled code linted outside the integrator. | §7 table |
-| B | Autofix ownership | **Integrator owns the loop; validator stays purely read-only.** `agents/contracts.md` updated; rollback stays a last-resort hint. | §7 ownership |
-| C | Scripted vs. prose boundary | **Prose-heavy, shrink §9** to template byte-shape + validator-on-output/-defect fixtures; the discovery/patch coverage gap is accepted and documented. | §6.2, §9 |
+| OQ5 | Plan-mode skimming | **Two-tier preview**: one-line summary + a focused "confirm these inferences" list (wrapper / namespace / adapter folder / user-id, each with its source anchor) + the full mechanical plan below. | §4; detail at end of §10 |
+| Review-OQ A | User-id collection timing | **Collect at plan time** (on the OQ5 inferences list) so run-1 validation PASSes; the reactive autofix prompt remains only as the fallback for hand-rolled code linted outside the integrator. | §7 table |
+| Review-OQ B | Autofix ownership | **Integrator owns the loop; validator stays purely read-only.** `agents/contracts.md` updated; rollback stays a last-resort hint. | §7 ownership |
+| Review-OQ C | Scripted vs. prose boundary | **Prose-heavy, shrink §9** to template byte-shape + validator-on-output/-defect fixtures; the discovery/patch coverage gap is accepted and documented. | §6.2, §9 |
 
 **Residual risk (carried into implementation, not blocking):**
 
 - **OQ1 verification** — confirm the flow-based wrapper test matches the May 28 repro project's actual wrapper shape. Requires the sibling `../max-agent-test/DemoApp`, which is absent from a clean clone; this is a **local manual check** for whoever has the repro, before v1.0 lands.
-- **OQ-C coverage gap** — discovery inference and patch application have no direct bash-golden regression test (verified via plan-mode review + validator-on-output). Deliberate, per §9.
+- **Review-OQ C coverage gap** — discovery inference and patch application have no direct bash-golden regression test (verified via plan-mode review + validator-on-output). Deliberate, per §9.
 
 **Plan-mode preview structure** (OQ5): the integrator's Step 3 emits, in order — (1) a one-line summary (`Detected: Max + wrapper, no remote-config gate. Will write 4 files, rewrite 3 call sites.`), (2) a **"Confirm these inferences"** list naming only the fuzzy/inferred decisions with their source anchors (`wrapper = AdManager.cs`, `namespace = Game.Ads.Metica (from AdManager.cs)`, `adapter folder = Assets/Scripts/Ads/Metica/`, `userId = <to collect>`), then (3) the full codegen plan. Scrutiny is directed at the decisions that, if wrong, silently produce foreign code — and that are only correctable before the write.
 
