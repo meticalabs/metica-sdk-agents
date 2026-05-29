@@ -1,6 +1,6 @@
 # RFC: v1.0 — discover-adapt-validate-autofix
 
-**Status:** Draft
+**Status:** Reviewed — ready for planning (open questions resolved 2026-05-29; see §10)
 **Author:** Drafted via Claude Code in session `01CdEYfGRcqm2pMfzcn4ikTv`
 **Supersedes:** the explicit mode-detect step (`mode-detect/2.x`) and the rollback-first failure mode of v0.9.x
 
@@ -130,12 +130,16 @@ The discovery checklist (in order, each line is a single Bash invocation or `Gre
 |---|---|---|
 | MaxSDK install (folder, manifest) | `find` + `grep` | `Max integration` |
 | Direct `MaxSdk.*` call sites (file:line + method + args) | `grep` through `clean-cs.awk` | `Direct Max call sites` |
-| Wrapper class (a class with non-Max public API that wraps `MaxSdk.*`) | `grep -l 'MaxSdk\.' Assets/Scripts/`, then `Read` candidates and look for `public ... Show/Load` methods that don't take a Max-style adUnitId | `Max wrapper detected` |
+| Wrapper class (a class with non-Max public API that wraps `MaxSdk.*`) | `grep -l 'MaxSdk\.' Assets/Scripts/`, then `Read` candidates. **Flow-based test, not name-based** (OQ1): a method is a wrapper method when the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class; if the method's own `string` parameter is forwarded straight into Max's ad-unit slot, the class is a routing layer → treat its call sites as direct. | `Max wrapper detected` |
 | Placement strings (2nd arg to `ShowInterstitial`/`ShowRewarded`) | `grep -oE 'ShowInterstitial\("[^"]*", "[^"]*"' \| awk -F'"' '{print $4}'` | `Placement strings observed` |
 | Custom-data strings (3rd arg) | same, 6th field | `Custom data observed` |
 | Trigger pattern (who calls `*.Show*` from the wrapper) | `grep -rn '$WrapperClass\.Show' Assets/Scripts/` | `Trigger pattern` |
 | Remote-config provider (Firebase / Unity Remote Config / AppMetrica) | existing Step 2.5 logic | `Remote-config provider` |
 | Remote-config gate around ad calls | `grep` for `RemoteConfig.Get` / `FirebaseRemoteConfig` keys near MaxSdk call sites | `Remote-config gate` |
+
+**Wrapper detection stays a prose judgment confirmed in plan mode** (OQ1) — it is *not* promoted to a precise scripted rule. When discovery finds **more than one** wrapper candidate, it lists them all and the plan-mode preview requires an explicit pick; a single candidate is auto-selected and shown for confirmation, never silently chosen (OQ2).
+
+**Shared cleaned-source seam** (OQ4): discovery and the validator both read C# source through a single `clean_source(path)` accessor. In v1.0 its body still shells `clean-cs.awk` / `strip-comments.awk` inline (current behavior); the materialized cleaned-source cache that amortises the awk passes is a later, localized drop-in behind this seam — no fixture churn when it lands.
 
 **Why not JSON?** Two reasons:
 
@@ -161,7 +165,9 @@ After rendering a template, the integrator may apply a small set of **determinis
 | Rename `MeticaAdService` | wrapper detected with neutral name (e.g. `AdsManager`) → orchestrator class renamed to e.g. `MeticaAdsManager` so it sits next to the wrapper visually | wrapper class name |
 | Adapter-folder placement | wrapper detected → place adapters next to the wrapper file | wrapper's parent directory |
 
-Patch passes are **explicit, named, and pure**: each one takes a file path + a discovery field and produces an edit. They're easier to test than a parameterized template DSL.
+Patch passes are **explicit, named, and pure**: each one takes a file path + a discovery field and produces an edit. They're easier to reason about than a parameterized template DSL.
+
+Per the testing decision (§9, §10/OQ-C), the patch passes remain **agent-applied prose**, not standalone scripts with per-patch goldens. They are validated *indirectly*: a fixture's correctly-integrated output must PASS the validator, so a botched patch surfaces as a validator FAIL. The accepted gap — no direct regression test of the patch mechanism itself — is documented in §9.
 
 ### 6.3 `MeticaAdService.cs.tmpl` finally exists
 
@@ -186,15 +192,18 @@ The validator emits 11–13 rules. Each is classified as `autofix`, `prompt`, or
 | `<fmt>_show_ready_guard` (ADVISORY) | — | No action — advisory only |
 | `revenue_callback_subscribed` (ADVISORY) | — | No action — advisory only |
 | `placeholder_ids_replaced` | prompt | Ask for real value, substitute in source |
-| `user_id_not_test_value` | prompt | Ask for real expression (offer common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, …) |
+| `user_id_not_test_value` | prompt | **For the integrator's own output: collected at plan time** (Review-OQ A) — the real expression is gathered in the plan-mode preview so run-1 validation PASSes. The reactive prompt (offer `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, …) remains only as the fallback for hand-rolled code linted outside the integrator flow. |
 | `legacy_router_files_present` | surface | Cannot infer how the user wants the stale router code removed; surface and offer `git rm` |
+
+**Ownership** (Review-OQ B): the **validator stays purely read-only** — it lints and emits `validator/1.4.0` JSON, unchanged. The **integrator (orchestrator) owns the entire autofix loop**: it reads the validator's FAIL rows, classifies each via the table above, applies edits, writes the log, prompts the user where needed, and re-invokes the validator. The validator never edits and never prompts. `agents/contracts.md`'s "do not auto-rollback" line is updated accordingly: rollback stays a last-resort *hint*, never automatic — but the integrator now *reacts* to FAILs with autofix before falling back to that hint.
 
 **Bounds on the autofix loop**:
 
 - **Maximum 3 iterations.** After 3 validator runs that still produce new FAILs, the loop halts and falls back to the rollback hint. Prevents infinite loops if a fix introduces a new failure.
 - **No autofix produces a NET-NEW file.** Autofixes only edit existing files. (Codegen produces files; autofix patches them.) This is a hard invariant — it means a missing file is always `surface`, never `autofix`.
+- **Anchor re-check before every edit** (OQ3). Immediately before applying a patch, the integrator re-reads the target and confirms the line it intends to change still matches what the validator reported. On a mismatch (file changed on disk / open in an editor), it does **not** retry the write — it surfaces the suggested patch + `file:line` for manual application and logs the refusal. Surface, never retry.
 - **Each autofix records what it did** in a `.metica-integration.log` next to the adapter folder, so the user can audit the loop after the fact.
-- **Prompt-class fixes are interactive.** They pause the run and ask. They never silently substitute.
+- **Prompt-class fixes are interactive.** They pause the run and ask. They never silently substitute. (The most common one, `user_id_not_test_value`, is collected proactively at plan time — see §7 table — so the loop rarely needs to prompt for the integrator's own output.)
 
 ## 8. Migration from v0.9.x
 
@@ -211,35 +220,46 @@ Migration steps:
 
 ## 9. Testing
 
-The shape of the codegen-validator suite changes from "assert byte-shape of generated files" to "assert correct response to a realistic input fixture".
+**Decision (OQ-C): prose-heavy, shrink the testing surface.** Discovery and the patch passes stay as agent prose (§5, §6.2); only the *deterministic, scriptable* output — template rendering and the validator's verdict — is golden-tested in bash. The suite does **not** regex-assert the discovery Markdown block or the patch mechanism (a pure-bash harness can't observe what the agent emits or edits). Those are verified at the agent/manual level plus the plan-mode audit checkpoint. **Accepted, documented gap:** there is no direct regression test of discovery inference or patch application; the safety net is that every fixture's correctly-integrated output must PASS the validator, so a broken result surfaces as a FAIL.
 
-New fixture categories under `tests/discovery-fixtures/`:
+What the suite asserts:
 
-- `discovery-fixtures/clean-fresh/` — Unity project, no Max, no Metica. Expected discovery: `fresh, no wrapper, no remote-config`. Expected codegen: standalone adapters in `Assets/Scripts/Metica/`, namespace `Metica.AbTest` (or none, if project has no namespaces).
-- `discovery-fixtures/max-direct-calls/` — Unity project with `MaxSdk.*` called directly from game scripts (no wrapper). Expected discovery: `straight-swap, no wrapper, direct call sites at X file:line`. Expected codegen: standalone adapters in `Assets/Scripts/Metica/`, rewrites of direct call sites.
-- `discovery-fixtures/max-with-wrapper/` — Unity project with `AdManager.cs` wrapper around Max. Expected discovery: `straight-swap, wrapper at Assets/Scripts/Ads/AdManager.cs, public API: AdManager.ShowInterstitial(string)`. Expected codegen: adapters in `Assets/Scripts/Ads/Metica/` (next to wrapper), orchestrator API matches wrapper.
-- `discovery-fixtures/max-with-firebase-gate/` — Max + Firebase Remote Config with an `ads_enabled` key gating Max calls. Expected discovery includes the gate. Expected final report includes the cohort-gating recipe with the existing `ads_enabled` key.
+1. **Codegen byte-shape** — existing assertions on the rendered template files (template rendering is scripted via `emit_standalone` / `sed`; this is unchanged and now exercises the new `MeticaAdService.cs.tmpl`, §6.3).
+2. **Validator-on-output** — for each representative integration scenario, a hand-built *post-codegen* fixture that the validator must PASS.
+3. **Validator-on-defect** — for each `FAIL`-producing rule, a fixture that triggers it and asserts the validator reports that rule with the expected `file:line`. This confirms the autofix loop will always have a correct, located target to act on (and that `surface`-class rules are reported, not silently swallowed).
 
-Each fixture asserts on:
-1. Discovery output (regex against the structured Markdown block the agent emits)
-2. Codegen output (existing byte-shape assertions on the generated files)
-3. Validator result (PASS, with autofix log if applicable)
+Fixture scenarios (correctly-integrated, must PASS the validator):
 
-The autofix loop itself is tested via `tests/run-autofix-tests.sh`:
-- Per autofix-classified rule, a fixture that triggers the failure, asserts the loop applies the right patch, and asserts the second validator run PASSes.
-- Per surface-classified rule, a fixture that triggers the failure, asserts the loop does NOT patch, and asserts the rollback hint is emitted.
+- `clean-fresh/` — Unity project, no Max, no Metica. Expected codegen: standalone adapters in `Assets/Scripts/Metica/`. **Namespace: none when the project has no `namespace` declarations; `MeticaIntegration` when namespaces exist but none dominate; `<dominant>.Metica` when one dominates — never `Metica.AbTest`** (that token is the plugin templates' placeholder, never emitted into game-owner code; see `CLAUDE.md` and `unity-integrator.md` Step 2.5/Step 5). Include a no-namespace fixture and a dominant-namespace fixture.
+- `max-direct-calls/` — `MaxSdk.*` called directly from game scripts, no wrapper. Expected codegen: standalone adapters in `Assets/Scripts/Metica/` + rewritten direct call sites.
+- `max-with-wrapper/` — `AdManager.cs` wrapper around Max. Expected codegen: adapters in `Assets/Scripts/Ads/Metica/` (next to the wrapper), orchestrator API mirrors the wrapper, wrapper body rewritten to delegate.
+- `max-with-firebase-gate/` — Max + Firebase Remote Config with an `ads_enabled` key. Expected final report includes the cohort-gating recipe keyed on the existing `ads_enabled`.
 
-## 10. Risks & open questions
+`tests/run-autofix-tests.sh` (validator-driven, not agent-driven):
+- Per `autofix`-classified rule: a pre-fix fixture asserting the validator FAILs with that rule + `file:line`, paired with a post-fix fixture asserting the validator PASSes. (Tests that the loop's target and exit condition are correct; the agent's application of the patch is verified manually.)
+- Per `surface`-classified rule: a fixture asserting the validator FAILs with that rule, and that the rule is one the partition (§7) marks `surface` (so the integrator emits the rollback hint rather than patching).
 
-1. **Wrapper detection is fuzzy.** What counts as a "Max wrapper"? Heuristic: a class with at least one `public` method whose body calls `MaxSdk.*` AND does NOT take an adUnitId-shaped string parameter. Edge case: a wrapper that DOES take an adUnitId is more of a routing layer than a wrapper; we'd treat it as direct call sites. **OQ:** does this heuristic match the May 28 repro project's actual wrapper shape? Worth a manual check before v1.0 lands.
+## 10. Resolved decisions (was: risks & open questions)
 
-2. **Multiple wrappers.** What if the project has `AdManager.cs` AND `IronSourceAdapter.cs` (mediation layer)? Discovery would surface both; the user picks which one to adapt to. **OQ:** is this likely enough to warrant explicit handling, or rare enough that the plan-mode override path is sufficient?
+All five original open questions were resolved in the 2026-05-29 review, along with three follow-ups the review surfaced. Decisions are folded into the relevant sections above; recorded here for traceability.
 
-3. **Autofix and merge conflicts.** If the user's editor or another tool has the file open when autofix runs, the patch might fail. **OQ:** retry or surface? Probably surface — autofix should be cautious.
+| # | Question | Decision | Folded into |
+|---|---|---|---|
+| OQ1 | Wrapper-detection precision | **Prose judgment confirmed in plan mode**; the adUnitId-vs-placement ambiguity is resolved by *data flow* (Max unit-id from a field/const = wrapper; from the public param = routing → direct), not by parameter name. Not promoted to a scripted rule. | §5 table |
+| OQ2 | Multiple wrapper candidates | **List + explicit pick**: one candidate auto-selected and shown for confirmation; >1 requires an explicit choice in plan mode, never a silent default. | §5 |
+| OQ3 | Autofix write races | **Surface via anchor re-check**: re-read the target before each edit, confirm the anchor line; on mismatch emit the patch + `file:line` and log it. Never retry the write. | §7 bounds |
+| OQ4 | Discovery scan cost | **Seam now, cache later**: discovery + validator read through one `clean_source()` accessor in v1.0 (awk still inline); the materialized cache is a later localized drop-in with no fixture churn. | §5 |
+| OQ5 | Plan-mode skimming | **Two-tier preview**: one-line summary + a focused "confirm these inferences" list (wrapper / namespace / adapter folder / user-id, each with its source anchor) + the full mechanical plan below. | §4, see note |
+| A | User-id collection timing | **Collect at plan time** (on the OQ5 inferences list) so run-1 validation PASSes; the reactive autofix prompt remains only as the fallback for hand-rolled code linted outside the integrator. | §7 table |
+| B | Autofix ownership | **Integrator owns the loop; validator stays purely read-only.** `agents/contracts.md` updated; rollback stays a last-resort hint. | §7 ownership |
+| C | Scripted vs. prose boundary | **Prose-heavy, shrink §9** to template byte-shape + validator-on-output/-defect fixtures; the discovery/patch coverage gap is accepted and documented. | §6.2, §9 |
 
-4. **Discovery cost.** Each discovery signal is a Bash call. For a 1000-file project, that's ~10 calls, each running awk over the full source tree. The validator already does the same in its rule loop (see the angle-H review findings — ~18,000 awk subprocesses on a 500-file project). v1.0 could amortise by materialising a cleaned-source cache once, then having both discovery AND the validator read from it. **OQ:** worth doing as part of v1.0, or as a follow-up perf pass?
+**Residual risk (carried into implementation, not blocking):**
 
-5. **Plan-mode size.** The discovery block + codegen plan is ~30–50 lines. Some users may skim. Mitigation: a one-line summary at the top ("Detected: Max + wrapper, no remote-config gate. Will write 4 files, rewrite 3 call sites, no autofix expected.") then the full block below for scrutiny.
+- **OQ1 verification** — confirm the flow-based wrapper test matches the May 28 repro project's actual wrapper shape. Requires the sibling `../max-agent-test/DemoApp`, which is absent from a clean clone; this is a **local manual check** for whoever has the repro, before v1.0 lands.
+- **OQ-C coverage gap** — discovery inference and patch application have no direct bash-golden regression test (verified via plan-mode review + validator-on-output). Deliberate, per §9.
+
+**Plan-mode preview structure** (OQ5): the integrator's Step 3 emits, in order — (1) a one-line summary (`Detected: Max + wrapper, no remote-config gate. Will write 4 files, rewrite 3 call sites.`), (2) a **"Confirm these inferences"** list naming only the fuzzy/inferred decisions with their source anchors (`wrapper = AdManager.cs`, `namespace = Game.Ads.Metica (from AdManager.cs)`, `adapter folder = Assets/Scripts/Ads/Metica/`, `userId = <to collect>`), then (3) the full codegen plan. Scrutiny is directed at the decisions that, if wrong, silently produce foreign code — and that are only correctable before the write.
 
 ## 11. Out-of-scope (for v1.0)
 
