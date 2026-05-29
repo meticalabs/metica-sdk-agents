@@ -8,20 +8,17 @@
 # the unchanged validator over them. If a documented template is invalid, this
 # test catches it.
 #
-# Coverage:
+# Coverage (post-v0.5.0 — router stack retired):
 #   1. fresh / interstitial / no namespace          → PASS
 #   2. fresh / rewarded / namespace MyGame.Services → PASS  (validates wrap + reward callback)
 #   3. fresh / privacy AFTER init                   → FAIL  (negative golden)
-#   4. side-by-side / firebase binding              → PASS  (validates 4 adapter files + 5th binding)
-#   5. side-by-side / none binding                  → PASS  (validates TODO-stub variant)
-#   6. side-by-side / Metica-prefixed names         → PASS  (validates collision-prefix path)
+#   3b. straight-swap / no router artifacts         → PASS  (validates no IAdService/router leaked)
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VALIDATE="$PLUGIN_DIR/scripts/validate-integration.sh"
-TEMPLATE_DIR="$PLUGIN_DIR/scripts/templates/sidebyside"
 STANDALONE_DIR="$PLUGIN_DIR/scripts/templates/standalone"
 
 pass=0
@@ -64,25 +61,28 @@ emit_standalone_perfile() {
 # Reference impl of the agent's standalone codegen (fresh + straight-swap,
 # integrator.md Step 5): the orchestrator MeticaAdService.cs + per-format files
 # (copied from templates) + (fresh only) a thin MeticaBootstrap MonoBehaviour.
-# Args: project ns formats(csv) api app mode(fresh|straight-swap)
+# Args: project ns formats(csv) api app mode(fresh|straight-swap) [userid]
 emit_standalone() {
     local project="$1" ns="$2" formats="$3" api="$4" app="$5" mode="$6"
+    local userid="${7:-\"u-abc-123\"}"
     local dir="$project/Assets/Scripts/Metica"
     mkdir -p "$dir"
 
-    local has_banner=0 has_inter=0 has_rew=0
+    local has_banner=0 has_inter=0 has_rew=0 has_mrec=0
     case ",$formats," in *,banner,*) has_banner=1 ;; esac
     case ",$formats," in *,interstitial,*) has_inter=1 ;; esac
     case ",$formats," in *,rewarded,*) has_rew=1 ;; esac
+    case ",$formats," in *,mrec,*) has_mrec=1 ;; esac
 
     # Per-format objects (from templates).
     [ "$has_banner" = 1 ] && emit_standalone_perfile MeticaBannerAd       "$dir" "$ns"
     [ "$has_inter"  = 1 ] && emit_standalone_perfile MeticaInterstitialAd "$dir" "$ns"
     [ "$has_rew"    = 1 ] && emit_standalone_perfile MeticaRewardedAd     "$dir" "$ns"
+    [ "$has_mrec"   = 1 ] && emit_standalone_perfile MeticaMRecAd         "$dir" "$ns"
 
     # Mediation: fresh = none; straight-swap = MAX (Metica mediates via AppLovin).
     local mediation='null'
-    [ "$mode" = "straight-swap" ] && mediation='new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "MAXKEY99")'
+    [ "$mode" = "straight-swap" ] && mediation='new MeticaMediationInfo(MeticaMediationType.MAX, "MAXKEY99")'
 
     # Orchestrator: privacy precedes Initialize in this same file; constructs the
     # per-format objects in the init callback; exposes Show* delegators.
@@ -97,16 +97,23 @@ emit_standalone() {
         [ "$has_banner" = 1 ] && echo '    private MeticaBannerAd _banner;'
         [ "$has_inter"  = 1 ] && echo '    private MeticaInterstitialAd _interstitial;'
         [ "$has_rew"    = 1 ] && echo '    private MeticaRewardedAd _rewarded;'
+        [ "$has_mrec"   = 1 ] && echo '    private MeticaMRecAd _mrec;'
+        echo '    private MonoBehaviour _runner;'
+        echo '    public MeticaAdService(MonoBehaviour runner) { _runner = runner; }'
         echo '    public void Initialize()'
         echo '    {'
         echo '        MeticaSdk.Ads.SetHasUserConsent(true);'
         echo '        MeticaSdk.Ads.SetDoNotSell(false);'
-        printf '        var config = new MeticaInitConfig("%s", "%s", null);\n' "$api" "$app"
+        printf '        var config = new MeticaInitConfig("%s", "%s", %s);\n' "$api" "$app" "$userid"
         printf '        MeticaSdk.Initialize(config, %s, response =>\n' "$mediation"
         echo '        {'
-        [ "$has_banner" = 1 ] && echo '            _banner = new MeticaBannerAd("banner_main"); _banner.Create(); _banner.Load(); _banner.Show();'
-        [ "$has_inter"  = 1 ] && echo '            _interstitial = new MeticaInterstitialAd("interstitial_main"); _interstitial.Load();'
-        [ "$has_rew"    = 1 ] && echo '            _rewarded = new MeticaRewardedAd("rewarded_main"); _rewarded.Load();'
+        # Per-format adapters are MonoBehaviours so they can host the docs.metica.com
+        # Invoke-based retry for interstitial/rewarded. Orchestrator AddComponent's
+        # each onto the runner's GameObject and calls Initialize(adUnitId).
+        [ "$has_banner" = 1 ] && echo '            _banner = _runner.gameObject.AddComponent<MeticaBannerAd>(); _banner.Initialize("banner_main"); _banner.Create(); _banner.Load(); _banner.Show();'
+        [ "$has_inter"  = 1 ] && echo '            _interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("interstitial_main");'
+        [ "$has_rew"    = 1 ] && echo '            _rewarded = _runner.gameObject.AddComponent<MeticaRewardedAd>(); _rewarded.Initialize("rewarded_main");'
+        [ "$has_mrec"   = 1 ] && echo '            _mrec = _runner.gameObject.AddComponent<MeticaMRecAd>(); _mrec.Initialize("mrec_main"); _mrec.Create(); _mrec.Load(); _mrec.Show();'
         echo '        });'
         echo '    }'
         [ "$has_inter" = 1 ] && echo '    public void ShowInterstitial() { _interstitial?.Show(); }'
@@ -123,134 +130,12 @@ emit_standalone() {
             echo 'public class MeticaBootstrap : MonoBehaviour'
             echo '{'
             echo '    private MeticaAdService _ads;'
-            echo '    void Start() { _ads = new MeticaAdService(); _ads.Initialize(); }'
+            echo '    void Start() { _ads = new MeticaAdService(this); _ads.Initialize(); }'
             [ "$has_inter" = 1 ] && echo '    public void ShowInterstitial() { _ads.ShowInterstitial(); }'
             [ "$has_rew"   = 1 ] && echo '    public void ShowRewarded() { _ads.ShowRewarded(); }'
             echo '}'
         } > "$project/Assets/Scripts/MeticaBootstrap.cs"
     fi
-}
-
-# Reference impl of the agent's side-by-side codegen.
-# Reads templates verbatim and applies the documented transforms.
-# Args: project, namespace, prefix (may be empty), api_key, app_id, max_key
-emit_sbs_files() {
-    local project="$1" ns="$2" prefix="$3" api="$4" app="$5" maxk="$6"
-    local out_dir="$project/Assets/Scripts/Metica"
-    mkdir -p "$out_dir"
-
-    # Collision-prefixed stems: filename + identifier references get the prefix.
-    local files=(IAdService MaxAdService MeticaAdService AdServiceRouter)
-    for stem in "${files[@]}"; do
-        local tmpl="$TEMPLATE_DIR/$stem.cs.tmpl"
-        local out="$out_dir/${prefix}${stem}.cs"
-        # Apply transforms via sed: namespace + identifier prefix + key substitution.
-        sed \
-            -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
-            -e "s|} // namespace Metica\\.AbTest|} // namespace $ns|g" \
-            -e "s|__METICA_API_KEY__|$api|g" \
-            -e "s|__METICA_APP_ID__|$app|g" \
-            -e "s|__MAX_SDK_KEY__|$maxk|g" \
-            "$tmpl" > "$out"
-        if [ -n "$prefix" ]; then
-            # Replace identifier references in this order (no word-boundary regex,
-            # which BSD sed lacks). Order matters: rename the original class names
-            # FIRST so later renames don't accidentally match inside earlier
-            # prefixed forms (e.g. MeticaAdService → MeticaMeticaAdService must
-            # happen before AdServiceRouter → MeticaAdServiceRouter, otherwise
-            # MeticaAdServiceRouter would re-match as a prefix and become
-            # MeticaMeticaAdServiceRouter).
-            sed -i.bak \
-                -e "s|MeticaAdService|${prefix}MeticaAdService|g" \
-                -e "s|MaxAdService|${prefix}MaxAdService|g" \
-                -e "s|IAdService|${prefix}IAdService|g" \
-                -e "s|AdServiceRouter|${prefix}AdServiceRouter|g" \
-                "$out"
-            rm -f "$out.bak"
-            # Adjust the output filename: emit_sbs_files already wrote to ${prefix}${stem}.cs
-            # so no rename needed.
-        fi
-    done
-
-    # Per-format handler objects (split out of MeticaAdService). Their own class
-    # names don't collide with user types, so the FILENAME is never prefixed — but
-    # in prefix mode the shared identifier rename still runs over their content so
-    # any reference (and orchestrator mention in comments) stays consistent with
-    # the prefixed orchestrator/interface.
-    for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd; do
-        local out="$out_dir/$stem.cs"
-        sed \
-            -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
-            -e "s|} // namespace Metica\\.AbTest|} // namespace $ns|g" \
-            "$TEMPLATE_DIR/$stem.cs.tmpl" > "$out"
-        if [ -n "$prefix" ]; then
-            sed -i.bak \
-                -e "s|MeticaAdService|${prefix}MeticaAdService|g" \
-                -e "s|MaxAdService|${prefix}MaxAdService|g" \
-                -e "s|IAdService|${prefix}IAdService|g" \
-                -e "s|AdServiceRouter|${prefix}AdServiceRouter|g" \
-                "$out"
-            rm -f "$out.bak"
-        fi
-    done
-}
-
-# Args: project, namespace, prefix, variant (firebase|none), key
-emit_rollout_binding() {
-    local project="$1" ns="$2" prefix="$3" variant="$4" key="$5"
-    local out="$project/Assets/Scripts/Metica/${prefix}MeticaRolloutBinding.cs"
-    local router="${prefix}AdServiceRouter"
-
-    case "$variant" in
-        firebase)
-            cat > "$out" <<EOF
-using Firebase.RemoteConfig;
-using UnityEngine;
-
-namespace $ns
-{
-    static class MeticaRolloutBinding
-    {
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        static void Bind()
-        {
-            $router.RolloutDecisionFunc = () =>
-                FirebaseRemoteConfig.DefaultInstance.GetValue("$key").BooleanValue;
-        }
-    }
-}
-EOF
-            ;;
-        none)
-            cat > "$out" <<EOF
-using UnityEngine;
-
-namespace $ns
-{
-    static class MeticaRolloutBinding
-    {
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        static void Bind()
-        {
-            // CHOOSE ONE AND UNCOMMENT — DO NOT SHIP THIS STUB
-            //
-            // Firebase Remote Config:
-            // $router.RolloutDecisionFunc = () =>
-            //     Firebase.RemoteConfig.FirebaseRemoteConfig.DefaultInstance.GetValue("$key").BooleanValue;
-            //
-            // AppMetrica:
-            // $router.RolloutDecisionFunc = () =>
-            //     Io.AppMetrica.AppMetrica.GetFeatureFlag("$key");
-            //
-            // Unity Remote Config:
-            // $router.RolloutDecisionFunc = () =>
-            //     Unity.Services.RemoteConfig.RemoteConfigService.Instance.appConfig.GetBool("$key");
-        }
-    }
-}
-EOF
-            ;;
-    esac
 }
 
 run_case() {
@@ -314,122 +199,127 @@ p="$(make_sbs_project)"
 emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" "straight-swap"
 if [ ! -f "$p/Assets/Scripts/Metica/AdServiceRouter.cs" ] \
    && [ ! -f "$p/Assets/Scripts/Metica/MaxAdService.cs" ] \
+   && [ ! -f "$p/Assets/Scripts/Metica/IAdService.cs" ] \
    && [ ! -f "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" ]; then
-    run_case "straight-swap interstitial (no router/Max adapter/binding)" "PASS" "$p" "straight-swap"
+    run_case "straight-swap interstitial (no router/Max adapter/binding/iadservice)" "PASS" "$p" "straight-swap"
 else
     echo "  FAIL  straight-swap interstitial  (unexpected router/Max-adapter/binding file generated)"
     fail=$((fail+1))
     rm -rf "$p"
 fi
 
-# 4. side-by-side / firebase binding
-p="$(make_sbs_project)"
-emit_sbs_files "$p" "Metica.AbTest" "" "ABC123" "XYZ987" "MAXKEY99"
-emit_rollout_binding "$p" "Metica.AbTest" "" "firebase" "metica_rollout"
-if grep -q "FirebaseRemoteConfig.DefaultInstance.GetValue" "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs"; then
-    run_case "sbs firebase binding" "PASS" "$p" "side-by-side"
+# 4. MRec template — generated file uses the right Metica casing (Mrec, not MRec).
+p="$(make_fresh_project)"
+emit_standalone "$p" "Metica.AbTest" "interstitial,mrec" "ABC123" "XYZ987" "fresh"
+if grep -q "MeticaSdk.Ads.LoadMrec(" "$p/Assets/Scripts/Metica/MeticaMRecAd.cs" \
+    && grep -q "MeticaAdsCallbacks.Mrec.OnAdLoadSuccess" "$p/Assets/Scripts/Metica/MeticaMRecAd.cs" \
+    && ! grep -q "MeticaSdk.Ads.LoadMRec(" "$p/Assets/Scripts/Metica/MeticaMRecAd.cs"; then
+    run_case "fresh mrec (correct Mrec casing)" "PASS" "$p" "fresh"
 else
-    echo "  FAIL  sbs firebase binding  (binding template missing FirebaseRemoteConfig call)"
+    echo "  FAIL  fresh mrec template casing"
+    grep -nE 'M[Rr]ec' "$p/Assets/Scripts/Metica/MeticaMRecAd.cs" | sed 's/^/        /'
     fail=$((fail+1))
     rm -rf "$p"
 fi
 
-# 5. side-by-side / none binding (TODO-stub)
-p="$(make_sbs_project)"
-emit_sbs_files "$p" "Metica.AbTest" "" "ABC123" "XYZ987" "MAXKEY99"
-emit_rollout_binding "$p" "Metica.AbTest" "" "none" "metica_rollout"
-all_three=1
-grep -q "Firebase Remote Config:"     "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-grep -q "AppMetrica:"                  "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-grep -q "Unity Remote Config:"         "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" || all_three=0
-if [ "$all_three" = 1 ]; then
-    run_case "sbs none binding (TODO stub)" "PASS" "$p" "side-by-side"
-else
-    echo "  FAIL  sbs none binding (TODO stub)  (missing one of the three commented examples)"
-    fail=$((fail+1))
-    rm -rf "$p"
-fi
-
-# 6. side-by-side / Metica-prefixed names (collision-prefix path)
-p="$(make_sbs_project)"
-# Pre-existing IAdService in the project triggers prefix mode.
-mkdir -p "$p/Assets/Scripts/Existing"
-cat > "$p/Assets/Scripts/Existing/IAdService.cs" <<'EOF'
-namespace Existing { public interface IAdService { } }
-EOF
-emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "ABC123" "XYZ987" "MAXKEY99"
-emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
-if grep -q "MeticaAdServiceRouter" "$p/Assets/Scripts/Metica/MeticaAdServiceRouter.cs" \
-    && grep -q "namespace MyGame.Services.Metica" "$p/Assets/Scripts/Metica/MeticaAdServiceRouter.cs"; then
-    run_case "sbs Metica-prefixed names" "PASS" "$p" "side-by-side"
-else
-    echo "  FAIL  sbs Metica-prefixed names  (prefix or namespace not applied)"
-    fail=$((fail+1))
-    rm -rf "$p"
-fi
-
-# 7. Property: after prefix mode, NO unprefixed base name leaks into any
-# generated file. This guards against a future rename-order regression
-# (adding a 6th class without thinking through substring overlap).
-p="$(make_sbs_project)"
-emit_sbs_files "$p" "MyGame.Services.Metica" "Metica" "ABC123" "XYZ987" "MAXKEY99"
-emit_rollout_binding "$p" "MyGame.Services.Metica" "Metica" "firebase" "metica_rollout"
-unprefixed_leaks=0
-for stem in IAdService MaxAdService MeticaAdService AdServiceRouter; do
-    # An unprefixed name is one that doesn't have an alphanumeric or '_' char
-    # immediately before it. Use grep -P for negative lookbehind.
-    if grep -rPq "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" 2>/dev/null; then
-        echo "        leak: unprefixed '$stem' found in generated files"
-        grep -rnP "(?<![A-Za-z0-9_])${stem}(?![A-Za-z0-9_])" "$p/Assets/Scripts/Metica/" | sed 's/^/          /'
-        unprefixed_leaks=1
+# 5. Named handlers + docs-aligned retry shape — every per-format template uses
+# named handler methods (OnLoadSuccess, OnLoadFailed, etc.). Interstitial and
+# Rewarded carry the docs.metica.com retry pattern (int _retryAttempt counter,
+# Math.Pow(2, Math.Min(6, attempt)) backoff, Invoke(nameof(Load), …)) and so are
+# MonoBehaviours (Invoke is MonoBehaviour-only). Banner and MRec do NOT carry
+# retry — per the docs example, those rely on the SDK's internal refresh and
+# only log on OnLoadFailed.
+shape_ok=1
+for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    # Named handler — at least OnLoadSuccess and OnLoadFailed as separate method declarations.
+    if ! grep -qE 'private[[:space:]]+void[[:space:]]+OnLoadSuccess' "$tmpl"; then
+        echo "  shape FAIL: $stem missing named OnLoadSuccess handler"; shape_ok=0
+    fi
+    if ! grep -qE 'private[[:space:]]+void[[:space:]]+OnLoadFailed' "$tmpl"; then
+        echo "  shape FAIL: $stem missing named OnLoadFailed handler"; shape_ok=0
+    fi
+    # All four templates are now MonoBehaviours (so the orchestrator can
+    # AddComponent uniformly and interstitial/rewarded can host Invoke-based retry).
+    if ! grep -qE 'class[[:space:]]+'"$stem"'[[:space:]]*:[[:space:]]*MonoBehaviour' "$tmpl"; then
+        echo "  shape FAIL: $stem must be a MonoBehaviour"; shape_ok=0
     fi
 done
-if [ "$unprefixed_leaks" = "0" ]; then
-    echo "  PASS  sbs prefix property (no unprefixed leaks)"
+# Retry scaffold lives only in interstitial + rewarded (matches the docs example).
+for stem in MeticaInterstitialAd MeticaRewardedAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if ! grep -q '_retryAttempt' "$tmpl"; then
+        echo "  shape FAIL: $stem missing _retryAttempt counter (docs retry pattern)"; shape_ok=0
+    fi
+    if ! grep -qE 'System\.Math\.Pow\(2,[[:space:]]*System\.Math\.Min\(6' "$tmpl"; then
+        echo "  shape FAIL: $stem missing Math.Pow(2, Math.Min(6, …)) backoff formula"; shape_ok=0
+    fi
+    if ! grep -qE 'Invoke\(nameof\(Load\)' "$tmpl"; then
+        echo "  shape FAIL: $stem missing Invoke(nameof(Load), …) retry call"; shape_ok=0
+    fi
+done
+# Banner/MRec must NOT carry retry (matches the docs: SDK handles refresh).
+# Banner/MRec must ALSO carry the canonical HomeScreen.cs behaviors:
+#   - optional placementTag arg on Create() + SetXPlacement call
+#   - _isShowing state flag
+#   - OnApplicationFocus pause/resume gated on _isShowing
+for stem in MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if grep -q '_retryAttempt' "$tmpl"; then
+        echo "  shape FAIL: $stem must NOT carry retry — docs example doesn't retry banner/MRec"; shape_ok=0
+    fi
+    if grep -qE 'Invoke\(nameof\(Load\)' "$tmpl"; then
+        echo "  shape FAIL: $stem must NOT call Invoke(nameof(Load), …)"; shape_ok=0
+    fi
+    # Create() signature may span multiple lines; check the body contains a
+    # placementTag parameter ahead of the SetXPlacement call.
+    if ! awk '/public[[:space:]]+void[[:space:]]+Create\(/,/\)/' "$tmpl" | grep -q 'placementTag'; then
+        echo "  shape FAIL: $stem.Create must accept an optional placementTag parameter"; shape_ok=0
+    fi
+    if ! grep -qE 'Set(Banner|Mrec)Placement\(' "$tmpl"; then
+        echo "  shape FAIL: $stem must call SetBannerPlacement/SetMrecPlacement when placementTag provided"; shape_ok=0
+    fi
+    if ! grep -q '_isShowing' "$tmpl"; then
+        echo "  shape FAIL: $stem missing _isShowing state flag"; shape_ok=0
+    fi
+    if ! grep -qE 'OnApplicationFocus\(bool' "$tmpl"; then
+        echo "  shape FAIL: $stem missing OnApplicationFocus(bool) handler"; shape_ok=0
+    fi
+    if ! grep -qE 'Start(Banner|Mrec)AutoRefresh\(' "$tmpl"; then
+        echo "  shape FAIL: $stem missing StartBannerAutoRefresh/StartMrecAutoRefresh call (in OnApplicationFocus)"; shape_ok=0
+    fi
+    if ! grep -qE 'Stop(Banner|Mrec)AutoRefresh\(' "$tmpl"; then
+        echo "  shape FAIL: $stem missing StopBannerAutoRefresh/StopMrecAutoRefresh call (in OnApplicationFocus)"; shape_ok=0
+    fi
+done
+
+# All four templates: diagnostic revenue log carries adUnitId / revenue /
+# networkName / placementTag (matches the canonical HomeScreen.cs revenue log).
+for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    # The revenue handler body must reference all four diagnostic fields.
+    for field in 'ad\.adUnitId' 'ad\.revenue' 'ad\.networkName' 'ad\.placementTag'; do
+        if ! grep -qE "$field" "$tmpl"; then
+            echo "  shape FAIL: $stem revenue log missing ${field//\\/} field"; shape_ok=0
+        fi
+    done
+done
+
+# All four templates: init-ordering comment on Initialize() so users don't
+# call it before MeticaSdk.Initialize fires its callback.
+for stem in MeticaInterstitialAd MeticaRewardedAd MeticaBannerAd MeticaMRecAd; do
+    tmpl="$STANDALONE_DIR/$stem.cs.tmpl"
+    if ! grep -qE 'OnInitialized callback|MeticaAdService' "$tmpl"; then
+        echo "  shape FAIL: $stem missing the init-ordering comment on Initialize()"; shape_ok=0
+    fi
+done
+
+if [ "$shape_ok" = "1" ]; then
+    echo "  PASS  per-format templates: named handlers + docs-aligned retry shape + canonical lifecycle"
     pass=$((pass+1))
 else
-    echo "  FAIL  sbs prefix property (unprefixed names leaked)"
     fail=$((fail+1))
 fi
-rm -rf "$p"
-
-# 8/9. integrator Step 7 credential-hygiene grep (documented prose). Asserts
-# the snippet in agents/unity-integrator.md actually locates YOUR_* placeholders
-# in the files the integrator writes, and produces zero matches on a clean run.
-# Mirrors the snippet verbatim — if anyone edits one and not the other, this fails.
-step7_grep() {
-    local proj="$1" out
-    shopt -s nullglob
-    out=$(grep -nE 'YOUR_METICA_API_KEY|YOUR_METICA_APP_ID|YOUR_MAX_SDK_KEY' \
-        "$proj/Assets/Scripts/Metica"/*.cs \
-        "$proj/Assets/Scripts/MeticaBootstrap.cs" 2>/dev/null || true)
-    shopt -u nullglob
-    printf '%s' "$out"
-}
-
-# 8. unsubstituted placeholder → grep locates it.
-p="$(make_fresh_project)"
-emit_standalone "$p" "Metica.AbTest" "interstitial" "YOUR_METICA_API_KEY" "real-app-id" "fresh"
-if printf '%s' "$(step7_grep "$p")" | grep -q 'YOUR_METICA_API_KEY'; then
-    echo "  PASS  step 7 grep locates YOUR_* placeholder"
-    pass=$((pass+1))
-else
-    echo "  FAIL  step 7 grep did not locate YOUR_METICA_API_KEY in generated files"
-    fail=$((fail+1))
-fi
-rm -rf "$p"
-
-# 9. real keys substituted → grep is silent.
-p="$(make_fresh_project)"
-emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" "fresh"
-if [ -z "$(step7_grep "$p")" ]; then
-    echo "  PASS  step 7 grep emits no placeholders on a clean run"
-    pass=$((pass+1))
-else
-    echo "  FAIL  step 7 grep matched on a clean run: $(step7_grep "$p")"
-    fail=$((fail+1))
-fi
-rm -rf "$p"
 
 echo
 echo "Pass: $pass   Fail: $fail"

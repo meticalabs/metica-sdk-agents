@@ -11,7 +11,7 @@ public class MeticaAdService
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
 
-        MeticaSdk.Initialize(new MeticaInitConfig("metica-api-key-abc", "metica-app-123", null), null, r =>
+        MeticaSdk.Initialize(new MeticaInitConfig("metica-api-key-abc", "metica-app-123", "u-abc-123"), null, r =>
         {
             _interstitial = new MeticaInterstitialAd("inter_main");
             _interstitial.Load();

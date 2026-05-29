@@ -8,7 +8,7 @@ public class MeticaBootstrap : MonoBehaviour
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
-        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", null), null, r => {});
+        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", "u-abc-123"), null, r => {});
         MeticaSdk.Ads.LoadInterstitial("inter_main");
         // BUG: never called MeticaSdk.Ads.ShowInterstitial
     }

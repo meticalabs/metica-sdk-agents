@@ -87,9 +87,6 @@ assert_case good-fresh                    "PASS" "fresh"        \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS" \
     "interstitial_reload_on_hidden:PASS"
 
-assert_case good-sidebyside               "PASS" "side-by-side" \
-    "init_count:PASS" "interstitial_reload_on_hidden:PASS"
-
 assert_case bad-no-init                   "FAIL" "fresh"        \
     "init_count:FAIL"
 
@@ -134,9 +131,58 @@ assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
 
+# New (1.4.0): interstitial without OnAdShowFailed FAILs — show-failure does not
+# fire OnAdHidden, so the reload loop alone is incomplete.
+assert_case bad-no-show-failed            "FAIL" "fresh"        \
+    "interstitial_show_failed_subscribed:FAIL"
+
 # New: Show without an IsReady guard → ADVISORY, still overall PASS.
 assert_case advisory-no-ready-guard       "PASS" "fresh"        \
     "interstitial_show_ready_guard:ADVISORY"
+
+# Credential-hygiene checks (validator/1.2.0 — reinstating what e42d709 removed).
+# Validator is an integration linter for human code, not just our codegen smoke
+# test, so these checks belong in the script — not just in the integrator report.
+assert_case bad-placeholder-key           "FAIL" "fresh"        \
+    "placeholder_ids_replaced:FAIL"
+
+assert_case bad-test-userid               "FAIL" "fresh"        \
+    "user_id_not_test_value:FAIL"
+
+assert_case bad-userid-multiline          "FAIL" "fresh"        \
+    "user_id_not_test_value:FAIL"
+
+# Commented-out test value must NOT trip the check (strip-comments.awk gates).
+assert_case good-commented-test-userid    "PASS" "fresh"        \
+    "placeholder_ids_replaced:PASS" "user_id_not_test_value:PASS"
+
+# Regression: userId containing the substring 'test' as part of a word
+# (contest-user-42) must NOT trip user_id_not_test_value. The pre-fix regex
+# matched 'test' anywhere; the tightened pattern requires - / _ boundaries.
+assert_case good-legitimate-userid-with-test-substring "PASS" "fresh" \
+    "user_id_not_test_value:PASS"
+
+# Regression: a constant NAMED YOUR_METICA_API_KEY (holding the real value) must
+# NOT trip placeholder_ids_replaced — the placeholder check matches only string
+# literal values, not identifier names.
+assert_case good-placeholder-named-constant "PASS" "fresh" \
+    "placeholder_ids_replaced:PASS"
+
+# New: MRec format coverage — broken MRec integration FAILs
+assert_case bad-mrec-no-callbacks         "FAIL" "fresh"        \
+    "mrec_callbacks_subscribed:FAIL" "mrec_load_show_parity:FAIL"
+
+# New: legacy router-stack files from v0.4.x → FAIL on validate (forces the
+# user to clean up half-migrated projects rather than ship double-init).
+# The check looks for `class AdServiceRouter` / `class MeticaRolloutBinding`
+# declarations, NOT filenames — so user-owned `IAdService.cs` does not false-positive.
+assert_case bad-legacy-router-files       "FAIL" "fresh"        \
+    "legacy_router_files_present:FAIL"
+
+# Regression: a user-owned ad abstraction named IAdService.cs (no AdServiceRouter
+# / MeticaRolloutBinding declaration) must NOT trip legacy_router_files_present.
+assert_case good-user-owned-iadservice    "PASS" "fresh"        \
+    "legacy_router_files_present:PASS"
 
 # New: straight-swap mode (Max present, no remote config). Validated with an
 # explicit --mode; no router is generated and the dropped ad_service_router_present
@@ -167,8 +213,19 @@ else
 fi
 rm -rf "$nometica"
 
+# Deprecated alias: --mode=side-by-side maps to straight-swap (v0.3.x back-compat),
+# AND must emit a deprecation entry in warnings[] so CI callers see a migration
+# signal instead of the alias silently coercing behind their back.
+out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1) || true
+if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ] \
+   && printf '%s' "$out" | grep -q 'side-by-side is deprecated'; then
+    printf "  ok    --mode=side-by-side alias maps to straight-swap + emits deprecation warning\n"; pass=$((pass+1))
+else
+    printf "  FAIL  --mode=side-by-side alias unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+fi
+
 # Assert all-fixtures JSON parses (no syntax errors)
-for fx in good-fresh good-sidebyside bad-no-init bad-double-init bad-privacy-after-init \
+for fx in good-fresh bad-no-init bad-double-init bad-privacy-after-init \
           bad-no-interstitial-callback bad-load-no-show bad-no-reward-callback advisory-no-revenue \
           good-string-literal-mention good-block-comment-mention bad-cross-file-privacy; do
     out=$(bash "$VALIDATE" --project="$FIX/$fx" 2>&1) || true

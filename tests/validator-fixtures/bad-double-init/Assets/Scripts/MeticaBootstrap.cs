@@ -8,8 +8,8 @@ public class MeticaBootstrap : MonoBehaviour
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
-        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", null), null, r => {});
-        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", null), null, r => {}); // BUG: duplicate
+        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", "u-abc-123"), null, r => {});
+        MeticaSdk.Initialize(new MeticaInitConfig("KEY", "APP", "u-abc-123"), null, r => {}); // BUG: duplicate
         MeticaSdk.Ads.LoadInterstitial("inter_main");
     }
     void ShowAd() { MeticaSdk.Ads.ShowInterstitial("inter_main"); }
