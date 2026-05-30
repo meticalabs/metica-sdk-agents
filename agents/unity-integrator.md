@@ -208,7 +208,7 @@ The label affects only two things downstream: the mediation argument to `MeticaS
 | **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test (OQ1):** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
 | **Multiple wrapper candidates (OQ2)** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
 | Formats in use | which of `LoadBanner` / `LoadInterstitial` / `LoadRewarded(Ad)` / `LoadMRec` appear | `Formats used` |
-| Placement strings | 2nd arg to `Show<Format>(adUnitId, "placement"…)` | `Placement strings observed` |
+| Placement strings (with counts) | 2nd arg to `Show<Format>(adUnitId, "placement"…)`; record each distinct string **with its occurrence count** (e.g. `"level_complete" (3), "shop_continue" (1)`) so the "default placement" patch pass can pick the most-frequent | `Placement strings observed` |
 | Custom-data strings | 3rd arg to `Show<Format>(…)` | `Custom data observed` |
 | Trigger pattern | who calls the wrapper's / game's `Show*` (e.g. `LevelEndController.OnLevelEnd`) | `Trigger pattern` |
 
@@ -311,7 +311,7 @@ The snippet now implements both branches: an exact-namespace majority and a pref
 
 These do not need a detection-report row; they are applied during codegen:
 
-- **Adapter folder pick** — `ls "$PROJECT/Assets/"`. If `Assets/_Project/Scripts/` exists, the folder is `Assets/_Project/Scripts/Metica`. Else if `Assets/Game/Scripts/` exists, `Assets/Game/Scripts/Metica`. Else default `Assets/Scripts/Metica`.
+- **Adapter folder pick** — **if discovery detected a wrapper, place the adapter folder next to it** (`<wrapper's parent dir>/Metica`, e.g. wrapper at `Assets/Scripts/Ads/AdManager.cs` → `Assets/Scripts/Ads/Metica`) so the new files sit beside the code they replace; this takes precedence (it is the "adapter folder next to wrapper" patch pass, Step 5). Otherwise `ls "$PROJECT/Assets/"`: if `Assets/_Project/Scripts/` exists, use `Assets/_Project/Scripts/Metica`; else if `Assets/Game/Scripts/` exists, `Assets/Game/Scripts/Metica`; else default `Assets/Scripts/Metica`.
 - **MeticaAdService collision check** — before writing, Grep `$PROJECT/Assets/` (outside `$ADAPTER_FOLDER`) for an existing `class\s+MeticaAdService` definition. If found, prepend `Metica` to the orchestrator (`MeticaMeticaAdService.cs`) and update all references in the generated files (the per-format objects construct it by name from the bootstrap). The per-format helper classes (`MeticaInterstitialAd`, etc.) are unlikely to collide with user code; if any do, fall back to manual rename and tell the user.
 
 #### Detection report (show to user, then proceed)
@@ -323,11 +323,11 @@ Detected remote-config provider: firebase (3 of 71 .cs files import Firebase.Rem
   Alternatives present: (none)  |  appmetrica (1 import)  |  ...
   → cohort-gating recipe will be included in the final report (Step 7)
 Detected dominant namespace: MyGame.Services (38 of 71 .cs files)
-Resolved adapter folder: Assets/_Project/Scripts/Metica
+Resolved adapter folder: Assets/Scripts/Ads/Metica   (next to wrapper AdManager.cs)
 Resolved namespace wrap: MyGame.Services.Metica
 ```
 
-In fresh mode, omit the provider line. When no namespace dominates and the project has no namespaces at all, show `Resolved namespace wrap: (none — emit without wrapper)`.
+In fresh mode, omit the provider line. When no namespace dominates and the project has no namespaces at all, show `Resolved namespace wrap: (none — emit without wrapper)`. When a wrapper was detected, the adapter-folder line shows the wrapper-adjacent resolution `(next to wrapper <file>)`; otherwise it shows the default pick (`Assets/_Project/Scripts/Metica`, `Assets/Game/Scripts/Metica`, or `Assets/Scripts/Metica`).
 
 Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
 
@@ -534,9 +534,22 @@ Then generate:
 
 1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (note: `mrec` maps to `MeticaMRecAd.cs.tmpl`), apply the namespace transform (see below), and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. **All four per-format adapters are `MonoBehaviour`s** — Interstitial and Rewarded need this so they can host the docs.metica.com retry pattern (`Invoke(nameof(Load), (float)delay)`, which is a `MonoBehaviour`-only method); Banner and MRec are `MonoBehaviour`s too for construction uniformity. Per the docs, Banner and MRec do **not** carry app-side retry — the SDK refreshes them internally — so those templates omit the retry block and only log on `OnAdLoadFailed`.
 
-2. **Orchestrator `MeticaAdService.cs`** — privacy (`SetHasUserConsent`/`SetDoNotSell`) **immediately precedes** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationType.MAX, "<MAX_KEY_ESC>"), …)` in this same file (note: `MeticaMediationType` is a **top-level** enum in `Metica.Ads`, not nested under `MeticaMediationInfo` — see the docs.metica.com Unity SDK example). In the init callback, **`AddComponent` each per-format adapter onto the runner's `gameObject`, then call `Initialize(adUnitId)` on it** — for example, `_interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("<ad_unit_id>");`. Reuse the **game's existing Max ad unit ID** for that format (per the migration guide they pass through unchanged). Expose `Show<Format>()` delegators. Include only the formats in `$FORMATS`.
+2. **Orchestrator `MeticaAdService.cs`** — privacy (`SetHasUserConsent`/`SetDoNotSell`) **immediately precedes** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationType.MAX, "<MAX_KEY_ESC>"), …)` in this same file (note: `MeticaMediationType` is a **top-level** enum in `Metica.Ads`, not nested under `MeticaMediationInfo` — see the docs.metica.com Unity SDK example). In the init callback, **`AddComponent` each per-format adapter onto the runner's `gameObject`, then call `Initialize(adUnitId)` on it** — for example, `_interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("<ad_unit_id>");`. Reuse the **game's existing Max ad unit ID** for that format (per the migration guide they pass through unchanged). Expose `Show<Format>()` delegators (the patch passes below may widen these to mirror a detected wrapper's API). Include only the formats in `$FORMATS`.
 
 3. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (the per-format objects own them).
+
+#### Post-template patch passes (conform codegen to the host — RFC v1.0 §6.2)
+
+After rendering the templates, apply a small, fixed set of **deterministic, named patch passes** parameterised by the Step 2 discovery findings. Each takes a file + a discovery field and produces one edit; they are **agent-applied** (the `Edit` tool) — not a template DSL, not a separate script. Per RFC Review-OQ C they are validated *indirectly*: the conformed output must still PASS the validator, so a botched patch surfaces as a validator FAIL. Apply only the passes whose trigger fired in discovery; skip the rest (fresh mode fires none — there is no wrapper or observed placement to conform to). The templates' structural shape never changes — these only **add** host-conforming lines (per the directive "don't change the structure of the placeholder files, just add logic").
+
+| Pass | Trigger (from discovery) | Edit |
+|---|---|---|
+| **Mirror wrapper API** | a wrapper was detected | **Replace** the template's parameterless `Show<Format>()` delegator with one matching the wrapper's public signature — **never append a second overload** (that would leave the parameterless delegator as dead/ambiguous code). Value params forward straight into `Show(...)`: e.g. wrapper `ShowInterstitial(string placement)` → `public void ShowInterstitial(string placement) { _interstitial?.Show(placement); }`. A **delegate/`Action` param** (e.g. `onReward` on `ShowRewarded(string placement, Action onReward)`) cannot be threaded through the fire-and-forget `Show()` — wire it to the rewarded adapter's `OnAdRewarded` handler instead; if the mapping isn't a clean 1:1, **surface it in the Step 3 plan for the user to confirm, never silently drop it**. The game's existing call sites keep compiling against the same surface. |
+| **Default placement** | placement strings observed | Where the delegator would otherwise pass `null`, pass the **most-frequent observed placement** (from the Step 2 placement counts; ties broken by first-seen) instead — e.g. `_interstitial?.Show("level_complete")`. The per-format `Show(string placement = null, …)` already accepts it — no template change. |
+| **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness with §6.2.) |
+| **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
+
+Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
 
 **Codegen self-check (tripwire — must always pass).** After writing the files, grep the just-generated tree for any artifact that should be impossible to produce in the post-v0.5.0 world. If anything matches, abort the run and emit an error: this means the agent has slipped back into the retired side-by-side codegen path.
 
