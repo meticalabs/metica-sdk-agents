@@ -54,35 +54,9 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 ---
 
-## `mode-detect/2.0.0`
+## `validator/1.4.0`-adjacent note: mode is self-detected
 
-Emitted by `scripts/detect-mode.sh`. Consumed by the integrator to choose between fresh-mode and straight-swap codegen.
-
-**Allowed values:**
-- `mode`: `fresh`, `straight-swap`
-- `signals[<id>].present`: boolean
-- `signals[<id>].location`: relative path (or `file:line`); empty when not present
-
-**Decision rule:** two-of-three Max signals present → `straight-swap`, else `fresh`. The script emits the **final mode label** directly — no integrator-side prose interpretation step. When `straight-swap` is selected, Step 2.5's remote-config detection runs in the integrator to drive the Step 7 cohort-gating recipe; it does NOT branch the generated artifacts.
-
-**Changes in 2.0.0** (major — removed an enum value):
-- Renamed `side-by-side` → `straight-swap` (the router stack was retired in plugin v0.5.0; the only Max-present codegen path now is straight-swap, which is what the script emits directly).
-- No new fields, no new flags. The integrator no longer has to combine `mode-detect` output with a separate provider judgment — the v0.3.x three-way matrix collapsed.
-
-**Concrete example:**
-
-```json
-{
-  "schema": "mode-detect/2.0.0",
-  "mode": "straight-swap",
-  "signals": {
-    "maxsdk_folder":      { "present": true,  "location": "Assets/MaxSdk/" },
-    "maxsdk_init_symbol": { "present": true,  "location": "Assets/Scripts/HomeScreen.cs:60" },
-    "applovin_manifest":  { "present": true,  "location": "Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" }
-  },
-  "decision": "3 of 3 signals present (>=2 → straight-swap)."
-}
-```
+There is no mode-detection contract. Mode is derived inline — by the integrator during discovery (Step 2) and by the validator from `HAS_MAX` — using the same rule (any cleaned `MaxSdk.` reference → `straight-swap`, else `fresh`). See "Retired contracts" below.
 
 ---
 
@@ -97,7 +71,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
 - `mode`: `fresh`, `straight-swap`, `unknown`
-- `warnings`: array of human-readable deprecation/migration strings (currently emitted only by the `--mode=side-by-side` alias path).
+- `warnings`: array of human-readable deprecation/migration strings. Currently always empty — the only path that populated it (the `--mode=side-by-side` alias) was removed in plugin v1.0.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
@@ -185,8 +159,12 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 ---
 
+## Retired contracts
+
+- **`mode-detect/2.x`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted and the explicit mode-detect step removed; mode is now a *property* derived inline (integrator discovery Step 2; validator from `HAS_MAX`), not a sub-agent contract. No deprecation alias — the script and its `run-mode-tests.sh` / `mode-fixtures/` are gone. The validator still emits a `mode` field (`fresh`/`straight-swap`/`unknown`) as a property of its result, but nothing branches on a mode *contract* anymore.
+
 ## Versioning policy
 
 - Bump minor (`1.0.0` → `1.1.0`) when adding optional fields. Orchestrator must remain backward-compatible.
 - Bump major (`1.0.0` → `2.0.0`) when removing or renaming required fields. Orchestrator and producers update in lockstep.
-- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `mode-detect/2.x`, `validator/1.x`).
+- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `validator/1.x`).

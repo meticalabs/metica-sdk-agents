@@ -5,9 +5,9 @@
 # Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 #
-# `--mode=side-by-side` is accepted as a deprecated alias for `straight-swap`
-# (kept for backward-compat with v0.3.x callers; the router stack is no longer
-# generated, so both modes validate identically).
+# When --mode is omitted, the mode is self-detected from MaxSDK presence
+# (HAS_MAX → straight-swap, else fresh). The v0.3.x `--mode=side-by-side` alias
+# was removed in v1.0 (the router stack was retired in v0.5.0).
 
 set -u
 set -o pipefail
@@ -68,14 +68,6 @@ done
 WARNINGS=""
 case "$MODE" in
     ""|fresh|straight-swap) ;;
-    side-by-side)
-        # Deprecated alias kept for v0.3.x backward compat; the router stack is
-        # no longer generated, so SBS and straight-swap validate identically.
-        # Emit a warning so callers (CI scripts) see a migration signal in their
-        # output rather than the alias silently changing semantics behind their
-        # back.
-        MODE="straight-swap"
-        WARNINGS='"--mode=side-by-side is deprecated; use --mode=straight-swap. The router stack was retired in v0.5.0 and the two modes validate identically."' ;;
     *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap)" ;;
 esac
 

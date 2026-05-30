@@ -12,7 +12,7 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
-- `MODE` — optional `fresh` or `straight-swap`. When omitted, the script auto-detects from project contents (presence of `MaxSdk.*` → straight-swap, otherwise fresh). `--mode=side-by-side` is accepted as a deprecated alias for `straight-swap` (v0.3.x back-compat; the router stack is no longer generated).
+- `MODE` — optional `fresh` or `straight-swap`. When omitted, the script auto-detects from project contents (presence of `MaxSdk.*` → straight-swap, otherwise fresh). The v0.3.x `--mode=side-by-side` alias was removed in v1.0 (the router stack was retired in v0.5.0) — it is now rejected as an invalid mode.
 
 ## What to do — run this single bash command
 

@@ -213,15 +213,13 @@ else
 fi
 rm -rf "$nometica"
 
-# Deprecated alias: --mode=side-by-side maps to straight-swap (v0.3.x back-compat),
-# AND must emit a deprecation entry in warnings[] so CI callers see a migration
-# signal instead of the alias silently coercing behind their back.
-out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1) || true
-if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ] \
-   && printf '%s' "$out" | grep -q 'side-by-side is deprecated'; then
-    printf "  ok    --mode=side-by-side alias maps to straight-swap + emits deprecation warning\n"; pass=$((pass+1))
+# Removed-alias guard: --mode=side-by-side was retired in v1.0 and must now be
+# rejected as an invalid mode (contract-shaped error, exit non-zero).
+out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1); rc=$?
+if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'Invalid --mode: side-by-side'; then
+    printf "  ok    --mode=side-by-side is rejected (alias retired in v1.0)\n"; pass=$((pass+1))
 else
-    printf "  FAIL  --mode=side-by-side alias unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+    printf "  FAIL  --mode=side-by-side should be rejected as invalid:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi
 
 # Assert all-fixtures JSON parses (no syntax errors)
