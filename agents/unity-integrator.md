@@ -7,9 +7,9 @@ model: sonnet
 
 # Metica Unity Integrator
 
-Orchestrates MeticaSDK integration. Calls sub-agents for preflight, mode-detection, and validation. Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
+Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
 
-Accepted sub-agent contract versions: `compat-checker/1.x`, `mode-detect/2.x`, `validator/1.x`. See `agents/contracts.md` for schemas and JSON extraction regex.
+Accepted sub-agent contract versions: `compat-checker/1.x`, `validator/1.x`. See `agents/contracts.md` for schemas and JSON extraction regex. (Mode detection is no longer a sub-agent contract — it is derived inline during Step 2 discovery; the retired `mode-detect/2.x` script is removed in the v1.0 cleanup.)
 
 ## Inputs from user
 
@@ -162,31 +162,65 @@ Rules for the rendering:
 - If there are multiple FAILs, list all of them and end with one consolidated "After applying the fixes…" line.
 - The only failure the integrator may auto-resolve is `metica_sdk` (see "MeticaSDK auto-install" above). For Unity / Java / MaxSDK / Android-API failures, do **not** offer to apply fixes — those touch project settings or the user's machine, and the user has full agency there.
 
-### Step 2 — Mode detection
+### Step 2 — Discovery
+
+Discovery replaces the old `detect-mode.sh` step **and** the Step 5 call-site inventory. It is **one inline step** run via the Bash / Grep / Read tools — there is **no script and no JSON contract**. The findings accumulate into a **structured Markdown block** that is shown to the user in Step 3 and reused as input to codegen in Step 5. Some signals are inherently fuzzy (wrapper detection, trigger pattern); keeping them in prose is deliberate — the user confirms them in the Step 3 plan, so perfect precision is not required (and forcing them into JSON would make the fuzziness *look* precise, which is worse).
+
+Source the shared cleaned-source accessor once so every scan ignores matches inside string literals and comments — byte-identical to what the validator sees (the cleaned-source cache lands behind this same seam later; see RFC v1.0 OQ4):
 
 ```bash
-bash "$PLUGIN_DIR/scripts/detect-mode.sh" --project="$PROJECT"
+source "$PLUGIN_DIR/scripts/lib/clean-source.sh"
+clean_source_selftest || { echo "clean-source accessor is broken; aborting." >&2; exit 1; }
+
+# Game C# only — exclude both vendored SDKs and Unity-managed dirs.
+game_cs() {
+    find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
+        | grep -v -e '/MaxSdk/' -e '/MeticaSdk/' -e '/PackageCache/' \
+                  -e '/Library/' -e '/Temp/' -e '/obj/'
+}
 ```
 
-Parse the JSON. `detect-mode.sh` emits the **final mode label** directly — no prose interpretation:
+#### Mode is a *property* of discovery, not a control-flow branch
 
-- `mode: "fresh"` → no existing AppLovin MAX detected; standalone MeticaSDK install (Step 5 "Fresh mode codegen").
-- `mode: "straight-swap"` → MaxSDK present. Generate the standalone `MeticaAdService` + per-format files (Step 5 "Straight-swap codegen") and rewrite the game's **direct** `MaxSdk.*` call sites to use MeticaSDK. Dedicated Max-wrapper files (e.g. an `AdManager.cs` that wraps MaxSDK behind a non-Max API) are left untouched — see the wrapper-scoping rule in Step 5.
+There is no mode label to interpret. Derive it inline from MaxSDK presence, using the **same rule the validator uses** (`HAS_MAX` = any cleaned `MaxSdk.` reference in game code) so the integrator's mode and the validator's `mode` field always agree:
 
-Decision matrix:
+```bash
+HAS_MAX=false
+while IFS= read -r f; do
+    clean_source "$f" 2>/dev/null | grep -qF 'MaxSdk.' && { HAS_MAX=true; break; }
+done < <(game_cs)
+MODE=fresh; $HAS_MAX && MODE=straight-swap
 
-| MaxSDK present? | Mode | Generated artifacts |
+# Corroborating signals (report-only context, not part of the mode decision):
+S_FOLDER=false;   [ -d "$PROJECT/Assets/MaxSdk" ] && S_FOLDER=true
+S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ] \
+    && grep -qiF applovin "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml"; } && S_MANIFEST=true
+[ -f "$PROJECT/Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" ] && S_MANIFEST=true
+```
+
+The label affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` for `fresh`, `MeticaMediationInfo(MAX, …)` for `straight-swap`) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override by saying "force fresh" / "force straight-swap" — honor it. (`side-by-side` is no longer valid — the router stack was retired in v0.5.0; run straight-swap instead.)
+
+#### The discovery checklist (run for Max-present projects; the namespace + remote-config signals in Step 2.5 also run for fresh)
+
+| Signal | How | Goes in the block under |
 |---|---|---|
-| No | **fresh** | standalone `MeticaAdService` + per-format files + thin bootstrap MonoBehaviour; direct calls |
-| Yes | **straight-swap** | standalone `MeticaAdService` + per-format files; rewrite the game's direct Max call sites to call it; **no router, no Max adapter, no rollout binding** |
+| Direct `MaxSdk.*` call sites | `game_cs` → `clean_source` → `grep -nE 'MaxSdk(\.|Callbacks\.)'`, emit `<file>:<line>:<snippet>` | `Direct Max call sites` |
+| **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test (OQ1):** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
+| **Multiple wrapper candidates (OQ2)** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
+| Formats in use | which of `LoadBanner` / `LoadInterstitial` / `LoadRewarded(Ad)` / `LoadMRec` appear | `Formats used` |
+| Placement strings | 2nd arg to `Show<Format>(adUnitId, "placement"…)` | `Placement strings observed` |
+| Custom-data strings | 3rd arg to `Show<Format>(…)` | `Custom data observed` |
+| Trigger pattern | who calls the wrapper's / game's `Show*` (e.g. `LevelEndController.OnLevelEnd`) | `Trigger pattern` |
 
-When MaxSDK is present, Step 2.5's remote-config detection is **report-only** (the artifacts are identical regardless of provider; the final report's cohort-gating recipe is what differs). The detection still runs because the rollout-recipe needs the provider name.
+Remote-config provider + the gate around ad calls, and the dominant namespace, are discovered in **Step 2.5** (they run for both modes). All of these feed the same structured block.
 
-Show the user the detected mode + the three Max signals + (for Max-present projects) the detected provider. **Ask for explicit confirmation** before proceeding even when the user invoked you with a "no clarifying questions" / "work without prompting" directive — the mode choice gates whether the game's `.cs` files get rewritten, which is too consequential to silently default. The user may override by saying "force fresh" or "force straight-swap"; honor it. (`force side-by-side` is no longer a valid override — the router stack was retired in v0.5.0; mention the change and run straight-swap instead.)
+#### The structured discovery block
 
-### Step 2.5 — Detect project patterns
+Assemble findings into a Markdown block with the anchors above (see the RFC v1.0 §4 worked example for the exact shape). This block is **not** a JSON contract — it is read by this same agent (to drive codegen) and by the user (in Step 3). Mode appears as a *property* of the result (`Mode: straight-swap`), not as a question. Do **not** ask for confirmation here — that happens once, in the Step 3 plan preview.
 
-Before codegen, learn two facts about the game's codebase: which remote-config provider already exists (drives Step 7's cohort-gating recipe — does NOT change generated artifacts), and which namespace the generated files should live in. All detection is done via Bash + Grep + Read — no script.
+### Step 2.5 — Discovery (cont.): project patterns
+
+The rest of discovery: which remote-config provider already exists (drives Step 7's cohort-gating recipe — does NOT change generated artifacts), and which namespace the generated files should live in. These run for **both** modes and feed the **same** structured discovery block (under `Remote-config provider` and the codegen-plan's `Namespace` line). All detection is done via Bash + Grep + Read — no script.
 
 Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing.
 
@@ -297,22 +331,53 @@ In fresh mode, omit the provider line. When no namespace dominates and the proje
 
 Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
 
-### Step 3 — Plan presentation
+### Step 3 — Plan-mode preview (the single audit checkpoint)
 
-Prefer Claude Code's plan mode. Try to call `EnterPlanMode` with the plan content below.
+This is the **only** gate before any file write. Present the discovery findings + the codegen plan, take one approval, and collect any value that would otherwise fail validation on the first run. Prefer Claude Code's plan mode (`EnterPlanMode`); if it is unavailable (tool absent or errors), present the same content under a `## Plan` heading and require an explicit `yes`/`y` before proceeding.
 
-**Fallback** — if `EnterPlanMode` is unavailable in the current harness (tool not present or returns an error), present the same plan content as a plain-text bullet list under a `## Plan` heading and ask "Approve? (yes/no)". Do not proceed until the user types `yes` (or `y`).
+Structure the preview in **two tiers** (OQ5) so the review-critical inferences can't be skimmed past:
 
-The plan must include:
+**Tier 1 — one-line summary**, e.g.:
+
+```
+Detected: Max + wrapper (AdManager.cs), firebase remote-config gate. Mode: straight-swap.
+Will write 4 files, rewrite 3 call sites.
+```
+
+**Tier 2 — "Confirm these inferences"** — list ONLY the fuzzy/inferred decisions, each with its source anchor, because these are the ones that silently produce foreign code if wrong:
+
+```
+Confirm these inferences:
+  - wrapper        = Assets/Scripts/Ads/AdManager.cs   (public API: ShowInterstitial(string), ShowRewarded(string, Action))
+  - namespace      = Game.Ads.Metica                   (AdManager.cs's namespace + .Metica)
+  - adapter folder = Assets/Scripts/Ads/Metica/        (next to the wrapper)
+  - userId         = <ASK NOW — see below>
+```
+
+If discovery found **more than one** wrapper candidate, list them here and require the user to pick one (OQ2) — never default silently.
+
+**Collect `USER_ID_EXPR` here (Review-OQ A).** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
+
+```
+userId is currently unset (defaults to null, which the validator will reject).
+Provide the C# expression for the player identity:
+  1) SystemInfo.deviceUniqueIdentifier
+  2) PlayerProfile.PlayerId
+  3) something else (type the expression)
+```
+
+Bake the chosen expression into `USER_ID_EXPR` before codegen. (The reactive autofix prompt for this rule remains only as a fallback for hand-rolled code linted outside this flow — see Step 7.)
+
+**Tier 3 — the full plan.** Below the summary + inferences, include the complete detail:
 
 - Files to create (full relative paths + brief purpose).
 - Files to edit (full relative paths + which lines / what kind of edit). The list **must not include any file under `Assets/MaxSdk/`** and **must not include any dedicated Max-wrapper file** (e.g. `AdManager.cs`) — see the wrapper-scoping rule in Step 5.
 - Dependencies to install (SDK version + form factor).
 - Hard constraints reflected in this plan: privacy calls (`SetHasUserConsent`, `SetDoNotSell`) precede `MeticaSdk.Initialize` and live in the same file (`MeticaAdService.cs`); init is called exactly once.
-- Code blocks for each new file. The agent generates files directly via Write; per-format reference shapes are `scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (Read at codegen time), and the orchestrator + bootstrap shapes live inline in this agent's Step 5 prose.
+- Code blocks for each new file. The agent generates files directly via Write; the per-format reference shapes are `scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` and the orchestrator shape is `scripts/templates/standalone/MeticaAdService.cs.tmpl` (Read at codegen time).
 - Rollback path: `git reset --hard pre-metica-integration` (tag created at step 4).
 
-After user approval, call `ExitPlanMode` (if used) and continue.
+The user may correct any inference here ("no, the wrapper is `AdsService.cs`") → re-discover and re-present. After approval, call `ExitPlanMode` (if used) and continue.
 
 ### Step 4 — Git snapshot
 
@@ -328,9 +393,11 @@ If the working tree is dirty (script exits non-zero), stop and tell the user to 
 
 #### Straight-swap: scan + propose Max-callsite refactor
 
-Scan the user's game code for `MaxSdk.*` callsites and propose rewrites that target the game's single `MeticaAdService` instance directly (no router). Introduce a `MeticaAdService _ads;` field constructed and `Initialize()`-d once in the game's bootstrap; replace each call site with `_ads.ShowInterstitial(…)` etc. **Removing Max from the game's call sites IS the straight-swap** — that's the point of the mode, and the "do not touch Max usage logic" rule is preserved by the wrapper-scoping rule below.
+The Max-callsite inventory and the wrapper classification were already produced in **Step 2 (Discovery)** and approved in the Step 3 plan — reuse them rather than re-deriving. The scan below is the **edit-time pass**: it drives the rewrites and re-verifies each file after editing.
 
-**Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not edit a dedicated Max-wrapper file** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper untouched and instead rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file: a file whose methods mostly *expose* a non-Max API while internally calling `MaxSdk.*` is a **wrapper** (leave alone); a file that calls `MaxSdk.*` to drive its own UI/gameplay is **scene/game logic** (rewrite). This is a prose judgment the user approves in the Step 3 plan — when unsure, surface the file and ask.
+Propose rewrites that target the game's single `MeticaAdService` instance directly (no router). Introduce a `MeticaAdService _ads;` field constructed and `Initialize()`-d once in the game's bootstrap; replace each call site with `_ads.ShowInterstitial(…)` etc. **Removing Max from the game's call sites IS the straight-swap** — that's the point of the mode, and the "do not touch Max usage logic" rule is preserved by the wrapper-scoping rule below.
+
+**Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not edit a dedicated Max-wrapper file** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper untouched and instead rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave it untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
 
 Use the Bash tool with `grep`, piped through `clean-cs.awk` to ignore matches inside string literals and comments. There is no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
 
