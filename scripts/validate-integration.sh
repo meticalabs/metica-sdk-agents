@@ -102,21 +102,20 @@ find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
 # `// BUG: forgot Foo`, `/* commented out */`, or `"a string literal"` does
 # not register as a real call. Line numbers are preserved (per-line cleanup).
 
-# Emit cleaned source for one file: strings (regular, verbatim, interpolated),
-# line comments, block comments stripped. Line numbers preserved.
-CLEAN_CS_AWK="$SCRIPT_DIR/lib/clean-cs.awk"
-clean_cs() { awk -f "$CLEAN_CS_AWK" "$1"; }
-
-# Smoke-test the helper before relying on it. If awk or the script is broken,
-# bail loudly with a contract-shaped error rather than silently returning 0
-# matches everywhere (which would emit a misleading all-PASS report).
-[ -f "$CLEAN_CS_AWK" ]                                || die_json "Missing helper: $CLEAN_CS_AWK"
-clean_cs /dev/null >/dev/null 2>&1                    || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
+# Cleaned source (strings — regular, verbatim, interpolated — plus line and
+# block comments stripped; line numbers preserved) is read through the shared
+# clean_source() accessor so the validator and the integrator's discovery scan
+# byte-identical input (RFC v1.0 OQ4: the cleaned-source cache lands behind this
+# seam later, with no caller changes). Self-test it before relying on it — a
+# broken accessor must bail loudly, not silently return 0 matches everywhere
+# (which would emit a misleading all-PASS report).
+source "$SCRIPT_DIR/lib/clean-source.sh"
+clean_source_selftest || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
 
 files_with() {
     local pat="$1"
     while IFS= read -r f; do
-        if clean_cs "$f" | grep -qF -- "$pat"; then
+        if clean_source "$f" | grep -qF -- "$pat"; then
             printf '%s\n' "$f"
         fi
     done < "$CS_LIST"
@@ -125,7 +124,7 @@ files_with() {
 count_lit() {
     local pat="$1" total=0 c
     while IFS= read -r f; do
-        c="$(clean_cs "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
+        c="$(clean_source "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
         total=$((total + c))
     done < "$CS_LIST"
     printf '%d' "$total"
@@ -134,7 +133,7 @@ count_lit() {
 first_loc() {
     local pat="$1" n
     while IFS= read -r f; do
-        n="$(clean_cs "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
+        n="$(clean_source "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
         if [ -n "$n" ]; then
             printf '%s:%s' "$f" "$n"
             return
@@ -143,7 +142,7 @@ first_loc() {
 }
 
 line_in_file() {
-    clean_cs "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
+    clean_source "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
 
 # ---- mode detection ---------------------------------------------------------
@@ -433,7 +432,7 @@ fi
 LEGACY_HIT=""
 while IFS= read -r f; do
     # Match the canonical class declarations from the retired templates.
-    if clean_cs "$f" 2>/dev/null | grep -qE 'class[[:space:]]+(AdServiceRouter|MeticaRolloutBinding)\b'; then
+    if clean_source "$f" 2>/dev/null | grep -qE 'class[[:space:]]+(AdServiceRouter|MeticaRolloutBinding)\b'; then
         LEGACY_HIT="$f"; break
     fi
 done < "$CS_LIST"
