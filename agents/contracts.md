@@ -181,7 +181,7 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 - `compat-checker.status == BLOCK` → abort, print the `FAIL` rows, exit. Do not prompt to override.
 - `compat-checker.status == PASS` with any `WARN` → continue, surface warnings.
-- `validator.status == FAIL` → print the `FAIL` rows, print the rollback command, exit non-zero. Do not auto-rollback.
+- `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
 
 ---
 

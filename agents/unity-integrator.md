@@ -655,19 +655,58 @@ Invoke `@agent-unity-validator` with the project path and the chosen mode. `$MOD
 bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" --mode="$MODE"
 ```
 
-Extract the JSON and read `.status`. The validator now enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep.
+Extract the JSON and read `.status`. The validator now enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
+
+### Step 6.5 — Validate + autofix loop (integrator-owned)
+
+The **validator stays read-only** (Review-OQ B): it lints and emits `validator/1.4.0` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default.
+
+Run the loop on `status: FAIL`, **max 3 iterations**:
+
+1. Classify each `level: FAIL` check by `rule` and act:
+
+| Rule | Class | Action |
+|---|---|---|
+| `privacy_before_init` | autofix | Reorder the offending file so both privacy calls precede `MeticaSdk.Initialize`. |
+| `<fmt>_callbacks_subscribed` | autofix | Append the missing `OnAdLoadSuccess` / `OnAdLoadFailed` subscription to the per-format adapter. |
+| `rewarded_reward_callback` | autofix | Append the `OnAdRewarded` subscription. |
+| `<fmt>_reload_on_hidden` | autofix | Append `OnAdHidden += ad => Load();`. |
+| `<fmt>_show_failed_subscribed` | autofix | Append `OnAdShowFailed += (ad, err) => Load();`. |
+| `placeholder_ids_replaced` | prompt | Ask for the real key; substitute in source. |
+| `user_id_not_test_value` | prompt | Ask for the real expression. For the integrator's own output this was already collected at plan time (Step 3), so run-1 should pass; this prompt is the fallback for hand-rolled code linted outside the integrator flow. |
+| `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
+| `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
+| `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
+| `legacy_router_files_present` | surface | Cannot infer how the user wants the stale file removed — surface and offer `git rm`. |
+
+`*_show_ready_guard` and `revenue_callback_subscribed` are `ADVISORY`, never `FAIL` — no action.
+
+2. **Anchor re-check before every autofix edit (OQ3):** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
+
+3. **No autofix produces a net-new file** — autofixes only edit existing files. A missing file (e.g. `init_count` count 0) is always `surface`, never `autofix`.
+
+4. **Log every action** (applied or refused) to `.metica-integration.log` next to the adapter folder, one line each, so the user can audit the loop afterward.
+
+5. Re-invoke `@agent-unity-validator` (fresh subagent context) and repeat. **Stop and fall back to the Step 7 rollback hint** when any `surface`-class FAIL remains, or after 3 iterations still produce FAILs (prevents an infinite loop if a fix introduces a new failure).
+
+Prompt-class fixes pause the run and ask; they never silently substitute.
 
 ### Step 7 — Final report
 
-When validator returned **FAIL**, lead with the rollback command:
+When the autofix loop **cleared all FAILs** (validator now PASS), report normally (below) and note any autofixes applied (read from `.metica-integration.log`).
+
+When the loop **gave up** — a `surface`-class FAIL remained, or 3 iterations were exhausted — lead with the rollback command **as a hint** (state which of the two reasons applied). The integrator **never runs `git reset --hard` itself**; it only prints the command for the user to run:
 
 ```
-VALIDATION FAILED. Rollback:
+VALIDATION FAILED (<surface-class issues remain | autofix exhausted 3 iterations>). Rollback (run this yourself if you want to revert):
     git reset --hard pre-metica-integration
 
-Failures:
-- <rule>: <detail>
+Unresolved:
+- <rule>: <detail>  (<file>:<line>)
 - ...
+
+Autofixes applied this run (see .metica-integration.log):
+- <rule>: <what was changed>
 ```
 
 Then the standard summary (mode, SDK version, files changed, compat-checker one-liner, validator one-liner).
