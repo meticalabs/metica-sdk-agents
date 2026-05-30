@@ -84,43 +84,30 @@ emit_standalone() {
     local mediation='null'
     [ "$mode" = "straight-swap" ] && mediation='new MeticaMediationInfo(MeticaMediationType.MAX, "MAXKEY99")'
 
-    # Orchestrator: privacy precedes Initialize in this same file; constructs the
-    # per-format objects in the init callback; exposes Show* delegators.
-    {
-        echo 'using UnityEngine;'
-        echo 'using Metica;'
-        echo 'using Metica.Ads;'
-        echo ''
-        echo "namespace $ns {"
-        echo 'public class MeticaAdService'
-        echo '{'
-        [ "$has_banner" = 1 ] && echo '    private MeticaBannerAd _banner;'
-        [ "$has_inter"  = 1 ] && echo '    private MeticaInterstitialAd _interstitial;'
-        [ "$has_rew"    = 1 ] && echo '    private MeticaRewardedAd _rewarded;'
-        [ "$has_mrec"   = 1 ] && echo '    private MeticaMRecAd _mrec;'
-        echo '    private MonoBehaviour _runner;'
-        echo '    public MeticaAdService(MonoBehaviour runner) { _runner = runner; }'
-        echo '    public void Initialize()'
-        echo '    {'
-        echo '        MeticaSdk.Ads.SetHasUserConsent(true);'
-        echo '        MeticaSdk.Ads.SetDoNotSell(false);'
-        printf '        var config = new MeticaInitConfig("%s", "%s", %s);\n' "$api" "$app" "$userid"
-        printf '        MeticaSdk.Initialize(config, %s, response =>\n' "$mediation"
-        echo '        {'
-        # Per-format adapters are MonoBehaviours so they can host the docs.metica.com
-        # Invoke-based retry for interstitial/rewarded. Orchestrator AddComponent's
-        # each onto the runner's GameObject and calls Initialize(adUnitId).
-        [ "$has_banner" = 1 ] && echo '            _banner = _runner.gameObject.AddComponent<MeticaBannerAd>(); _banner.Initialize("banner_main"); _banner.Create(); _banner.Load(); _banner.Show();'
-        [ "$has_inter"  = 1 ] && echo '            _interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("interstitial_main");'
-        [ "$has_rew"    = 1 ] && echo '            _rewarded = _runner.gameObject.AddComponent<MeticaRewardedAd>(); _rewarded.Initialize("rewarded_main");'
-        [ "$has_mrec"   = 1 ] && echo '            _mrec = _runner.gameObject.AddComponent<MeticaMRecAd>(); _mrec.Initialize("mrec_main"); _mrec.Create(); _mrec.Load(); _mrec.Show();'
-        echo '        });'
-        echo '    }'
-        [ "$has_inter" = 1 ] && echo '    public void ShowInterstitial() { _interstitial?.Show(); }'
-        [ "$has_rew"   = 1 ] && echo '    public void ShowRewarded() { _rewarded?.Show(); }'
-        echo '}'
-        echo '}'
-    } > "$dir/MeticaAdService.cs"
+    # Orchestrator: rendered from MeticaAdService.cs.tmpl (privacy precedes
+    # Initialize in this same file; constructs the per-format objects in the init
+    # callback; exposes Show* delegators). sed fills the scalar placeholders; awk
+    # drops `// @fmt:<format>` lines for formats not in use and strips the marker
+    # from the lines it keeps (mirrors the integrator's per-project conform step).
+    sed \
+        -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
+        -e "s|__METICA_API_KEY__|$api|g" \
+        -e "s|__METICA_APP_ID__|$app|g" \
+        -e "s|__USER_ID__|$userid|g" \
+        -e "s|__MEDIATION__|$mediation|g" \
+        "$STANDALONE_DIR/MeticaAdService.cs.tmpl" \
+    | awk -v fmts=",$formats," '
+        {
+            line = $0
+            if (match(line, /\/\/ @fmt:[ \t]*[a-z]+[ \t]*$/)) {
+                tag = substr(line, RSTART)
+                sub(/.*@fmt:[ \t]*/, "", tag)   # drop up to and incl "@fmt:" + any spaces
+                sub(/[ \t]*$/, "", tag)
+                if (index(fmts, "," tag ",") == 0) next               # format unused → drop line
+                sub(/[ \t]*\/\/ @fmt:[ \t]*[a-z]+[ \t]*$/, "", line)  # strip marker from kept line
+            }
+            print line
+        }' > "$dir/MeticaAdService.cs"
 
     if [ "$mode" = "fresh" ]; then
         # Thin entry-point MonoBehaviour.
@@ -316,6 +303,37 @@ done
 
 if [ "$shape_ok" = "1" ]; then
     echo "  PASS  per-format templates: named handlers + docs-aligned retry shape + canonical lifecycle"
+    pass=$((pass+1))
+else
+    fail=$((fail+1))
+fi
+
+# 6. Orchestrator template shape — the promoted MeticaAdService.cs.tmpl must
+# carry the canonical init structure (privacy precedes Initialize), the config
+# constructor, and a `// @fmt:<format>` marker for each per-format adapter so
+# codegen can drop the formats a project doesn't use.
+orch_tmpl="$STANDALONE_DIR/MeticaAdService.cs.tmpl"
+orch_ok=1
+if [ ! -f "$orch_tmpl" ]; then
+    echo "  shape FAIL: MeticaAdService.cs.tmpl missing"; orch_ok=0
+else
+    grep -q 'class MeticaAdService'           "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing class MeticaAdService"; orch_ok=0; }
+    grep -q 'MeticaSdk.Ads.SetHasUserConsent' "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing SetHasUserConsent"; orch_ok=0; }
+    grep -q 'MeticaSdk.Ads.SetDoNotSell'      "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing SetDoNotSell"; orch_ok=0; }
+    grep -q 'MeticaSdk.Initialize('           "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing MeticaSdk.Initialize"; orch_ok=0; }
+    grep -q 'new MeticaInitConfig('           "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing MeticaInitConfig constructor"; orch_ok=0; }
+    for f in banner interstitial rewarded mrec; do
+        grep -q "@fmt:$f" "$orch_tmpl" || { echo "  shape FAIL: orchestrator missing @fmt:$f marker"; orch_ok=0; }
+    done
+    # Privacy must precede Initialize in the template (same-file ordering rule).
+    cons_line="$(grep -n 'SetHasUserConsent' "$orch_tmpl" | head -1 | cut -d: -f1)"
+    init_line="$(grep -n 'MeticaSdk.Initialize(' "$orch_tmpl" | head -1 | cut -d: -f1)"
+    if [ -n "$cons_line" ] && [ -n "$init_line" ] && [ "$cons_line" -ge "$init_line" ]; then
+        echo "  shape FAIL: orchestrator privacy call must precede Initialize"; orch_ok=0
+    fi
+fi
+if [ "$orch_ok" = "1" ]; then
+    echo "  PASS  orchestrator template shape (privacy-before-init + @fmt markers)"
     pass=$((pass+1))
 else
     fail=$((fail+1))
