@@ -93,7 +93,7 @@ assert_fail_rule "load/show parity"          bad-load-no-show             inters
 
 # --- loop exit condition: a correctly-integrated project PASSes -------------
 assert_pass "good fresh"          good-fresh
-assert_pass "good straight-swap"  good-straight-swap
+assert_pass "good max-present"   good-max-present
 
 echo
 echo "Pass: $pass   Fail: $fail"

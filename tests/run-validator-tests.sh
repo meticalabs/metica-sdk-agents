@@ -20,15 +20,6 @@ status_of() {
         }'
 }
 
-mode_of() {
-    printf '%s\n' "$1" | awk '
-        /"mode":[[:space:]]*"/ {
-            n = index($0, "\"mode\":")
-            s = substr($0, n + 7); sub(/^[^"]*"/, "", s); sub(/".*$/, "", s)
-            print s; exit
-        }'
-}
-
 # Extract level of a specific rule. Anchored to "rule": "<name>" then "level": "<...>" on same line.
 level_of_rule() {
     printf '%s\n' "$1" | awk -v want="$2" '
@@ -45,22 +36,17 @@ level_of_rule() {
         }'
 }
 
-# assert_case <name> <expected_status> <expected_mode> [rule:level ...]
+# assert_case <name> <expected_status> [rule:level ...]
 assert_case() {
-    local name="$1" exp_status="$2" exp_mode="$3"; shift 3
+    local name="$1" exp_status="$2"; shift 2
     local out; out=$(bash "$VALIDATE" --project="$FIX/$name" 2>&1) || true
 
-    local got_status got_mode
+    local got_status
     got_status=$(status_of "$out")
-    got_mode=$(mode_of "$out")
 
     local err=0
     if [ "$got_status" != "$exp_status" ]; then
         printf "  FAIL  %s: status expected=%s got=%s\n" "$name" "$exp_status" "$got_status"
-        err=1
-    fi
-    if [ -n "$exp_mode" ] && [ "$got_mode" != "$exp_mode" ]; then
-        printf "  FAIL  %s: mode expected=%s got=%s\n" "$name" "$exp_mode" "$got_mode"
         err=1
     fi
     for pair in "$@"; do
@@ -83,107 +69,98 @@ assert_case() {
 
 echo "== validator golden eval =="
 
-assert_case good-fresh                    "PASS" "fresh"        \
+assert_case good-fresh                    "PASS"        \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_callbacks_subscribed:PASS" \
     "interstitial_reload_on_hidden:PASS"
 
-assert_case bad-no-init                   "FAIL" "fresh"        \
+assert_case bad-no-init                   "FAIL"        \
     "init_count:FAIL"
 
-assert_case bad-double-init               "FAIL" "fresh"        \
+assert_case bad-double-init               "FAIL"        \
     "init_count:FAIL"
 
-assert_case bad-privacy-after-init        "FAIL" "fresh"        \
+assert_case bad-privacy-after-init        "FAIL"        \
     "privacy_before_init:FAIL"
 
-assert_case bad-no-interstitial-callback  "FAIL" "fresh"        \
+assert_case bad-no-interstitial-callback  "FAIL"        \
     "interstitial_callbacks_subscribed:FAIL"
 
-assert_case bad-load-no-show              "FAIL" "fresh"        \
+assert_case bad-load-no-show              "FAIL"        \
     "interstitial_load_show_parity:FAIL"
 
-assert_case bad-no-reward-callback        "FAIL" "fresh"        \
+assert_case bad-no-reward-callback        "FAIL"        \
     "rewarded_reward_callback:FAIL"
 
-assert_case advisory-no-revenue           "PASS" "fresh"        \
+assert_case advisory-no-revenue           "PASS"        \
     "revenue_callback_subscribed:ADVISORY"
 
 # New: string-literal and block-comment immunity
-assert_case good-string-literal-mention   "PASS" "fresh"        \
+assert_case good-string-literal-mention   "PASS"        \
     "init_count:PASS"
 
-assert_case good-block-comment-mention    "PASS" "fresh"        \
+assert_case good-block-comment-mention    "PASS"        \
     "init_count:PASS"
 
-assert_case good-verbatim-string          "PASS" "fresh"        \
+assert_case good-verbatim-string          "PASS"        \
     "init_count:PASS" "interstitial_load_show_parity:PASS"
 
 # Regression: imported MeticaSDK (Assets/MeticaSdk/) contains its own test
 # files with multiple Initialize() calls. Validator must scope to user code only.
-assert_case good-fresh-with-imported-sdk  "PASS" "fresh"        \
+assert_case good-fresh-with-imported-sdk  "PASS"        \
     "init_count:PASS"
 
 # New: cross-file privacy is FAIL with explicit hint
-assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
+assert_case bad-cross-file-privacy        "FAIL"        \
     "privacy_before_init:FAIL"
 
 # New: interstitial without OnAdHidden auto-reload FAILs
-assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
+assert_case bad-no-reload-on-hidden       "FAIL"        \
     "interstitial_reload_on_hidden:FAIL"
 
 # interstitial without OnAdShowFailed FAILs — show-failure does not
 # fire OnAdHidden, so the reload loop alone is incomplete.
-assert_case bad-no-show-failed            "FAIL" "fresh"        \
+assert_case bad-no-show-failed            "FAIL"        \
     "interstitial_show_failed_subscribed:FAIL"
 
 # New: Show without an IsReady guard → ADVISORY, still overall PASS.
-assert_case advisory-no-ready-guard       "PASS" "fresh"        \
+assert_case advisory-no-ready-guard       "PASS"        \
     "interstitial_show_ready_guard:ADVISORY"
 
 # Credential-hygiene checks (placeholder keys + test/null userIds).
 # Validator is an integration linter for human code, not just our codegen smoke
 # test, so these checks belong in the script — not just in the integrator report.
-assert_case bad-placeholder-key           "FAIL" "fresh"        \
+assert_case bad-placeholder-key           "FAIL"        \
     "placeholder_ids_replaced:FAIL"
 
-assert_case bad-test-userid               "FAIL" "fresh"        \
+assert_case bad-test-userid               "FAIL"        \
     "user_id_not_test_value:FAIL"
 
-assert_case bad-userid-multiline          "FAIL" "fresh"        \
+assert_case bad-userid-multiline          "FAIL"        \
     "user_id_not_test_value:FAIL"
 
 # Commented-out test value must NOT trip the check (strip-comments.awk gates).
-assert_case good-commented-test-userid    "PASS" "fresh"        \
+assert_case good-commented-test-userid    "PASS"        \
     "placeholder_ids_replaced:PASS" "user_id_not_test_value:PASS"
 
 # Regression: userId containing the substring 'test' as part of a word
 # (contest-user-42) must NOT trip user_id_not_test_value. The pre-fix regex
 # matched 'test' anywhere; the tightened pattern requires - / _ boundaries.
-assert_case good-legitimate-userid-with-test-substring "PASS" "fresh" \
+assert_case good-legitimate-userid-with-test-substring "PASS" \
     "user_id_not_test_value:PASS"
 
 # Regression: a constant NAMED YOUR_METICA_API_KEY (holding the real value) must
 # NOT trip placeholder_ids_replaced — the placeholder check matches only string
 # literal values, not identifier names.
-assert_case good-placeholder-named-constant "PASS" "fresh" \
+assert_case good-placeholder-named-constant "PASS" \
     "placeholder_ids_replaced:PASS"
 
 # New: MRec format coverage — broken MRec integration FAILs
-assert_case bad-mrec-no-callbacks         "FAIL" "fresh"        \
+assert_case bad-mrec-no-callbacks         "FAIL"        \
     "mrec_callbacks_subscribed:FAIL" "mrec_load_show_parity:FAIL"
 
-# straight-swap mode (Max present, no remote config), validated with an explicit
-# --mode: PASSes with same-file privacy validation.
-out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=straight-swap 2>&1) || true
-if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ]; then
-    printf "  ok    good-straight-swap (explicit mode=straight-swap)\n"; pass=$((pass+1))
-else
-    printf "  FAIL  good-straight-swap unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
-fi
-
-# New: the same project auto-detects as straight-swap (Max wrapper + Metica, no
-# router) and gets same-file privacy validation — not a router-branch false-PASS.
-assert_case good-straight-swap            "PASS" "straight-swap" \
+# A Max-present project (Max wrapper + Metica) gets the same uniform validation
+# — same-file privacy ordering, init count, reload-on-hidden.
+assert_case good-max-present            "PASS" \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_reload_on_hidden:PASS"
 
 # New: project with no Metica refs gets a structured error, not a PASS-laden report
@@ -199,12 +176,12 @@ else
 fi
 rm -rf "$nometica"
 
-# An unknown --mode is rejected with a contract-shaped error (exit non-zero).
-out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=bogus 2>&1); rc=$?
-if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'Invalid --mode: bogus'; then
-    printf "  ok    unknown --mode is rejected\n"; pass=$((pass+1))
+# An unknown argument is rejected with a contract-shaped error (exit non-zero).
+out=$(bash "$VALIDATE" --project="$FIX/good-max-present" --bogus 2>&1); rc=$?
+if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'Unknown arg: --bogus'; then
+    printf "  ok    unknown argument is rejected\n"; pass=$((pass+1))
 else
-    printf "  FAIL  unknown --mode should be rejected as invalid:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+    printf "  FAIL  unknown argument should be rejected:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi
 
 # Assert all-fixtures JSON parses (no syntax errors)

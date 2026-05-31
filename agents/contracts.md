@@ -54,15 +54,9 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 ---
 
-## `validator/1.0.0`-adjacent note: mode is self-detected
-
-There is no mode-detection contract. Mode is derived inline — by the integrator during discovery (Step 2) and by the validator from `HAS_MAX` — using the same rule (any cleaned `MaxSdk.` reference → `straight-swap`, else `fresh`). See "Retired contracts" below.
-
----
-
 ## Max-callsite inventory (no JSON contract)
 
-The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5, straight-swap branch) for the canonical scan snippet.
+The integrator scans for MaxSdk callsites directly via the Bash tool (using `grep` piped through `scripts/lib/clean-cs.awk` to ignore matches inside string literals and comments) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5) for the canonical scan snippet.
 
 ---
 
@@ -70,7 +64,6 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
-- `mode`: `fresh`, `straight-swap`, `unknown`
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
@@ -80,7 +73,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 **Rules emitted** (see `scripts/validate-integration.sh` for exact conditions):
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`.
-- `privacy_before_init` — both privacy calls before `Initialize` (same-file ordering in both modes).
+- `privacy_before_init` — both privacy calls before `Initialize` (same-file ordering; uniform regardless of MaxSDK presence).
 - `<format>_callbacks_subscribed` — for each used format (banner, interstitial, rewarded, mrec), `OnAdLoadSuccess` + `OnAdLoadFailed` subscribed.
 - `rewarded_reward_callback` — when rewarded is used, `OnAdRewarded` subscribed.
 - `<format>_load_show_parity` — every Load has a matching Show (banner, interstitial, rewarded, mrec).
@@ -100,7 +93,6 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 {
   "schema": "validator/1.0.0",
   "status": "FAIL",
-  "mode": "straight-swap",
   "error": null,
   "warnings": [],
   "checks": [
@@ -119,13 +111,13 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 The integrator does not emit JSON — it is the orchestrator. Its final message to the user includes:
 
-1. Mode used (`fresh` | `straight-swap`).
+1. Whether MaxSDK was present.
 2. SDK version installed.
 3. Files created / edited (list).
 4. Compat-checker summary (one line).
 5. Validator summary (one line + `PASS`/`FAIL`).
 6. Rollback command (`git reset --hard pre-metica-integration`) when validator returned `FAIL`.
-7. (Straight-swap + remote-config provider detected) Cohort-gating recipe — see `agents/unity-integrator.md` Step 7.
+7. (MaxSDK present + remote-config provider detected) Cohort-gating recipe — see `agents/unity-integrator.md` Step 7.
 
 The `pre-metica-integration` git tag is created by the integrator before any file change (see integrator.md, workflow step 4).
 
@@ -139,7 +131,7 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 ## Retired contracts
 
-- **`mode-detect/2.x`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted and the explicit mode-detect step removed; mode is now a *property* derived inline (integrator discovery Step 2; validator from `HAS_MAX`), not a sub-agent contract. No deprecation alias — the script and its `run-mode-tests.sh` / `mode-fixtures/` are gone. The validator still emits a `mode` field (`fresh`/`straight-swap`/`unknown`) as a property of its result, but nothing branches on a mode *contract* anymore.
+- **`mode-detect/2.x`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted along with its `run-mode-tests.sh` / `mode-fixtures/`. There is no "mode" concept anymore: the integrator discovers MaxSDK presence inline (discovery Step 2) and adapts codegen to it; the validator runs uniform checks and emits no mode field.
 
 ## Versioning policy
 

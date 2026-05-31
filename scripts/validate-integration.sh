@@ -2,11 +2,10 @@
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
 # Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
 #
-# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
+# Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 #
-# When --mode is omitted, the mode is self-detected from MaxSDK presence
-# (HAS_MAX → straight-swap, else fresh).
+# Validation is uniform — it does not depend on whether MaxSDK is present.
 
 set -u
 set -o pipefail
@@ -15,7 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PROJECT=""
-MODE=""
 
 # ---- JSON helpers -----------------------------------------------------------
 
@@ -39,7 +37,6 @@ die_json() {
     printf '{\n'
     printf '  "schema": "validator/1.0.0",\n'
     printf '  "status": "FAIL",\n'
-    printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
     printf '  "checks": []\n'
@@ -52,9 +49,8 @@ die_json() {
 for arg in "$@"; do
     case $arg in
         --project=*) PROJECT="${arg#*=}" ;;
-        --mode=*)    MODE="${arg#*=}" ;;
         -h|--help)
-            sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die_json "Unknown arg: $arg" ;;
     esac
@@ -65,10 +61,6 @@ done
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
 WARNINGS=""
-case "$MODE" in
-    ""|fresh|straight-swap) ;;
-    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap)" ;;
-esac
 
 # ---- discover C# sources ---------------------------------------------------
 
@@ -136,24 +128,13 @@ line_in_file() {
     clean_source "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
 
-# ---- mode detection ---------------------------------------------------------
-
-HAS_MAX=0;    [ "$(count_lit 'MaxSdk.')"   != "0" ] && HAS_MAX=1
-HAS_METICA=0; [ "$(count_lit 'MeticaSdk.')" != "0" ] && HAS_METICA=1
+# ---- MeticaSDK presence guard ----------------------------------------------
 
 # Refuse to validate if there are no MeticaSdk references at all — this is not
 # a Metica integration, just a Unity project. Emit a contract-shaped error.
+HAS_METICA=0; [ "$(count_lit 'MeticaSdk.')" != "0" ] && HAS_METICA=1
 if [ "$HAS_METICA" = "0" ]; then
     die_json "No MeticaSdk references found; project does not appear to have a MeticaSDK integration."
-fi
-
-if [ -z "$MODE" ]; then
-    if [ "$HAS_MAX" = "1" ]; then
-        # Max + Metica → straight-swap (Max being removed from app code).
-        MODE="straight-swap"
-    else
-        MODE="fresh"
-    fi
 fi
 
 # ---- check accumulator -----------------------------------------------------
@@ -181,7 +162,7 @@ case "$INIT_COUNT" in
 esac
 
 # 2. privacy_before_init: validate same-file ordering of privacy calls before
-# Initialize. Both modes (fresh / straight-swap) require this — same logic.
+# Initialize (the rule is uniform regardless of whether MaxSDK is present).
 INIT_FILE="${INIT_LOC%:*}"
 if [ -n "$INIT_FILE" ]; then
     INIT_LINE="$(line_in_file 'MeticaSdk.Initialize(' "$INIT_FILE")"
@@ -431,7 +412,6 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 printf '{\n'
 printf '  "schema": "validator/1.0.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
-printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"
 printf '  "checks": [\n'

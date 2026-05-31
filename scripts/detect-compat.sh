@@ -251,8 +251,8 @@ ev_java() {
 
 ev_max() {
     # MAX absence is policy-dependent; for SDK 2.4.0 absence is acceptable
-    # (fresh-mode integration). When matrix gets a `max_required: true` field
-    # we will distinguish here.
+    # (a no-Max standalone integration). When matrix gets a `max_required: true`
+    # field we will distinguish here.
     [ -z "$MAX" ] && { echo "PASS|"; return; }
     ver_ge "$MAX" "$MAX_MIN" && echo "PASS|" \
         || echo "FAIL|Update AppLovin MAX to $MAX_MIN+ via Window > AppLovin > Integration Manager in Unity."

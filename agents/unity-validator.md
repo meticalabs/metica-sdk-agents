@@ -12,7 +12,8 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
-- `MODE` — optional `fresh` or `straight-swap`. When omitted, the script auto-detects from project contents (presence of `MaxSdk.*` → straight-swap, otherwise fresh). An unrecognized mode is rejected with a contract-shaped error.
+
+Validation is uniform — there is no mode input; the checks apply identically whether or not MaxSDK is present.
 
 ## What to do — run this single bash command
 
@@ -32,9 +33,8 @@ done
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Set METICA_SDK_AGENTS_DIR to the plugin path and retry." >&2; exit 1; }
 
 PROJECT="<absolute_project_path>"
-MODE_ARG=""   # or "--mode=fresh" / "--mode=straight-swap"
 
-JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" $MODE_ARG)
+JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT")
 printf '```json\n%s\n```\n' "$JSON"
 ```
 
