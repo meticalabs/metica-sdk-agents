@@ -119,7 +119,7 @@ emit_standalone() {
             echo 'public class MeticaBootstrap : MonoBehaviour'
             echo '{'
             echo '    private MeticaAdService _ads;'
-            echo '    void Start() { _ads = new MeticaAdService(this); _ads.Initialize(); }'
+            echo '    void Start() { _ads = gameObject.AddComponent<MeticaAdService>(); _ads.Initialize(); }'
             [ "$has_inter" = 1 ] && echo '    public void ShowInterstitial() { _ads.ShowInterstitial(); }'
             [ "$has_rew"   = 1 ] && echo '    public void ShowRewarded() { _ads.ShowRewarded(); }'
             echo '}'

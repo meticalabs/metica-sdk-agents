@@ -452,8 +452,8 @@ MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterLoaded;
 // ... more callback subscriptions ...
 
 // after:
-_ads = new MeticaAdService(this);   // pass this MonoBehaviour — orchestrator AddComponent's per-format adapters onto its GameObject
-_ads.Initialize();                  // privacy + MeticaSdk.Initialize live inside MeticaAdService
+_ads = gameObject.AddComponent<MeticaAdService>();  // MeticaAdService is a MonoBehaviour; it hosts the per-format adapters on its own GameObject
+_ads.Initialize();                  // privacy + MeticaSdk.Initialize live inside MeticaAdService (OnInitialized callback)
 // Delete the MaxSdkCallbacks.* subscriptions entirely — the per-format
 // objects (MeticaInterstitialAd, etc.) own those, including auto-reload.
 ```
@@ -533,7 +533,7 @@ Then generate:
 
 1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (note: `mrec` maps to `MeticaMRecAd.cs.tmpl`), apply the namespace transform (see below), and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. **All four per-format adapters are `MonoBehaviour`s** — Interstitial and Rewarded need this so they can host the docs.metica.com retry pattern (`Invoke(nameof(Load), (float)delay)`, which is a `MonoBehaviour`-only method); Banner and MRec are `MonoBehaviour`s too for construction uniformity. Per the docs, Banner and MRec do **not** carry app-side retry — the SDK refreshes them internally — so those templates omit the retry block and only log on `OnAdLoadFailed`.
 
-2. **Orchestrator `MeticaAdService.cs`** — privacy (`SetHasUserConsent`/`SetDoNotSell`) **immediately precedes** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationType.MAX, "<MAX_KEY_ESC>"), …)` in this same file (note: `MeticaMediationType` is a **top-level** enum in `Metica.Ads`, not nested under `MeticaMediationInfo` — see the docs.metica.com Unity SDK example). In the init callback, **`AddComponent` each per-format adapter onto the runner's `gameObject`, then call `Initialize(adUnitId)` on it** — for example, `_interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("<ad_unit_id>");`. Reuse the **game's existing Max ad unit ID** for that format (per the migration guide they pass through unchanged). Expose `Show<Format>()` delegators (the patch passes below may widen these to mirror a detected wrapper's API). Include only the formats in `$FORMATS`.
+2. **Orchestrator `MeticaAdService.cs`** — a **`MonoBehaviour`** (rendered from the template). Privacy (`SetHasUserConsent`/`SetDoNotSell`) and `MeticaSdk.SetLogEnabled(true)` **immediately precede** `MeticaSdk.Initialize(config, new MeticaMediationInfo(MeticaMediationType.MAX, "<MAX_KEY_ESC>"), OnInitialized)` in this same file (note: `MeticaMediationType` is a **top-level** enum in `Metica.Ads`, not nested under `MeticaMediationInfo` — see the docs.metica.com Unity SDK example; the callback is the **named `OnInitialized` method, not a lambda**). In `OnInitialized`, **`AddComponent` each per-format adapter onto its own `gameObject`, then call `Initialize(adUnitId)` on it** — for example, `_interstitial = gameObject.AddComponent<MeticaInterstitialAd>(); _interstitial.Initialize("<ad_unit_id>");`. Reuse the **game's existing Max ad unit ID** for that format (per the migration guide they pass through unchanged). Expose the per-format delegators (`LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`; the patch passes below may widen the `Show*` signatures to mirror a detected wrapper's API). Include only the formats in `$FORMATS`.
 
 3. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (the per-format objects own them).
 
@@ -594,34 +594,36 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
 **Files to generate** (under `$ADAPTER_FOLDER`, plus the bootstrap under `Assets/Scripts/`):
 
 1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (filenames: `MeticaBannerAd.cs.tmpl`, `MeticaInterstitialAd.cs.tmpl`, `MeticaRewardedAd.cs.tmpl`, `MeticaMRecAd.cs.tmpl`), apply the namespace transform from the rule above, and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. **All four are `MonoBehaviour`s** so Interstitial/Rewarded can host the docs.metica.com `Invoke(nameof(Load), …)` retry (Invoke is MonoBehaviour-only). They own the format's callbacks (named methods, not lambdas — game can extend by adding lines), auto-reload-on-hidden + `OnAdShowFailed`-recovery (interstitial/rewarded), `IsReady`-guarded `Show()`, and **exponential-backoff retry on `OnAdLoadFailed`** (`Math.Pow(2, Math.Min(6, attempt))` → 2→4→8…→64s) — interstitial/rewarded only. Banner and MRec have no app-side retry (SDK refreshes them internally) but carry `OnApplicationFocus` pause/resume and an `_isShowing` state flag.
-2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — the standalone orchestrator. Privacy precedes `MeticaSdk.Initialize` **in this file**; with no MaxSDK present it passes `null` mediation (no MAX). In the init callback, `AddComponent` each per-format adapter onto the runner's `gameObject` and then call `Initialize(adUnitId)` on it — the adapter auto-loads inside `Initialize`. Expose `Show<Format>()` delegators. Substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim. Reference shape (mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
+2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — a **`MonoBehaviour`** rendered from `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl` (apply the namespace transform; substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim; with no MaxSDK present the mediation arg is `null`). It mirrors the docs.metica.com example: `Initialize()` sets privacy (**before** `MeticaSdk.Initialize`, same file), calls `MeticaSdk.SetLogEnabled(true)`, and runs `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method — not an inline lambda**. `OnInitialized` logs the `SmartFloors` user group / forced-holdout / userId, then `AddComponent`s each per-format adapter onto **its own `gameObject`** and calls `Initialize(adUnitId)`. It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(placement, customData)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Reference shape (the actual template; mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
-   public class MeticaAdService
+   public class MeticaAdService : MonoBehaviour
    {
        private MeticaInterstitialAd _interstitial;  // one field per format in $FORMATS
-       private MonoBehaviour _runner;
-       public MeticaAdService(MonoBehaviour runner) { _runner = runner; }
        public void Initialize()
        {
            MeticaSdk.Ads.SetHasUserConsent(true);   // privacy precedes Initialize, same file
            MeticaSdk.Ads.SetDoNotSell(false);
+           MeticaSdk.SetLogEnabled(true);
            var config = new MeticaInitConfig("<API_KEY_ESCAPED>", "<APP_ID_ESCAPED>", <USER_ID_EXPR>);
-           MeticaSdk.Initialize(config, null, response => {
-               // Per-format adapters are MonoBehaviours — AddComponent onto the runner's
-               // GameObject, then call Initialize(adUnitId) (auto-loads inside).
-               _interstitial = _runner.gameObject.AddComponent<MeticaInterstitialAd>();
-               _interstitial.Initialize("interstitial_main");
-               // banner/mrec: also call .Create(position, placementTag) and .Show() after Initialize.
-               // … one AddComponent + Initialize per format in $FORMATS
-           });
+           MeticaSdk.Initialize(config, null, OnInitialized);   // named callback, not a lambda
        }
-       public void ShowInterstitial() { _interstitial?.Show(); }   // one delegator per format
+       private void OnInitialized(MeticaInitResponse response)
+       {
+           Debug.Log($"[Metica] user group: {response.SmartFloors.UserGroup}, userId: {response.UserId}");
+           // AddComponent each per-format adapter onto this GameObject, then Initialize(adUnitId).
+           _interstitial = gameObject.AddComponent<MeticaInterstitialAd>();
+           _interstitial.Initialize("interstitial_main");        // auto-loads inside Initialize
+           // banner/mrec also .Create() + .Load() here; … one block per format in $FORMATS
+       }
+       public void LoadInterstitial() { _interstitial?.Load(); }                                  // one Load + Show per inter/rewarded
+       public void ShowInterstitial(string placement = null, string customData = null) { _interstitial?.Show(placement, customData); }
+       // banner/mrec expose ShowX()/HideX()
    }
    }
    ```
-3. **Thin bootstrap `Assets/Scripts/MeticaBootstrap.cs`** — a MonoBehaviour that in `Start()` does `_ads = new MeticaAdService(this); _ads.Initialize();` (passes `this` so the orchestrator can `AddComponent` the per-format adapters onto this same GameObject), and exposes `ShowInterstitial()`/`ShowRewarded()` for UI hookup. Add `using <NAMESPACE>;` when the namespace is non-empty.
+3. **Thin bootstrap `Assets/Scripts/MeticaBootstrap.cs`** — a MonoBehaviour that in `Start()` does `_ads = gameObject.AddComponent<MeticaAdService>(); _ads.Initialize();` (MeticaAdService is itself a MonoBehaviour and hosts the per-format adapters on this same GameObject), and exposes `ShowInterstitial()`/`ShowRewarded()` for UI hookup. Add `using <NAMESPACE>;` when the namespace is non-empty.
 
 **Hard correctness invariants** (validator-enforced):
 
