@@ -1,6 +1,6 @@
 # RFC: v1.0 — discover-adapt-validate-autofix
 
-**Status:** Reviewed — ready for planning (open questions resolved 2026-05-29; see §10)
+**Status:** Implemented in plugin v1.0.0 (open questions resolved 2026-05-29, see §10; built in five staged commits — see §12)
 **Author:** Drafted via Claude Code in session `01CdEYfGRcqm2pMfzcn4ikTv`
 **Supersedes:** the explicit mode-detect step (`mode-detect/2.x`) and the rollback-first failure mode of v0.9.x
 
@@ -269,6 +269,14 @@ All five original open questions were resolved in the 2026-05-29 review, along w
 - Auto-generated cohort-gating wiring (still report-only — user copy-pastes the recipe)
 - Multi-mediator detection (IronSource, AdMob) — Max only for v1.0
 
-## 12. Recommendation
+## 12. Outcome
 
-Land v0.9.1 first (the current branch state — all review threads resolved). Then promote this RFC to a tracked issue, gather concrete feedback (especially on §10 OQs), and build v1.0 as a fresh branch. Estimated scope: 2 weeks of work given the test-fixture build-out, not a one-PR refactor.
+Implemented in plugin **v1.0.0** in five staged commits, each independently reviewed and verified:
+
+1. Promote `MeticaAdService.cs.tmpl` (orchestrator template; §6.3).
+2. Shared `clean_source()` accessor seam (OQ4 — the cleaned-source cache drops in behind it later).
+3. Discovery-first integrator: mode as a property, flow-based wrapper detection, multi-wrapper pick, two-tier plan preview with plan-time user-id (Steps 2, 2.5, 3).
+4. Adaptive codegen via named post-template patch passes (§6.2).
+5. Integrator-owned validate + autofix loop (§7); retire `mode-detect/2.x`, the `--mode=side-by-side` alias, and the mode test suite; rewrite docs; bump to 1.0.0 (§8).
+
+Carried-forward manual check (non-blocking): validate the flow-based wrapper heuristic (§10/OQ1) against the May 28 repro project, which is absent from a clean clone.

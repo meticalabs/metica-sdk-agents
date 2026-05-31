@@ -1,12 +1,12 @@
 #!/bin/bash
 # run-codegen-validator-tests.sh — validate the canonical agent-generated outputs.
 #
-# Phase 3 deleted codegen-fresh.sh and codegen-sidebyside.sh; codegen now lives
-# in the integrator agent's prose. This test suite cannot drive the agent from
-# bash, so it instead pre-populates synthetic projects with the *expected* agent
-# output (a reference impl that mirrors integrator.md Step 5 verbatim) and runs
-# the unchanged validator over them. If a documented template is invalid, this
-# test catches it.
+# Codegen lives in the integrator agent's prose (there are no codegen-*.sh
+# scripts). This suite cannot drive the agent from bash, so it instead
+# pre-populates synthetic projects with the *expected* agent output — a
+# reference impl that renders the same templates the integrator does (Step 5) —
+# and runs the unchanged validator over them. If a documented template is
+# invalid, this test catches it.
 #
 # Coverage (post-v0.5.0 — router stack retired):
 #   1. fresh / interstitial / no namespace          → PASS

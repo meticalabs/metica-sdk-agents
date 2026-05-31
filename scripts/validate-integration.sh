@@ -435,7 +435,7 @@ else
     add_check "legacy_router_files_present" "" "PASS" "No retired router-stack classes declared."
 fi
 
-# DEFERRED to a follow-up patch (tracked in Notion log §11):
+# DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
 #                                   format is still showing. Needs call-graph/scope awareness to detect
