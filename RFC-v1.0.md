@@ -28,7 +28,7 @@ The proposal is a single workflow that addresses all three.
 ## 3. Non-goals
 
 - **Not a rewrite of the templates' structural shape.** Per the user's directive ("don't change the structure of placeholder files, just add logic"): the `Metica<Format>Ad.cs.tmpl` and `MeticaAdService.cs.tmpl` retain their current shape. Adaptive codegen happens via **post-template patch passes**, not via template parameterization or a DSL.
-- **Not removing the validator's deterministic rule set.** The validator's rules are unchanged (it ships as `validator/1.0.0`). What changes is the integrator's *reaction* to FAILs — autofix vs. rollback.
+- **Not removing the validator's deterministic rule set.** The validator's rules are unchanged by the discover→adapt→validate→autofix restructure (it ships as `validator/1.0.0`); what changes is the integrator's *reaction* to FAILs — autofix vs. rollback. (The one exception, the half-migration guard `legacy_router_files_present`, was dropped separately in the brand-new-project simplification — see §13.)
 - **Not adding inference for completely-new features.** If the game uses App Open Ads (which `references/max-vs-metica-2.4.0-api.md:243` flags as a MeticaSDK gap), v1.0 still surfaces that as out-of-scope — discovery records the gap, codegen doesn't paper over it.
 - **Not changing `compat-checker` or `validator` agent contracts.** The orchestrator's surface stays the same.
 
@@ -279,3 +279,21 @@ Implemented in plugin **v1.0.0** in five staged commits, each independently revi
 5. Integrator-owned validate + autofix loop (§7); retire `mode-detect/2.x`, the `--mode=side-by-side` alias, and the mode test suite; rewrite docs; bump to 1.0.0 (§8).
 
 Carried-forward manual check (non-blocking): validate the flow-based wrapper heuristic (§10/OQ1) against the May 28 repro project, which is absent from a clean clone.
+
+## 13. Addendum: brand-new-project simplification (post-1.0)
+
+After v1.0 landed, the maintainer confirmed this is a **brand-new project — no prior public releases and no users**. With no installed base, backward-compatibility shims and half-migration guards protect nobody, so they were removed and the contracts now present as a clean first release. This supersedes the parts of §3/§7/§8 that assumed an existing v0.x user base.
+
+**Removed:**
+
+- **`legacy_router_files_present` validator rule** + the integrator's codegen self-check tripwire and the "never emit `IAdService`/`MaxAdService`/`AdServiceRouter`/`MeticaRolloutBinding`" hard rule. These guarded against a retired *internal* codegen path (the v0.4 router stack) that no shipped project ever used. The `bad-legacy-router-files` and `good-user-owned-iadservice` fixtures and their validator/autofix test cases went with it. (This narrows the §7 autofix partition — the `surface`-class `legacy_router_files_present` row no longer exists.)
+- **`--mode=side-by-side` back-compat.** The alias was already removed in §8; the dedicated rejection test is now a generic invalid-mode test.
+- **Validator schema version history.** Reset `validator/1.4.0 → validator/1.0.0` everywhere; deleted the "Changes in 1.2.0/1.3.0/1.4.0" changelogs and the `(added in X)` per-rule annotations. The validator ships as `validator/1.0.0` — a true first release.
+- **Retired-version framing** ("retired in v0.5.0", "v0.4 router stack", "v0.3.x back-compat") scrubbed from the README, CLAUDE.md, the agents, and the validator script.
+
+**Kept** — these are about *user* code, not the retired internal stack, and remain load-bearing:
+
+- The **wrapper-scoping rule** (never edit a dedicated Max-wrapper file; rewrite only the game's direct call sites).
+- The **`never modify Assets/MaxSdk/`** hard rule.
+
+This addendum's framing about migrating *from* v0.9.x (§1, §8) is retained only as the genuine design record of how the v1.0 architecture was reached — it does not imply a shipped v0.x that anyone must migrate.
