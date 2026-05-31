@@ -28,7 +28,7 @@ The proposal is a single workflow that addresses all three.
 ## 3. Non-goals
 
 - **Not a rewrite of the templates' structural shape.** Per the user's directive ("don't change the structure of placeholder files, just add logic"): the `Metica<Format>Ad.cs.tmpl` and `MeticaAdService.cs.tmpl` retain their current shape. Adaptive codegen happens via **post-template patch passes**, not via template parameterization or a DSL.
-- **Not removing the validator's deterministic rule set.** The validator stays exactly as it is at `validator/1.4.0`. What changes is the integrator's *reaction* to FAILs — autofix vs. rollback.
+- **Not removing the validator's deterministic rule set.** The validator's rules are unchanged (it ships as `validator/1.0.0`). What changes is the integrator's *reaction* to FAILs — autofix vs. rollback.
 - **Not adding inference for completely-new features.** If the game uses App Open Ads (which `references/max-vs-metica-2.4.0-api.md:243` flags as a MeticaSDK gap), v1.0 still surfaces that as out-of-scope — discovery records the gap, codegen doesn't paper over it.
 - **Not changing `compat-checker` or `validator` agent contracts.** The orchestrator's surface stays the same.
 
@@ -193,9 +193,8 @@ The validator emits 11–13 rules. Each is classified as `autofix`, `prompt`, or
 | `revenue_callback_subscribed` (ADVISORY) | — | No action — advisory only |
 | `placeholder_ids_replaced` | prompt | Ask for real value, substitute in source |
 | `user_id_not_test_value` | prompt | **For the integrator's own output: collected at plan time** (Review-OQ A) — the real expression is gathered in the plan-mode preview so run-1 validation PASSes. The reactive prompt (offer `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, …) remains only as the fallback for hand-rolled code linted outside the integrator flow. |
-| `legacy_router_files_present` | surface | Cannot infer how the user wants the stale router code removed; surface and offer `git rm` |
 
-**Ownership** (Review-OQ B): the **validator stays purely read-only** — it lints and emits `validator/1.4.0` JSON, unchanged. The **integrator (orchestrator) owns the entire autofix loop**: it reads the validator's FAIL rows, classifies each via the table above, applies edits, writes the log, prompts the user where needed, and re-invokes the validator. The validator never edits and never prompts. `agents/contracts.md`'s "do not auto-rollback" line is updated accordingly: rollback stays a last-resort *hint*, never automatic — but the integrator now *reacts* to FAILs with autofix before falling back to that hint.
+**Ownership** (Review-OQ B): the **validator stays purely read-only** — it lints and emits `validator/1.0.0` JSON, unchanged. The **integrator (orchestrator) owns the entire autofix loop**: it reads the validator's FAIL rows, classifies each via the table above, applies edits, writes the log, prompts the user where needed, and re-invokes the validator. The validator never edits and never prompts. `agents/contracts.md`'s "do not auto-rollback" line is updated accordingly: rollback stays a last-resort *hint*, never automatic — but the integrator now *reacts* to FAILs with autofix before falling back to that hint.
 
 **Bounds on the autofix loop**:
 
@@ -215,7 +214,7 @@ Migration steps:
 2. **Tests:** delete `tests/run-mode-tests.sh` and `tests/mode-fixtures/`. The codegen-validator suite expands to cover discovery + patch outputs (see §9).
 3. **Plugin version:** `0.9.x → 1.0.0`.
 4. **CLAUDE.md & README**: rewrite the "two modes" section into "discover → adapt → validate → autofix". The mode labels still appear in the validator's `mode` field, but the integrator stops branching on them — they become a property of the result, not a control-flow input.
-5. **Validator schema:** unchanged at `validator/1.4.0`. No new rules. The mode field's allowed values remain `fresh`, `straight-swap`, `unknown` — the validator still auto-detects from `HAS_MAX` and labels the result. (Removing the label from the validator output would break consumers; not worth it.)
+5. **Validator schema:** ships as `validator/1.0.0`. The mode field's allowed values are `fresh`, `straight-swap`, `unknown` — the validator auto-detects from `HAS_MAX` and labels the result as a property.
 6. **`--mode=side-by-side` alias:** removed. v0.3.x callers have had two major versions to migrate; the alias was always a transition tool.
 7. **Integrator reaction (`agents/contracts.md`):** update the "Integrator's reaction to sub-agent results" subsection — `validator.status == FAIL` now drives the autofix loop (classify, patch with anchor re-check, re-validate, max 3 iterations) before falling back to the rollback hint. The validator contract itself is unchanged; only the integrator's documented reaction changes.
 

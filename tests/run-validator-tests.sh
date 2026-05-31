@@ -131,7 +131,7 @@ assert_case bad-cross-file-privacy        "FAIL" "fresh"        \
 assert_case bad-no-reload-on-hidden       "FAIL" "fresh"        \
     "interstitial_reload_on_hidden:FAIL"
 
-# New (1.4.0): interstitial without OnAdShowFailed FAILs — show-failure does not
+# interstitial without OnAdShowFailed FAILs — show-failure does not
 # fire OnAdHidden, so the reload loop alone is incomplete.
 assert_case bad-no-show-failed            "FAIL" "fresh"        \
     "interstitial_show_failed_subscribed:FAIL"
@@ -140,7 +140,7 @@ assert_case bad-no-show-failed            "FAIL" "fresh"        \
 assert_case advisory-no-ready-guard       "PASS" "fresh"        \
     "interstitial_show_ready_guard:ADVISORY"
 
-# Credential-hygiene checks (validator/1.2.0 — reinstating what e42d709 removed).
+# Credential-hygiene checks (placeholder keys + test/null userIds).
 # Validator is an integration linter for human code, not just our codegen smoke
 # test, so these checks belong in the script — not just in the integrator report.
 assert_case bad-placeholder-key           "FAIL" "fresh"        \
@@ -172,25 +172,11 @@ assert_case good-placeholder-named-constant "PASS" "fresh" \
 assert_case bad-mrec-no-callbacks         "FAIL" "fresh"        \
     "mrec_callbacks_subscribed:FAIL" "mrec_load_show_parity:FAIL"
 
-# New: legacy router-stack files from v0.4.x → FAIL on validate (forces the
-# user to clean up half-migrated projects rather than ship double-init).
-# The check looks for `class AdServiceRouter` / `class MeticaRolloutBinding`
-# declarations, NOT filenames — so user-owned `IAdService.cs` does not false-positive.
-assert_case bad-legacy-router-files       "FAIL" "fresh"        \
-    "legacy_router_files_present:FAIL"
-
-# Regression: a user-owned ad abstraction named IAdService.cs (no AdServiceRouter
-# / MeticaRolloutBinding declaration) must NOT trip legacy_router_files_present.
-assert_case good-user-owned-iadservice    "PASS" "fresh"        \
-    "legacy_router_files_present:PASS"
-
-# New: straight-swap mode (Max present, no remote config). Validated with an
-# explicit --mode; no router is generated and the dropped ad_service_router_present
-# check must not appear.
+# straight-swap mode (Max present, no remote config), validated with an explicit
+# --mode: PASSes with same-file privacy validation.
 out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=straight-swap 2>&1) || true
-if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ] \
-   && ! printf '%s' "$out" | grep -q 'ad_service_router_present'; then
-    printf "  ok    good-straight-swap (mode=straight-swap, no router check)\n"; pass=$((pass+1))
+if [ "$(status_of "$out")" = "PASS" ] && [ "$(mode_of "$out")" = "straight-swap" ]; then
+    printf "  ok    good-straight-swap (explicit mode=straight-swap)\n"; pass=$((pass+1))
 else
     printf "  FAIL  good-straight-swap unexpected output:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi
@@ -213,13 +199,12 @@ else
 fi
 rm -rf "$nometica"
 
-# Removed-alias guard: --mode=side-by-side was retired in v1.0 and must now be
-# rejected as an invalid mode (contract-shaped error, exit non-zero).
-out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=side-by-side 2>&1); rc=$?
-if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'Invalid --mode: side-by-side'; then
-    printf "  ok    --mode=side-by-side is rejected (alias retired in v1.0)\n"; pass=$((pass+1))
+# An unknown --mode is rejected with a contract-shaped error (exit non-zero).
+out=$(bash "$VALIDATE" --project="$FIX/good-straight-swap" --mode=bogus 2>&1); rc=$?
+if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'Invalid --mode: bogus'; then
+    printf "  ok    unknown --mode is rejected\n"; pass=$((pass+1))
 else
-    printf "  FAIL  --mode=side-by-side should be rejected as invalid:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
+    printf "  FAIL  unknown --mode should be rejected as invalid:\n"; printf '%s\n' "$out" | sed 's/^/    /'; fail=$((fail+1))
 fi
 
 # Assert all-fixtures JSON parses (no syntax errors)

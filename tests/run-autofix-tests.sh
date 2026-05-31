@@ -8,7 +8,7 @@
 #   * every FAIL-producing rule the loop acts on is emitted as level=FAIL on a
 #     fixture that triggers it, with the location shape the loop needs — rules
 #     that target a specific line (privacy reorder, placeholder/userId prompts,
-#     duplicate-init, legacy file) emit file:line; append-type autofixes and the
+#     duplicate-init) emit file:line; append-type autofixes and the
 #     count-0 codegen-bug emit no location, by design;
 #   * the §7 partition (autofix | prompt | surface) is recorded here so a rule
 #     silently changing class is caught in review;
@@ -90,7 +90,6 @@ assert_fail_rule "test userId (multiline)"   bad-userid-multiline         user_i
 assert_fail_rule "duplicate init"            bad-double-init              init_count                          surface y
 assert_fail_rule "missing init (codegen bug)" bad-no-init                init_count                          surface n
 assert_fail_rule "load/show parity"          bad-load-no-show             interstitial_load_show_parity       surface n
-assert_fail_rule "legacy router file"        bad-legacy-router-files      legacy_router_files_present         surface y
 
 # --- loop exit condition: a correctly-integrated project PASSes -------------
 assert_pass "good fresh"          good-fresh

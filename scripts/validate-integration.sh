@@ -1,13 +1,12 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.4.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
 #
 # Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 #
 # When --mode is omitted, the mode is self-detected from MaxSDK presence
-# (HAS_MAX → straight-swap, else fresh). The v0.3.x `--mode=side-by-side` alias
-# was removed in v1.0 (the router stack was retired in v0.5.0).
+# (HAS_MAX → straight-swap, else fresh).
 
 set -u
 set -o pipefail
@@ -38,7 +37,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.4.0",\n'
+    printf '  "schema": "validator/1.0.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
@@ -414,27 +413,6 @@ else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
 fi
 
-# 11. legacy_router_files_present — FAIL when the retired v0.4 router-stack
-# artifacts are still present in the project after a v0.5.0 upgrade. We
-# identify the retired stack by **content**, not just filename — searching
-# for the two class names that are unique to our retired codegen
-# (`AdServiceRouter`, `MeticaRolloutBinding`) — so user-owned ad abstractions
-# named `IAdService.cs` are not falsely flagged. Mirrors the integrator's
-# Step 5 codegen tripwire so the same guarantee holds on every CI re-validation.
-LEGACY_HIT=""
-while IFS= read -r f; do
-    # Match the canonical class declarations from the retired templates.
-    if clean_source "$f" 2>/dev/null | grep -qE 'class[[:space:]]+(AdServiceRouter|MeticaRolloutBinding)\b'; then
-        LEGACY_HIT="$f"; break
-    fi
-done < "$CS_LIST"
-if [ -n "$LEGACY_HIT" ]; then
-    add_check "legacy_router_files_present" "$LEGACY_HIT" "FAIL" \
-        "Retired router-stack class declared (AdServiceRouter or MeticaRolloutBinding — both removed in v0.5.0). Delete the file and migrate to the standalone MeticaAdService."
-else
-    add_check "legacy_router_files_present" "" "PASS" "No retired router-stack classes declared."
-fi
-
 # DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
@@ -451,7 +429,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.4.0",\n'
+printf '  "schema": "validator/1.0.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'

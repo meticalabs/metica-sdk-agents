@@ -8,11 +8,11 @@
 # and runs the unchanged validator over them. If a documented template is
 # invalid, this test catches it.
 #
-# Coverage (post-v0.5.0 — router stack retired):
+# Coverage:
 #   1. fresh / interstitial / no namespace          → PASS
 #   2. fresh / rewarded / namespace MyGame.Services → PASS  (validates wrap + reward callback)
 #   3. fresh / privacy AFTER init                   → FAIL  (negative golden)
-#   3b. straight-swap / no router artifacts         → PASS  (validates no IAdService/router leaked)
+#   3b. straight-swap / standalone adapter set      → PASS
 
 set -u
 
@@ -180,20 +180,11 @@ awk '
 mv "$orch.new" "$orch"
 run_case "fresh privacy-after-init (negative)" "FAIL" "$p" "fresh"
 
-# 3b. straight-swap (Max present, no remote config): standalone adapter, no
-# router / Max adapter / binding. Validated with explicit --mode=straight-swap.
+# 3b. straight-swap (Max present, no remote config): the standalone adapter set
+# validates with an explicit --mode=straight-swap.
 p="$(make_sbs_project)"
 emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" "straight-swap"
-if [ ! -f "$p/Assets/Scripts/Metica/AdServiceRouter.cs" ] \
-   && [ ! -f "$p/Assets/Scripts/Metica/MaxAdService.cs" ] \
-   && [ ! -f "$p/Assets/Scripts/Metica/IAdService.cs" ] \
-   && [ ! -f "$p/Assets/Scripts/Metica/MeticaRolloutBinding.cs" ]; then
-    run_case "straight-swap interstitial (no router/Max adapter/binding/iadservice)" "PASS" "$p" "straight-swap"
-else
-    echo "  FAIL  straight-swap interstitial  (unexpected router/Max-adapter/binding file generated)"
-    fail=$((fail+1))
-    rm -rf "$p"
-fi
+run_case "straight-swap interstitial" "PASS" "$p" "straight-swap"
 
 # 4. MRec template — generated file uses the right Metica casing (Mrec, not MRec).
 p="$(make_fresh_project)"

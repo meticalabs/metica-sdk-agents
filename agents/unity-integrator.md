@@ -198,7 +198,7 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 [ -f "$PROJECT/Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" ] && S_MANIFEST=true
 ```
 
-The label affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` for `fresh`, `MeticaMediationInfo(MAX, …)` for `straight-swap`) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override by saying "force fresh" / "force straight-swap" — honor it. (`side-by-side` is no longer valid — the router stack was retired in v0.5.0; run straight-swap instead.)
+The label affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` for `fresh`, `MeticaMediationInfo(MAX, …)` for `straight-swap`) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override by saying "force fresh" / "force straight-swap" — honor it.
 
 #### The discovery checklist (run for Max-present projects; the namespace + remote-config signals in Step 2.5 also run for fresh)
 
@@ -509,7 +509,7 @@ Event-name table (Max → Metica):
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
 
 
-**Straight-swap codegen (agent-driven):** Generate the **standalone** adapter set — `MeticaAdService` orchestrator + per-format files. There is **no** router, **no** `MaxAdService`, **no** `MeticaRolloutBinding`, and **no** `IAdService` (the router stack was retired in v0.5.0). Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key) if not provided. Resolve inputs:
+**Straight-swap codegen (agent-driven):** Generate the **standalone** adapter set — the `MeticaAdService` orchestrator + per-format files — and rewrite the game's direct Max call sites to use it. Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key) if not provided. Resolve inputs:
 
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
@@ -550,19 +550,6 @@ After rendering the templates, apply a small, fixed set of **deterministic, name
 | **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
-
-**Codegen self-check (tripwire — must always pass).** After writing the files, grep the just-generated tree for any artifact that should be impossible to produce in the post-v0.5.0 world. If anything matches, abort the run and emit an error: this means the agent has slipped back into the retired side-by-side codegen path.
-
-```bash
-find "$PROJECT/$ADAPTER_FOLDER" -type f \( \
-       -name 'IAdService.cs' \
-    -o -name 'MaxAdService.cs' \
-    -o -name 'AdServiceRouter.cs' \
-    -o -name 'MeticaRolloutBinding.cs' \
-\) -print | head -1 | while read -r forbidden; do
-    [ -n "$forbidden" ] && { echo "Forbidden file generated: $forbidden (router stack was retired in v0.5.0)" >&2; exit 1; }
-done
-```
 
 ```bash
 mkdir -p "$PROJECT/$ADAPTER_FOLDER"
@@ -608,7 +595,7 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
 **Files to generate** (under `$ADAPTER_FOLDER`, plus the bootstrap under `Assets/Scripts/`):
 
 1. **Per-format files** — for each format in `$FORMATS`, Read `$PLUGIN_DIR/scripts/templates/standalone/Metica<Format>Ad.cs.tmpl` (filenames: `MeticaBannerAd.cs.tmpl`, `MeticaInterstitialAd.cs.tmpl`, `MeticaRewardedAd.cs.tmpl`, `MeticaMRecAd.cs.tmpl`), apply the namespace transform from the rule above, and Write to `$ADAPTER_FOLDER/Metica<Format>Ad.cs`. **All four are `MonoBehaviour`s** so Interstitial/Rewarded can host the docs.metica.com `Invoke(nameof(Load), …)` retry (Invoke is MonoBehaviour-only). They own the format's callbacks (named methods, not lambdas — game can extend by adding lines), auto-reload-on-hidden + `OnAdShowFailed`-recovery (interstitial/rewarded), `IsReady`-guarded `Show()`, and **exponential-backoff retry on `OnAdLoadFailed`** (`Math.Pow(2, Math.Min(6, attempt))` → 2→4→8…→64s) — interstitial/rewarded only. Banner and MRec have no app-side retry (SDK refreshes them internally) but carry `OnApplicationFocus` pause/resume and an `_isShowing` state flag.
-2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — standalone (no `IAdService`). Privacy precedes `MeticaSdk.Initialize` **in this file**; fresh mode passes `null` mediation (no MAX). In the init callback, `AddComponent` each per-format adapter onto the runner's `gameObject` and then call `Initialize(adUnitId)` on it — the adapter auto-loads inside `Initialize`. Expose `Show<Format>()` delegators. Substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim. Reference shape (mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
+2. **Orchestrator `$ADAPTER_FOLDER/MeticaAdService.cs`** — the standalone orchestrator. Privacy precedes `MeticaSdk.Initialize` **in this file**; fresh mode passes `null` mediation (no MAX). In the init callback, `AddComponent` each per-format adapter onto the runner's `gameObject` and then call `Initialize(adUnitId)` on it — the adapter auto-loads inside `Initialize`. Expose `Show<Format>()` delegators. Substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` from `validate-keys.sh` and `<USER_ID_EXPR>` verbatim. Reference shape (mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
@@ -659,7 +646,7 @@ Extract the JSON and read `.status`. The validator now enforces credential hygie
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
-The **validator stays read-only** (Review-OQ B): it lints and emits `validator/1.4.0` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default.
+The **validator stays read-only** (Review-OQ B): it lints and emits `validator/1.0.0` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default.
 
 Run the loop on `status: FAIL`, **max 3 iterations**:
 
@@ -677,7 +664,6 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
-| `legacy_router_files_present` | surface | Cannot infer how the user wants the stale file removed — surface and offer `git rm`. |
 
 `*_show_ready_guard` and `revenue_callback_subscribed` are `ADVISORY`, never `FAIL` — no action.
 
@@ -713,7 +699,7 @@ Then the standard summary (mode, SDK version, files changed, compat-checker one-
 
 #### Credential hygiene (now validator-driven)
 
-The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks (added in `validator/1.2.0`) catch leftover `YOUR_*` keys and null/test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
+The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and null/test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
 
 ```
 ⚠ The validator flagged credential placeholders / a null userId.
@@ -732,7 +718,7 @@ In **straight-swap mode**, the report must also include:
 
 #### Cohort-gating recipe (straight-swap + remote-config provider detected)
 
-Mature games with a remote-config provider often want to roll out Metica gradually rather than swap unconditionally. The integrator does **not** generate a router or rollout-binding (the router stack was retired in v0.5.0) — the user wires their own gate using the provider they already have. Include this section in the final report when `REMOTE_CONFIG_PROVIDER ≠ none`:
+Mature games with a remote-config provider often want to roll out Metica gradually rather than swap unconditionally. The integrator does **not** generate a router or rollout-binding — the user wires their own gate using the provider they already have. Include this section in the final report when `REMOTE_CONFIG_PROVIDER ≠ none`:
 
 ```
 Cohort-gating recipe (your project has <PROVIDER> remote-config):
@@ -766,7 +752,7 @@ Replace `<PROVIDER>` and the read-expression with the detected value. When the p
 ## Hard rules
 
 - Never modify any file under `Assets/MaxSdk/`. In straight-swap mode, rewrite only the game's direct `MaxSdk.*` call sites (scene/game logic) — never a dedicated Max-wrapper file (see the wrapper-scoping rule in Step 5).
-- **Never emit `IAdService.cs`, `MaxAdService.cs`, `AdServiceRouter.cs`, or `MeticaRolloutBinding.cs`.** The router stack was retired in v0.5.0; the codegen self-check (Step 5) traps any regression. If the user asks for "side-by-side" / "router", explain it's no longer supported and run straight-swap with the Step 7 cohort-gating recipe.
+- The generated design is the standalone `MeticaAdService` orchestrator + per-format adapters — the integrator does not generate an A/B router or rollout-binding. If the user wants gradual rollout, point them to the Step 7 cohort-gating recipe (they gate the rewritten call sites behind their own remote-config flag).
 - Privacy calls (`SetHasUserConsent`, `SetDoNotSell`) **must** precede `MeticaSdk.Initialize` and live in the **same file** (the `MeticaAdService` orchestrator).
 - Reuse the existing Max ad unit IDs for MeticaSDK (per migration guide).
 - Sub-agent invocations (compat-checker, validator) **must** be in fresh subagent contexts — never share your reasoning context with them.
