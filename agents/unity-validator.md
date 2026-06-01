@@ -55,7 +55,7 @@ A single fenced ```` ```json ```` block. No human pre-summary at this stage — 
 
 The validator must run in a **fresh subagent context** — it must not see the integrator's reasoning. Input is the file tree only.
 
-## Rule set (`validator/1.0.0`)
+## Rule set (`validator/1.1.0`)
 
 For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 
@@ -71,5 +71,7 @@ For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appear as string literal values (comments stripped, identifier names ignored)
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder` as a delimited word, or is digits-only. Handles `@"..."`, `$"..."`, `$@"..."`, `@$"..."` verbatim/interpolated forms too
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
+- `mediation_enum_qualified` *(1.1.0)* — FAIL on bare `MeticaMediationType.MAX` (CS0103); it is a nested enum and must be qualified `MeticaMediationInfo.MeticaMediationType.MAX`. Emitted only when the mediation enum is referenced
+- `smartfloors_property_case` *(1.1.0)* — FAIL on camelCase `SmartFloors.isForcedHoldout` (CS1061); the property is PascalCase `IsForcedHoldout`. Emitted only when `SmartFloors.` is referenced
 
 These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output.

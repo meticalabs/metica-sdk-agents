@@ -1,6 +1,6 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
 #
 # Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -35,7 +35,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.0.0",\n'
+    printf '  "schema": "validator/1.1.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
@@ -120,6 +120,47 @@ first_loc() {
     local pat="$1" n
     while IFS= read -r f; do
         n="$(clean_source "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
+        if [ -n "$n" ]; then
+            printf '%s:%s' "$f" "$n"
+            return
+        fi
+    done < "$CS_LIST"
+}
+
+# Regex-aware variants (ERE) of count_lit/first_loc — used by the reference-form
+# checks (mediation enum qualification, SmartFloors property casing) where a
+# fixed-string match isn't enough.
+#
+# These read COMMENT-stripped source (strings preserved) via strip-comments.awk,
+# NOT clean_source. The reason is the SmartFloors access lives inside an
+# interpolated string — `$"...{response.SmartFloors.IsForcedHoldout}..."` — and
+# clean-cs.awk strips interpolated strings whole (interpolation holes included),
+# which would hide the reference entirely. strip-comments.awk keeps string
+# contents (so the interpolation hole survives) while still dropping comments, so
+# a commented-out example can't false-positive. Same count-don't-short-circuit
+# discipline as the literal helpers above.
+__STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
+strip_comments_source() { awk -f "$__STRIP_COMMENTS_AWK" "$1"; }
+
+count_re() {
+    local pat="$1" total=0 c
+    while IFS= read -r f; do
+        c="$(strip_comments_source "$f" | grep -cE -- "$pat" 2>/dev/null)" || c=0
+        total=$((total + c))
+    done < "$CS_LIST"
+    printf '%d' "$total"
+}
+
+# first_re <pattern> [exclude_pattern]: first <file>:<line> matching <pattern>,
+# skipping lines that ALSO match <exclude_pattern> (e.g. the already-qualified form).
+first_re() {
+    local pat="$1" exclude="${2:-}" n
+    while IFS= read -r f; do
+        if [ -n "$exclude" ]; then
+            n="$(strip_comments_source "$f" | grep -nE -- "$pat" | grep -vE -- "$exclude" | head -1 | awk -F: '{ print $1 }')"
+        else
+            n="$(strip_comments_source "$f" | grep -nE -- "$pat" | head -1 | awk -F: '{ print $1 }')"
+        fi
         if [ -n "$n" ]; then
             printf '%s:%s' "$f" "$n"
             return
@@ -397,8 +438,44 @@ else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
 fi
 
+# 11. mediation_enum_qualified — MeticaMediationType is a NESTED enum inside
+# MeticaMediationInfo, so it must be written `MeticaMediationInfo.MeticaMediationType.MAX`.
+# The docs.metica.com Unity SDK example uses the bare `MeticaMediationType.MAX`, which
+# does NOT compile (CS0103). Detect any bare reference not already qualified by
+# `MeticaMediationInfo.`. Skipped when no mediation enum is referenced (no-Max projects).
+MED_TOTAL="$(count_re 'MeticaMediationType\.')"
+if [ "$MED_TOTAL" != "0" ]; then
+    MED_QUALIFIED="$(count_re 'MeticaMediationInfo\.MeticaMediationType\.')"
+    if [ "$MED_TOTAL" -gt "$MED_QUALIFIED" ]; then
+        MED_LOC="$(first_re 'MeticaMediationType\.' 'MeticaMediationInfo\.MeticaMediationType\.')"
+        add_check "mediation_enum_qualified" "$MED_LOC" "FAIL" \
+            "Bare MeticaMediationType.MAX does not compile (CS0103) — it is a nested enum. Qualify it: MeticaMediationInfo.MeticaMediationType.MAX."
+    else
+        add_check "mediation_enum_qualified" "$(first_re 'MeticaMediationInfo\.MeticaMediationType\.')" "PASS" \
+            "Mediation enum is correctly qualified (MeticaMediationInfo.MeticaMediationType.*)."
+    fi
+fi
+
+# 12. smartfloors_property_case — MeticaSmartFloors.IsForcedHoldout is PascalCase.
+# The docs.metica.com example uses camelCase `isForcedHoldout`, which does NOT
+# compile (CS1061). Detect the camelCase form. Skipped when SmartFloors is not referenced.
+if [ "$(count_re 'SmartFloors\.')" != "0" ]; then
+    if [ "$(count_re 'SmartFloors\.isForcedHoldout')" != "0" ]; then
+        add_check "smartfloors_property_case" "$(first_re 'SmartFloors\.isForcedHoldout')" "FAIL" \
+            "SmartFloors.isForcedHoldout does not compile (CS1061) — the property is PascalCase. Use SmartFloors.IsForcedHoldout."
+    else
+        add_check "smartfloors_property_case" "$(first_re 'SmartFloors\.')" "PASS" \
+            "SmartFloors property access uses correct PascalCase casing."
+    fi
+fi
+
 # DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
+#   - compiles_cleanly:             invoke Unity batch-mode (or csc/dotnet) against the adapter folder +
+#                                   SDK and surface real CS errors. Heavy + environment-dependent; the
+#                                   string-level reference checks above (mediation_enum_qualified,
+#                                   smartfloors_property_case) catch the known docs-transcription bugs
+#                                   without a toolchain.
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
 #                                   format is still showing. Needs call-graph/scope awareness to detect
 #                                   without false positives; deferred until a reliable heuristic exists.
@@ -413,7 +490,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.0.0",\n'
+printf '  "schema": "validator/1.1.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"

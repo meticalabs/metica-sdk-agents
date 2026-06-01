@@ -32,6 +32,23 @@ clean_source() { awk -f "$CLEAN_CS_AWK" "$1"; }
 clean_source_selftest() {
     [ -f "$CLEAN_CS_AWK" ]              || return 1
     clean_source /dev/null >/dev/null 2>&1 || return 1
+    # The checks above pass even for a degenerate accessor that returns EMPTY for
+    # ALL input — which would make every grep find nothing and yield a misleading
+    # all-PASS report. Pipe a known bare-code token through and assert it survives
+    # the cleaning pass (it is neither a string literal nor a comment).
+    local probe
+    probe="$(printf 'MeticaSdk.Initialize(config);\n' | awk -f "$CLEAN_CS_AWK" 2>/dev/null)" || return 1
+    case "$probe" in
+        *"MeticaSdk.Initialize(config)"*) ;;   # token survived → accessor is live
+        *) return 1 ;;
+    esac
+    # And the inverse: a token that lives ONLY inside a comment must be stripped,
+    # so a no-op accessor (passes everything through unchanged) is also rejected.
+    local probe_comment
+    probe_comment="$(printf '// MeticaSdk.Initialize(commented);\n' | awk -f "$CLEAN_CS_AWK" 2>/dev/null)" || return 1
+    case "$probe_comment" in
+        *"MeticaSdk.Initialize"*) return 1 ;;   # comment NOT stripped → accessor is broken
+    esac
     return 0
 }
 

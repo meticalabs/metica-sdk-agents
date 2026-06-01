@@ -163,6 +163,20 @@ assert_case bad-mrec-no-callbacks         "FAIL"        \
 assert_case good-max-present            "PASS" \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_reload_on_hidden:PASS"
 
+# issue #8: reference-form checks for the docs-transcription bugs that compiled
+# to CS errors but slipped past the validator.
+# Bare nested mediation enum (MeticaMediationType.MAX) → FAIL (CS0103).
+assert_case bad-mediation-enum-unqualified "FAIL" \
+    "mediation_enum_qualified:FAIL"
+
+# camelCase SmartFloors.isForcedHoldout → FAIL (CS1061).
+assert_case bad-smartfloors-property-case  "FAIL" \
+    "smartfloors_property_case:FAIL"
+
+# Correct forms (qualified enum + PascalCase property) → both rules PASS.
+assert_case good-reference-forms           "PASS" \
+    "mediation_enum_qualified:PASS" "smartfloors_property_case:PASS"
+
 # New: project with no Metica refs gets a structured error, not a PASS-laden report
 nometica=$(mktemp -d -t no-metica-XXXXXX)
 mkdir -p "$nometica/Assets/Scripts" "$nometica/ProjectSettings"

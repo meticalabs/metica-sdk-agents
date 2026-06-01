@@ -60,7 +60,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.0.0`
+## `validator/1.1.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
@@ -84,6 +84,8 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string (matched as a delimited word — `-`/`_` boundaries or quote anchors — so legitimate ids like `"contest-user-42"` or `"latest-build"` do not false-positive), or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. The check's outer collector is string-aware, so a test value containing `(` or `)` (`"test)hacker"`) cannot bypass the check. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
 - `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL when the format is used but `OnAdShowFailed` is not subscribed. Per the docs.metica.com Unity SDK example, both Interstitial and Rewarded subscribe `OnAdShowFailed` (signature `Action<MeticaAd, MeticaAdError>`). Without it the canonical reload-on-hidden loop stalls on the first show-failure: `OnAdHidden` does NOT fire after a show-fail, so the next ad is never loaded.
+- `mediation_enum_qualified` *(added in 1.1.0)* — FAIL when a bare `MeticaMediationType.MAX` appears (CS0103 — it is a **nested** enum and must be qualified `MeticaMediationInfo.MeticaMediationType.MAX`). PASS when only the qualified form is present. Emitted only when the mediation enum is referenced (skipped on no-Max projects). A cheap string-level guard for the docs-page transcription bug in issue #8 — no compiler required.
+- `smartfloors_property_case` *(added in 1.1.0)* — FAIL when `SmartFloors.isForcedHoldout` (camelCase) appears (CS1061 — the property is PascalCase `IsForcedHoldout`). PASS when `SmartFloors.*` is referenced without the camelCase form. Emitted only when `SmartFloors.` is referenced. Companion to `mediation_enum_qualified` (issue #8).
 
 **Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.
 
@@ -91,7 +93,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ```json
 {
-  "schema": "validator/1.0.0",
+  "schema": "validator/1.1.0",
   "status": "FAIL",
   "error": null,
   "warnings": [],
