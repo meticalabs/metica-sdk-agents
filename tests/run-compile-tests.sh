@@ -91,8 +91,8 @@ fu="$(make_fake_unity "$err_log" 0)"
 out="$(UNITY_PATH="$fu" bash "$CC" --project="$p" 2>&1)"; rc=$?
 n_err="$(printf '%s\n' "$out" | grep -c '^ERROR')"
 if [ "$rc" = "1" ] && [ "$n_err" = "2" ] \
-    && printf '%s' "$out" | grep -qP '^ERROR\tAssets/Scripts/Metica/MeticaAdService\.cs\t32\tCS0103: ' \
-    && printf '%s' "$out" | grep -qP '^ERROR\tAssets/Scripts/Metica/MeticaAdService\.cs\t39\tCS1061: '; then
+    && printf '%s' "$out" | grep -qF "$(printf 'ERROR\tAssets/Scripts/Metica/MeticaAdService.cs\t32\tCS0103: ')" \
+    && printf '%s' "$out" | grep -qF "$(printf 'ERROR\tAssets/Scripts/Metica/MeticaAdService.cs\t39\tCS1061: ')"; then
     ok "compile errors → 2 ERROR records (file/line/msg) exit 1"
 else
     bad "compile errors (rc=$rc, n_err=$n_err)"; printf '%s\n' "$out" | sed 's/^/        /'
@@ -104,7 +104,7 @@ rm -f "$fu"
 paren_log="$(printf 'Assets/Foo (copy).cs(7,3): error CS0246: type not found\r\n')"
 fu="$(make_fake_unity "$paren_log" 0)"
 out="$(UNITY_PATH="$fu" bash "$CC" --project="$p" 2>&1)"; rc=$?
-if [ "$rc" = "1" ] && printf '%s' "$out" | grep -qP '^ERROR\tAssets/Foo \(copy\)\.cs\t7\tCS0246: type not found$'; then
+if [ "$rc" = "1" ] && printf '%s' "$out" | grep -qxF "$(printf 'ERROR\tAssets/Foo (copy).cs\t7\tCS0246: type not found')"; then
     ok "paren-in-path + CRLF → file kept intact, no trailing CR"
 else
     bad "paren/CRLF parse (rc=$rc)"; printf '%s\n' "$out" | cat -A | sed 's/^/        /'

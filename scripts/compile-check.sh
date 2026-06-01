@@ -135,7 +135,8 @@ if [ -n "$ERR_LINES" ]; then
         loc="${line%%): error*}"        # Assets/...cs(12,34
         file="${loc%(*}"                # strip the LAST '(' group only, so a
                                         # path containing '(' (e.g. "Foo (copy).cs") survives
-        linecol="${loc##*(}"            # 12,34
+        linecol="${loc##*\(}"           # 12,34 — escape the '(' so it's a literal,
+                                        # not an `*(...)` extglob operator if extglob is on
         ln="${linecol%%,*}"             # 12
         msg="${line#*): error }"        # CS0103: The name 'X' does not exist...
         printf 'ERROR\t%s\t%s\t%s\n' "$file" "$ln" "$msg"

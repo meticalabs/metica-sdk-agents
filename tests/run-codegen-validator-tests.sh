@@ -150,7 +150,7 @@ emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" 1
 svc="$p/Assets/Scripts/Metica/MeticaAdService.cs"
 # The nested enum MUST be qualified; the bare form does not compile (issue #8).
 if grep -q "MeticaMediationInfo.MeticaMediationType.MAX" "$svc" \
-    && ! grep -qE '[^.]MeticaMediationType\.MAX' "$svc"; then
+    && ! grep -qE '(^|[^.])MeticaMediationType\.MAX' "$svc"; then
     run_case "max-present interstitial (qualified MAX mediation)" "PASS" "$p"
 else
     echo "  FAIL  max-present interstitial  (qualified MAX mediation arg missing or bare enum present)"
