@@ -12,7 +12,8 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
-- `MODE` — optional `fresh` or `straight-swap`. When omitted, the script auto-detects from project contents (presence of `MaxSdk.*` → straight-swap, otherwise fresh). `--mode=side-by-side` is accepted as a deprecated alias for `straight-swap` (v0.3.x back-compat; the router stack is no longer generated).
+
+Validation is uniform — there is no mode input; the checks apply identically whether or not MaxSDK is present.
 
 ## What to do — run this single bash command
 
@@ -32,9 +33,8 @@ done
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Set METICA_SDK_AGENTS_DIR to the plugin path and retry." >&2; exit 1; }
 
 PROJECT="<absolute_project_path>"
-MODE_ARG=""   # or "--mode=fresh" / "--mode=straight-swap"
 
-JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT" $MODE_ARG)
+JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT")
 printf '```json\n%s\n```\n' "$JSON"
 ```
 
@@ -55,22 +55,21 @@ A single fenced ```` ```json ```` block. No human pre-summary at this stage — 
 
 The validator must run in a **fresh subagent context** — it must not see the integrator's reasoning. Input is the file tree only.
 
-## Rule set (current scope — `validator/1.4.0`)
+## Rule set (`validator/1.0.0`)
 
-For the full canonical schema with version history, see [`agents/contracts.md`](contracts.md#validator14).
+For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, both modes)
+- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, regardless of MaxSDK presence)
 - `<format>_callbacks_subscribed` — for each used ad format (banner/interstitial/rewarded/mrec), OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
 - `<format>_load_show_parity` — every Load has a matching Show somewhere (banner/interstitial/rewarded/mrec)
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
-- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` *(1.4.0)* — FAIL if the format is used but `OnAdShowFailed` is not subscribed (the reload-on-hidden loop stalls on show-fail because `OnAdHidden` doesn't fire then)
+- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL if the format is used but `OnAdShowFailed` is not subscribed (the reload-on-hidden loop stalls on show-fail because `OnAdHidden` doesn't fire then)
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
 - `revenue_callback_subscribed` — ADVISORY only
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appear as string literal values (comments stripped, identifier names ignored)
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder` as a delimited word, or is digits-only. Handles `@"..."`, `$"..."`, `$@"..."`, `@$"..."` verbatim/interpolated forms too
-- `mrec_callbacks_subscribed` / `mrec_load_show_parity` *(1.3.0)* — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
-- `legacy_router_files_present` *(1.3.0)* — FAIL when any source declares `class AdServiceRouter` or `class MeticaRolloutBinding` (unique to the retired v0.4 router stack — identified by class declaration, NOT by filename, so user-owned `IAdService.cs` does not false-positive)
+- `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
 
-These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output. `ad_service_router_present` was removed in `validator/1.1.0` and the router stack was retired entirely in v0.5.0; the new `legacy_router_files_present` rule catches half-migrated v0.4→v0.5 upgrades by class-declaration content.
+These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output.

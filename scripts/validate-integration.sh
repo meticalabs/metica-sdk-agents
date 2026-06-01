@@ -1,13 +1,11 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.4.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
 #
-# Usage: validate-integration.sh --project=<path> [--mode=fresh|straight-swap]
+# Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
 #
-# `--mode=side-by-side` is accepted as a deprecated alias for `straight-swap`
-# (kept for backward-compat with v0.3.x callers; the router stack is no longer
-# generated, so both modes validate identically).
+# Validation is uniform — it does not depend on whether MaxSDK is present.
 
 set -u
 set -o pipefail
@@ -16,7 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PROJECT=""
-MODE=""
 
 # ---- JSON helpers -----------------------------------------------------------
 
@@ -38,9 +35,8 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.4.0",\n'
+    printf '  "schema": "validator/1.0.0",\n'
     printf '  "status": "FAIL",\n'
-    printf '  "mode": "unknown",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
     printf '  "checks": []\n'
@@ -53,9 +49,8 @@ die_json() {
 for arg in "$@"; do
     case $arg in
         --project=*) PROJECT="${arg#*=}" ;;
-        --mode=*)    MODE="${arg#*=}" ;;
         -h|--help)
-            sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die_json "Unknown arg: $arg" ;;
     esac
@@ -66,18 +61,6 @@ done
 [ -d "$PROJECT/Assets" ]     || die_json "Not a Unity project (no Assets/): $PROJECT"
 
 WARNINGS=""
-case "$MODE" in
-    ""|fresh|straight-swap) ;;
-    side-by-side)
-        # Deprecated alias kept for v0.3.x backward compat; the router stack is
-        # no longer generated, so SBS and straight-swap validate identically.
-        # Emit a warning so callers (CI scripts) see a migration signal in their
-        # output rather than the alias silently changing semantics behind their
-        # back.
-        MODE="straight-swap"
-        WARNINGS='"--mode=side-by-side is deprecated; use --mode=straight-swap. The router stack was retired in v0.5.0 and the two modes validate identically."' ;;
-    *) die_json "Invalid --mode: $MODE (allowed: fresh, straight-swap)" ;;
-esac
 
 # ---- discover C# sources ---------------------------------------------------
 
@@ -102,30 +85,32 @@ find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
 # `// BUG: forgot Foo`, `/* commented out */`, or `"a string literal"` does
 # not register as a real call. Line numbers are preserved (per-line cleanup).
 
-# Emit cleaned source for one file: strings (regular, verbatim, interpolated),
-# line comments, block comments stripped. Line numbers preserved.
-CLEAN_CS_AWK="$SCRIPT_DIR/lib/clean-cs.awk"
-clean_cs() { awk -f "$CLEAN_CS_AWK" "$1"; }
-
-# Smoke-test the helper before relying on it. If awk or the script is broken,
-# bail loudly with a contract-shaped error rather than silently returning 0
-# matches everywhere (which would emit a misleading all-PASS report).
-[ -f "$CLEAN_CS_AWK" ]                                || die_json "Missing helper: $CLEAN_CS_AWK"
-clean_cs /dev/null >/dev/null 2>&1                    || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
+# Cleaned source (strings — regular, verbatim, interpolated — plus line and
+# block comments stripped; line numbers preserved) is read through the shared
+# clean_source() accessor so the validator and the integrator's discovery scan
+# byte-identical input (RFC v1.0 OQ4: the cleaned-source cache lands behind this
+# seam later, with no caller changes). Self-test it before relying on it — a
+# broken accessor must bail loudly, not silently return 0 matches everywhere
+# (which would emit a misleading all-PASS report).
+source "$SCRIPT_DIR/lib/clean-source.sh"
+clean_source_selftest || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
 
 files_with() {
-    local pat="$1"
+    local pat="$1" c
     while IFS= read -r f; do
-        if clean_cs "$f" | grep -qF -- "$pat"; then
-            printf '%s\n' "$f"
-        fi
+        # Count (don't short-circuit): a `grep -q` would close the pipe on the
+        # first match and SIGPIPE the clean_source awk, which under `set -o
+        # pipefail` makes the pipeline report failure and silently skips a
+        # large file. `grep -cF` consumes the whole stream, so awk completes.
+        c="$(clean_source "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
+        [ "${c:-0}" -gt 0 ] && printf '%s\n' "$f"
     done < "$CS_LIST"
 }
 
 count_lit() {
     local pat="$1" total=0 c
     while IFS= read -r f; do
-        c="$(clean_cs "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
+        c="$(clean_source "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
         total=$((total + c))
     done < "$CS_LIST"
     printf '%d' "$total"
@@ -134,7 +119,7 @@ count_lit() {
 first_loc() {
     local pat="$1" n
     while IFS= read -r f; do
-        n="$(clean_cs "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
+        n="$(clean_source "$f" | grep -nF -- "$pat" | head -1 | awk -F: '{ print $1 }')"
         if [ -n "$n" ]; then
             printf '%s:%s' "$f" "$n"
             return
@@ -143,27 +128,16 @@ first_loc() {
 }
 
 line_in_file() {
-    clean_cs "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
+    clean_source "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
 
-# ---- mode detection ---------------------------------------------------------
-
-HAS_MAX=0;    [ "$(count_lit 'MaxSdk.')"   != "0" ] && HAS_MAX=1
-HAS_METICA=0; [ "$(count_lit 'MeticaSdk.')" != "0" ] && HAS_METICA=1
+# ---- MeticaSDK presence guard ----------------------------------------------
 
 # Refuse to validate if there are no MeticaSdk references at all — this is not
 # a Metica integration, just a Unity project. Emit a contract-shaped error.
+HAS_METICA=0; [ "$(count_lit 'MeticaSdk.')" != "0" ] && HAS_METICA=1
 if [ "$HAS_METICA" = "0" ]; then
     die_json "No MeticaSdk references found; project does not appear to have a MeticaSDK integration."
-fi
-
-if [ -z "$MODE" ]; then
-    if [ "$HAS_MAX" = "1" ]; then
-        # Max + Metica → straight-swap (Max being removed from app code).
-        MODE="straight-swap"
-    else
-        MODE="fresh"
-    fi
 fi
 
 # ---- check accumulator -----------------------------------------------------
@@ -191,7 +165,7 @@ case "$INIT_COUNT" in
 esac
 
 # 2. privacy_before_init: validate same-file ordering of privacy calls before
-# Initialize. Both modes (fresh / straight-swap) require this — same logic.
+# Initialize (the rule is uniform regardless of whether MaxSDK is present).
 INIT_FILE="${INIT_LOC%:*}"
 if [ -n "$INIT_FILE" ]; then
     INIT_LINE="$(line_in_file 'MeticaSdk.Initialize(' "$INIT_FILE")"
@@ -423,28 +397,7 @@ else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
 fi
 
-# 11. legacy_router_files_present — FAIL when the retired v0.4 router-stack
-# artifacts are still present in the project after a v0.5.0 upgrade. We
-# identify the retired stack by **content**, not just filename — searching
-# for the two class names that are unique to our retired codegen
-# (`AdServiceRouter`, `MeticaRolloutBinding`) — so user-owned ad abstractions
-# named `IAdService.cs` are not falsely flagged. Mirrors the integrator's
-# Step 5 codegen tripwire so the same guarantee holds on every CI re-validation.
-LEGACY_HIT=""
-while IFS= read -r f; do
-    # Match the canonical class declarations from the retired templates.
-    if clean_cs "$f" 2>/dev/null | grep -qE 'class[[:space:]]+(AdServiceRouter|MeticaRolloutBinding)\b'; then
-        LEGACY_HIT="$f"; break
-    fi
-done < "$CS_LIST"
-if [ -n "$LEGACY_HIT" ]; then
-    add_check "legacy_router_files_present" "$LEGACY_HIT" "FAIL" \
-        "Retired router-stack class declared (AdServiceRouter or MeticaRolloutBinding — both removed in v0.5.0). Delete the file and migrate to the standalone MeticaAdService."
-else
-    add_check "legacy_router_files_present" "" "PASS" "No retired router-stack classes declared."
-fi
-
-# DEFERRED to a follow-up patch (tracked in Notion log §11):
+# DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
 #                                   format is still showing. Needs call-graph/scope awareness to detect
@@ -460,9 +413,8 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.4.0",\n'
+printf '  "schema": "validator/1.0.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
-printf '  "mode": "%s",\n' "$MODE"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"
 printf '  "checks": [\n'
