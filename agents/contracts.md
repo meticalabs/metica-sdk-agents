@@ -60,12 +60,12 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.0.0`
+## `validator/1.1.0`
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
-- `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
+- `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` added in 1.1.0 — a non-blocking "could not verify" signal, currently used only by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
 - `checks[].detail`: one-line message describing what was found.
@@ -84,14 +84,15 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string (matched as a delimited word — `-`/`_` boundaries or quote anchors — so legitimate ids like `"contest-user-42"` or `"latest-build"` do not false-positive), or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. The check's outer collector is string-aware, so a test value containing `(` or `)` (`"test)hacker"`) cannot bypass the check. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
 - `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL when the format is used but `OnAdShowFailed` is not subscribed. Per the docs.metica.com Unity SDK example, both Interstitial and Rewarded subscribe `OnAdShowFailed` (signature `Action<MeticaAd, MeticaAdError>`). Without it the canonical reload-on-hidden loop stalls on the first show-failure: `OnAdHidden` does NOT fire after a show-fail, so the next ad is never loaded.
+- `compiles_cleanly` *(added in 1.1.0)* — the authoritative "does this integration actually build" check, delegated to `scripts/compile-check.sh` (Unity batch-mode — the only compiler that sees Unity's assemblies, asmdefs and scripting defines; a raw `csc`/`dotnet` pass would bury real errors in missing-`UnityEngine` noise, so we never fall back to it). **PASS** when the project compiles with no `error CS####`; **one FAIL per compile error** with `location` = `<file>:<line>` and `detail` carrying the `CS####: message` (this is what catches the docs-transcription class from issue #8 — unqualified nested enum, wrong property casing — without bespoke per-bug rules); **WARN** (non-blocking) when the check is skipped because no Unity editor could be located or `METICA_SKIP_COMPILE=1`, or when Unity ran but could not complete (license/timeout/crash). On by default; the plugin's own test suites export `METICA_SKIP_COMPILE=1` so synthetic fixtures never launch Unity.
 
-**Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.
+**Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` and `WARN` do not affect status.
 
 **Concrete example:**
 
 ```json
 {
-  "schema": "validator/1.0.0",
+  "schema": "validator/1.1.0",
   "status": "FAIL",
   "error": null,
   "warnings": [],
@@ -125,7 +126,8 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 - `compat-checker.status == BLOCK` → abort, print the `FAIL` rows, exit. Do not prompt to override.
 - `compat-checker.status == PASS` with any `WARN` → continue, surface warnings.
-- `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
+- `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). A `compiles_cleanly` FAIL is `surface`-class (a real `CS####` compile error — printed verbatim with `file:line`, not auto-edited). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
+- A `compiles_cleanly` **WARN** (compile skipped — no Unity located / `METICA_SKIP_COMPILE=1` — or could not complete) is non-blocking: surface it in the final report so the user knows the build was not verified, but it does not trigger the autofix loop or affect status.
 
 ---
 

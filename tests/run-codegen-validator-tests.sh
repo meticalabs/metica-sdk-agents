@@ -18,6 +18,9 @@
 
 set -u
 
+# Synthetic rendered projects — never launch Unity (see run-validator-tests.sh).
+export METICA_SKIP_COMPILE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VALIDATE="$PLUGIN_DIR/scripts/validate-integration.sh"
@@ -65,7 +68,9 @@ emit_standalone() {
     mkdir -p "$dir"
 
     local mediation='null'
-    [ "$has_max" = "1" ] && mediation='new MeticaMediationInfo(MeticaMediationType.MAX, "MAXKEY99")'
+    # Nested enum MUST be qualified: MeticaMediationInfo.MeticaMediationType.MAX
+    # (bare MeticaMediationType.MAX does not compile — see issue #8).
+    [ "$has_max" = "1" ] && mediation='new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "MAXKEY99")'
 
     sed \
         -e "s|namespace Metica\\.AbTest|namespace $ns|g" \
@@ -143,10 +148,13 @@ run_case "privacy-after-init (negative)" "FAIL" "$p"
 p="$(make_max_project)"
 emit_standalone "$p" "Metica.AbTest" "interstitial" "ABC123" "XYZ987" 1
 svc="$p/Assets/Scripts/Metica/MeticaAdService.cs"
-if grep -q "MeticaMediationType.MAX" "$svc"; then
-    run_case "max-present interstitial (MAX mediation)" "PASS" "$p"
+# The nested enum MUST be qualified; the bare form does not compile (issue #8).
+if grep -q "MeticaMediationInfo.MeticaMediationType.MAX" "$svc" \
+    && ! grep -qE '(^|[^.])MeticaMediationType\.MAX' "$svc"; then
+    run_case "max-present interstitial (qualified MAX mediation)" "PASS" "$p"
 else
-    echo "  FAIL  max-present interstitial  (MAX mediation arg missing)"
+    echo "  FAIL  max-present interstitial  (qualified MAX mediation arg missing or bare enum present)"
+    grep -n "MeticaMediationType" "$svc" | sed 's/^/        /'
     fail=$((fail+1)); rm -rf "$p"
 fi
 
@@ -196,6 +204,10 @@ grep -qE 'private[[:space:]]+void[[:space:]]+OnInitialized\(MeticaInitResponse' 
 grep -q 'MeticaSdk.Initialize(config, __MEDIATION__, OnInitialized)' "$TMPL" || sh_fail "Initialize must pass the named OnInitialized callback (not a lambda)"
 grep -q 'response.SmartFloors.UserGroup'  "$TMPL" || sh_fail "OnInitialized must log SmartFloors.UserGroup"
 grep -q 'response.UserId'                 "$TMPL" || sh_fail "OnInitialized must log UserId"
+# Reference-form correctness (issue #8): the SmartFloors property is PascalCase
+# (IsForcedHoldout); the camelCase docs form does not compile (CS1061).
+grep -q 'response.SmartFloors.IsForcedHoldout' "$TMPL" || sh_fail "OnInitialized must use PascalCase SmartFloors.IsForcedHoldout"
+grep -q 'SmartFloors.isForcedHoldout'          "$TMPL" && sh_fail "camelCase SmartFloors.isForcedHoldout does not compile (CS1061)"
 # Privacy precedes Initialize in the template.
 cons_line="$(grep -n 'SetHasUserConsent' "$TMPL" | head -1 | cut -d: -f1)"
 init_line="$(grep -n 'MeticaSdk.Initialize(' "$TMPL" | head -1 | cut -d: -f1)"

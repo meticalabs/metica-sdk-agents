@@ -39,7 +39,7 @@ public class MeticaAdService : MonoBehaviour
     private void OnInitialized(MeticaInitResponse response)
     {
         Debug.Log($"[Metica] initialized — user group: {response.SmartFloors.UserGroup}, " +
-                  $"forced holdout: {response.SmartFloors.isForcedHoldout}, userId: {response.UserId}");
+                  $"forced holdout: {response.SmartFloors.IsForcedHoldout}, userId: {response.UserId}");
 
         // Subscribe each used format's callbacks + kick off its initial load.
         // @fmt-begin:interstitial

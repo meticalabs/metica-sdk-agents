@@ -1,6 +1,6 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.0.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
 #
 # Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -35,7 +35,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.0.0",\n'
+    printf '  "schema": "validator/1.1.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
@@ -397,6 +397,46 @@ else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
 fi
 
+# 11. compiles_cleanly — the authoritative "does this integration actually build"
+# check. We delegate to compile-check.sh, which compiles the WHOLE project in
+# Unity batch-mode (the only compiler that sees Unity's assemblies, asmdefs, and
+# scripting defines — a raw csc/dotnet pass would drown the real errors in
+# missing-UnityEngine noise) and prints any `error CS####` it finds. This catches
+# the entire class of compile bugs (e.g. the docs-transcription errors in issue
+# #8: unqualified nested enum, wrong property casing) without enumerating each as
+# a bespoke string rule.
+#
+# Mapping: OK → PASS; per-error lines → one FAIL each with file:line; SKIP (no
+# Unity located, or METICA_SKIP_COMPILE set) → WARN (non-blocking); any other
+# non-completion (license/timeout/crash) → WARN with the reason. On by default;
+# the plugin's own test suites export METICA_SKIP_COMPILE=1 so synthetic fixtures
+# never launch Unity.
+COMPILE_CHECK="$SCRIPT_DIR/compile-check.sh"
+if [ -x "$COMPILE_CHECK" ] || [ -f "$COMPILE_CHECK" ]; then
+    CC_OUT="$(bash "$COMPILE_CHECK" --project="$PROJECT" 2>/dev/null)"; CC_RC=$?
+    case "$CC_RC" in
+        0) add_check "compiles_cleanly" "" "PASS" "Project compiles with no C# errors (Unity batch-mode)." ;;
+        1) # one or more compile errors — emit a FAIL per error with file:line.
+           CC_ANY=0
+           while IFS=$'\t' read -r tag file ln msg; do
+               [ "$tag" = "ERROR" ] || continue
+               CC_ANY=1
+               add_check "compiles_cleanly" "$file:$ln" "FAIL" "Compile error: $msg"
+           done <<< "$CC_OUT"
+           # Defensive: rc=1 but nothing parseable — don't silently pass.
+           [ "$CC_ANY" = "0" ] && add_check "compiles_cleanly" "" "FAIL" "Compilation failed; see Unity log."
+           ;;
+        3) # SKIP — reason is on the SKIP line (tab-delimited).
+           CC_REASON="$(printf '%s' "$CC_OUT" | awk -F'\t' '/^SKIP/ { print $2; exit }')"
+           add_check "compiles_cleanly" "" "WARN" "Compile check skipped: ${CC_REASON:-no Unity editor located. Set UNITY_PATH to enable.}"
+           ;;
+        *) # 2 (or anything else) — Unity present but the run could not complete.
+           CC_REASON="$(printf '%s' "$CC_OUT" | awk -F'\t' '/^(FAIL|SKIP)/ { print $2; exit }')"
+           add_check "compiles_cleanly" "" "WARN" "Compile check did not complete: ${CC_REASON:-Unity exited abnormally (license/activation?).}"
+           ;;
+    esac
+fi
+
 # DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
@@ -413,7 +453,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.0.0",\n'
+printf '  "schema": "validator/1.1.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"
