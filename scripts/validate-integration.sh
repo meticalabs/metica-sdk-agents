@@ -96,11 +96,14 @@ source "$SCRIPT_DIR/lib/clean-source.sh"
 clean_source_selftest || die_json "clean-cs.awk failed self-test (awk error or syntax issue)"
 
 files_with() {
-    local pat="$1"
+    local pat="$1" c
     while IFS= read -r f; do
-        if clean_source "$f" | grep -qF -- "$pat"; then
-            printf '%s\n' "$f"
-        fi
+        # Count (don't short-circuit): a `grep -q` would close the pipe on the
+        # first match and SIGPIPE the clean_source awk, which under `set -o
+        # pipefail` makes the pipeline report failure and silently skips a
+        # large file. `grep -cF` consumes the whole stream, so awk completes.
+        c="$(clean_source "$f" | grep -cF -- "$pat" 2>/dev/null)" || c=0
+        [ "${c:-0}" -gt 0 ] && printf '%s\n' "$f"
     done < "$CS_LIST"
 }
 
