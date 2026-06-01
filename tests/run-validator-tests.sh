@@ -169,6 +169,10 @@ assert_case good-max-present            "PASS" \
 assert_case bad-mediation-enum-unqualified "FAIL" \
     "mediation_enum_qualified:FAIL"
 
+# Edge case: bare + qualified enum on ONE line — occurrence counting must still FAIL.
+assert_case bad-mediation-enum-same-line   "FAIL" \
+    "mediation_enum_qualified:FAIL"
+
 # camelCase SmartFloors.isForcedHoldout → FAIL (CS1061).
 assert_case bad-smartfloors-property-case  "FAIL" \
     "smartfloors_property_case:FAIL"

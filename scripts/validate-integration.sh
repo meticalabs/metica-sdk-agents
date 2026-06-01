@@ -142,10 +142,17 @@ first_loc() {
 __STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
 strip_comments_source() { awk -f "$__STRIP_COMMENTS_AWK" "$1"; }
 
+# count_re counts MATCH OCCURRENCES, not matching lines (`grep -oE` then count
+# the emitted matches). Occurrence counting matters for the mediation rule: the
+# qualified form `MeticaMediationInfo.MeticaMediationType.` contains the bare
+# `MeticaMediationType.` as a substring, so the rule compares total-vs-qualified
+# OCCURRENCE counts (`MED_TOTAL > MED_QUALIFIED` ⇒ a bare ref exists). A
+# line-granular count would miss a line holding BOTH forms. `wc -l` consumes the
+# whole stream (no SIGPIPE under pipefail).
 count_re() {
     local pat="$1" total=0 c
     while IFS= read -r f; do
-        c="$(strip_comments_source "$f" | grep -cE -- "$pat" 2>/dev/null)" || c=0
+        c="$(strip_comments_source "$f" | grep -oE -- "$pat" 2>/dev/null | wc -l)" || c=0
         total=$((total + c))
     done < "$CS_LIST"
     printf '%d' "$total"
@@ -442,7 +449,11 @@ fi
 # MeticaMediationInfo, so it must be written `MeticaMediationInfo.MeticaMediationType.MAX`.
 # The docs.metica.com Unity SDK example uses the bare `MeticaMediationType.MAX`, which
 # does NOT compile (CS0103). Detect any bare reference not already qualified by
-# `MeticaMediationInfo.`. Skipped when no mediation enum is referenced (no-Max projects).
+# `MeticaMediationInfo.` by comparing OCCURRENCE counts (count_re counts matches,
+# not lines), so a line carrying both a bare and a qualified ref is still caught.
+# Skipped when no mediation enum is referenced (no-Max projects). The location is
+# line-granular and may be empty in the (rare) both-on-one-line case — the FAIL
+# still fires regardless; detection is the contract, the location is a hint.
 MED_TOTAL="$(count_re 'MeticaMediationType\.')"
 if [ "$MED_TOTAL" != "0" ]; then
     MED_QUALIFIED="$(count_re 'MeticaMediationInfo\.MeticaMediationType\.')"
