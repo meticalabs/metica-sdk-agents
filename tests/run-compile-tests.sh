@@ -99,6 +99,18 @@ else
 fi
 rm -f "$fu"
 
+# 7b. CRLF log + a path containing '(' — the file field must keep the parens and
+# carry no trailing carriage return (regression: file="${loc%(*}" not %%, + \r strip).
+paren_log="$(printf 'Assets/Foo (copy).cs(7,3): error CS0246: type not found\r\n')"
+fu="$(make_fake_unity "$paren_log" 0)"
+out="$(UNITY_PATH="$fu" bash "$CC" --project="$p" 2>&1)"; rc=$?
+if [ "$rc" = "1" ] && printf '%s' "$out" | grep -qP '^ERROR\tAssets/Foo \(copy\)\.cs\t7\tCS0246: type not found$'; then
+    ok "paren-in-path + CRLF → file kept intact, no trailing CR"
+else
+    bad "paren/CRLF parse (rc=$rc)"; printf '%s\n' "$out" | cat -A | sed 's/^/        /'
+fi
+rm -f "$fu"
+
 # 8. Fake Unity that produces NO log and exits non-zero → FAIL (non-completion) exit 2
 nolog="$(mktemp -t metica-fake-unity-XXXXXX)"
 printf '#!/bin/bash\nexit 1\n' > "$nolog"; chmod +x "$nolog"

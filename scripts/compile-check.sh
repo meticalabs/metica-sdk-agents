@@ -131,8 +131,10 @@ ERR_LINES="$(grep -aoE '[^[:space:]].*\.cs\([0-9]+,[0-9]+\): error CS[0-9]+: .*'
 if [ -n "$ERR_LINES" ]; then
     while IFS= read -r line; do
         [ -z "$line" ] && continue
+        line="${line%$'\r'}"            # tolerate CRLF logs (Windows Unity)
         loc="${line%%): error*}"        # Assets/...cs(12,34
-        file="${loc%%(*}"               # Assets/...cs
+        file="${loc%(*}"                # strip the LAST '(' group only, so a
+                                        # path containing '(' (e.g. "Foo (copy).cs") survives
         linecol="${loc##*(}"            # 12,34
         ln="${linecol%%,*}"             # 12
         msg="${line#*): error }"        # CS0103: The name 'X' does not exist...
