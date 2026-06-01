@@ -60,7 +60,7 @@ The validator must run in a **fresh subagent context** — it must not see the i
 For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 
 - `init_count` — exactly one `MeticaSdk.Initialize(`
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, both modes)
+- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, regardless of MaxSDK presence)
 - `<format>_callbacks_subscribed` — for each used ad format (banner/interstitial/rewarded/mrec), OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
 - `<format>_load_show_parity` — every Load has a matching Show somewhere (banner/interstitial/rewarded/mrec)
