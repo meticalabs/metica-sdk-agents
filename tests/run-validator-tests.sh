@@ -4,6 +4,13 @@
 
 set -u
 
+# Force the validator's compiles_cleanly rule to skip — these are synthetic
+# fixtures, not openable Unity projects, so a real batch compile would be both
+# impossible and nondeterministic across CI machines. The skip path (→ WARN) is
+# exercised explicitly below; the real compile path is covered by compile-check
+# unit tests + runs on the user's machine.
+export METICA_SKIP_COMPILE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATE="$SCRIPT_DIR/../scripts/validate-integration.sh"
 FIX="$SCRIPT_DIR/validator-fixtures"
@@ -163,23 +170,13 @@ assert_case bad-mrec-no-callbacks         "FAIL"        \
 assert_case good-max-present            "PASS" \
     "init_count:PASS" "privacy_before_init:PASS" "interstitial_reload_on_hidden:PASS"
 
-# issue #8: reference-form checks for the docs-transcription bugs that compiled
-# to CS errors but slipped past the validator.
-# Bare nested mediation enum (MeticaMediationType.MAX) → FAIL (CS0103).
-assert_case bad-mediation-enum-unqualified "FAIL" \
-    "mediation_enum_qualified:FAIL"
-
-# Edge case: bare + qualified enum on ONE line — occurrence counting must still FAIL.
-assert_case bad-mediation-enum-same-line   "FAIL" \
-    "mediation_enum_qualified:FAIL"
-
-# camelCase SmartFloors.isForcedHoldout → FAIL (CS1061).
-assert_case bad-smartfloors-property-case  "FAIL" \
-    "smartfloors_property_case:FAIL"
-
-# Correct forms (qualified enum + PascalCase property) → both rules PASS.
-assert_case good-reference-forms           "PASS" \
-    "mediation_enum_qualified:PASS" "smartfloors_property_case:PASS"
+# issue #8: the validator now verifies the integration actually BUILDS via the
+# compiles_cleanly rule (Unity batch-mode). With METICA_SKIP_COMPILE=1 exported
+# above, the rule must report WARN (skipped) and NOT affect the overall status —
+# a good fixture stays PASS. The real compile (errors → FAIL) is covered by the
+# compile-check unit tests and runs on the user's machine.
+assert_case good-fresh                     "PASS" \
+    "compiles_cleanly:WARN"
 
 # New: project with no Metica refs gets a structured error, not a PASS-laden report
 nometica=$(mktemp -d -t no-metica-XXXXXX)

@@ -127,54 +127,6 @@ first_loc() {
     done < "$CS_LIST"
 }
 
-# Regex-aware variants (ERE) of count_lit/first_loc — used by the reference-form
-# checks (mediation enum qualification, SmartFloors property casing) where a
-# fixed-string match isn't enough.
-#
-# These read COMMENT-stripped source (strings preserved) via strip-comments.awk,
-# NOT clean_source. The reason is the SmartFloors access lives inside an
-# interpolated string — `$"...{response.SmartFloors.IsForcedHoldout}..."` — and
-# clean-cs.awk strips interpolated strings whole (interpolation holes included),
-# which would hide the reference entirely. strip-comments.awk keeps string
-# contents (so the interpolation hole survives) while still dropping comments, so
-# a commented-out example can't false-positive. Same count-don't-short-circuit
-# discipline as the literal helpers above.
-__STRIP_COMMENTS_AWK="$SCRIPT_DIR/lib/strip-comments.awk"
-strip_comments_source() { awk -f "$__STRIP_COMMENTS_AWK" "$1"; }
-
-# count_re counts MATCH OCCURRENCES, not matching lines (`grep -oE` then count
-# the emitted matches). Occurrence counting matters for the mediation rule: the
-# qualified form `MeticaMediationInfo.MeticaMediationType.` contains the bare
-# `MeticaMediationType.` as a substring, so the rule compares total-vs-qualified
-# OCCURRENCE counts (`MED_TOTAL > MED_QUALIFIED` ⇒ a bare ref exists). A
-# line-granular count would miss a line holding BOTH forms. `wc -l` consumes the
-# whole stream (no SIGPIPE under pipefail).
-count_re() {
-    local pat="$1" total=0 c
-    while IFS= read -r f; do
-        c="$(strip_comments_source "$f" | grep -oE -- "$pat" 2>/dev/null | wc -l)" || c=0
-        total=$((total + c))
-    done < "$CS_LIST"
-    printf '%d' "$total"
-}
-
-# first_re <pattern> [exclude_pattern]: first <file>:<line> matching <pattern>,
-# skipping lines that ALSO match <exclude_pattern> (e.g. the already-qualified form).
-first_re() {
-    local pat="$1" exclude="${2:-}" n
-    while IFS= read -r f; do
-        if [ -n "$exclude" ]; then
-            n="$(strip_comments_source "$f" | grep -nE -- "$pat" | grep -vE -- "$exclude" | head -1 | awk -F: '{ print $1 }')"
-        else
-            n="$(strip_comments_source "$f" | grep -nE -- "$pat" | head -1 | awk -F: '{ print $1 }')"
-        fi
-        if [ -n "$n" ]; then
-            printf '%s:%s' "$f" "$n"
-            return
-        fi
-    done < "$CS_LIST"
-}
-
 line_in_file() {
     clean_source "$2" | grep -nF -- "$1" | head -1 | awk -F: '{ print $1 }'
 }
@@ -445,48 +397,48 @@ else
     add_check "user_id_not_test_value" "" "PASS" "MeticaInitConfig userId looks non-test."
 fi
 
-# 11. mediation_enum_qualified — MeticaMediationType is a NESTED enum inside
-# MeticaMediationInfo, so it must be written `MeticaMediationInfo.MeticaMediationType.MAX`.
-# The docs.metica.com Unity SDK example uses the bare `MeticaMediationType.MAX`, which
-# does NOT compile (CS0103). Detect any bare reference not already qualified by
-# `MeticaMediationInfo.` by comparing OCCURRENCE counts (count_re counts matches,
-# not lines), so a line carrying both a bare and a qualified ref is still caught.
-# Skipped when no mediation enum is referenced (no-Max projects). The location is
-# line-granular and may be empty in the (rare) both-on-one-line case — the FAIL
-# still fires regardless; detection is the contract, the location is a hint.
-MED_TOTAL="$(count_re 'MeticaMediationType\.')"
-if [ "$MED_TOTAL" != "0" ]; then
-    MED_QUALIFIED="$(count_re 'MeticaMediationInfo\.MeticaMediationType\.')"
-    if [ "$MED_TOTAL" -gt "$MED_QUALIFIED" ]; then
-        MED_LOC="$(first_re 'MeticaMediationType\.' 'MeticaMediationInfo\.MeticaMediationType\.')"
-        add_check "mediation_enum_qualified" "$MED_LOC" "FAIL" \
-            "Bare MeticaMediationType.MAX does not compile (CS0103) — it is a nested enum. Qualify it: MeticaMediationInfo.MeticaMediationType.MAX."
-    else
-        add_check "mediation_enum_qualified" "$(first_re 'MeticaMediationInfo\.MeticaMediationType\.')" "PASS" \
-            "Mediation enum is correctly qualified (MeticaMediationInfo.MeticaMediationType.*)."
-    fi
-fi
-
-# 12. smartfloors_property_case — MeticaSmartFloors.IsForcedHoldout is PascalCase.
-# The docs.metica.com example uses camelCase `isForcedHoldout`, which does NOT
-# compile (CS1061). Detect the camelCase form. Skipped when SmartFloors is not referenced.
-if [ "$(count_re 'SmartFloors\.')" != "0" ]; then
-    if [ "$(count_re 'SmartFloors\.isForcedHoldout')" != "0" ]; then
-        add_check "smartfloors_property_case" "$(first_re 'SmartFloors\.isForcedHoldout')" "FAIL" \
-            "SmartFloors.isForcedHoldout does not compile (CS1061) — the property is PascalCase. Use SmartFloors.IsForcedHoldout."
-    else
-        add_check "smartfloors_property_case" "$(first_re 'SmartFloors\.')" "PASS" \
-            "SmartFloors property access uses correct PascalCase casing."
-    fi
+# 11. compiles_cleanly — the authoritative "does this integration actually build"
+# check. We delegate to compile-check.sh, which compiles the WHOLE project in
+# Unity batch-mode (the only compiler that sees Unity's assemblies, asmdefs, and
+# scripting defines — a raw csc/dotnet pass would drown the real errors in
+# missing-UnityEngine noise) and prints any `error CS####` it finds. This catches
+# the entire class of compile bugs (e.g. the docs-transcription errors in issue
+# #8: unqualified nested enum, wrong property casing) without enumerating each as
+# a bespoke string rule.
+#
+# Mapping: OK → PASS; per-error lines → one FAIL each with file:line; SKIP (no
+# Unity located, or METICA_SKIP_COMPILE set) → WARN (non-blocking); any other
+# non-completion (license/timeout/crash) → WARN with the reason. On by default;
+# the plugin's own test suites export METICA_SKIP_COMPILE=1 so synthetic fixtures
+# never launch Unity.
+COMPILE_CHECK="$SCRIPT_DIR/compile-check.sh"
+if [ -x "$COMPILE_CHECK" ] || [ -f "$COMPILE_CHECK" ]; then
+    CC_OUT="$(bash "$COMPILE_CHECK" --project="$PROJECT" 2>/dev/null)"; CC_RC=$?
+    case "$CC_RC" in
+        0) add_check "compiles_cleanly" "" "PASS" "Project compiles with no C# errors (Unity batch-mode)." ;;
+        1) # one or more compile errors — emit a FAIL per error with file:line.
+           CC_ANY=0
+           while IFS=$'\t' read -r tag file ln msg; do
+               [ "$tag" = "ERROR" ] || continue
+               CC_ANY=1
+               add_check "compiles_cleanly" "$file:$ln" "FAIL" "Compile error: $msg"
+           done <<< "$CC_OUT"
+           # Defensive: rc=1 but nothing parseable — don't silently pass.
+           [ "$CC_ANY" = "0" ] && add_check "compiles_cleanly" "" "FAIL" "Compilation failed; see Unity log."
+           ;;
+        3) # SKIP — reason is on the SKIP line (tab-delimited).
+           CC_REASON="$(printf '%s' "$CC_OUT" | awk -F'\t' '/^SKIP/ { print $2; exit }')"
+           add_check "compiles_cleanly" "" "WARN" "Compile check skipped: ${CC_REASON:-no Unity editor located. Set UNITY_PATH to enable.}"
+           ;;
+        *) # 2 (or anything else) — Unity present but the run could not complete.
+           CC_REASON="$(printf '%s' "$CC_OUT" | awk -F'\t' '/^(FAIL|SKIP)/ { print $2; exit }')"
+           add_check "compiles_cleanly" "" "WARN" "Compile check did not complete: ${CC_REASON:-Unity exited abnormally (license/activation?).}"
+           ;;
+    esac
 fi
 
 # DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
-#   - compiles_cleanly:             invoke Unity batch-mode (or csc/dotnet) against the adapter folder +
-#                                   SDK and surface real CS errors. Heavy + environment-dependent; the
-#                                   string-level reference checks above (mediation_enum_qualified,
-#                                   smartfloors_property_case) catch the known docs-transcription bugs
-#                                   without a toolchain.
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
 #                                   format is still showing. Needs call-graph/scope awareness to detect
 #                                   without false positives; deferred until a reliable heuristic exists.

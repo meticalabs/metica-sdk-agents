@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, IsReady-guarded show, leftover placeholder credentials, and test-value userIds. Reports per-rule PASS/FAIL/ADVISORY. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, IsReady-guarded show, leftover placeholder credentials, and test-value userIds, plus a compiles-cleanly pass that builds the project in Unity batch-mode and surfaces real CS errors. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash
 model: sonnet
 ---
@@ -40,6 +40,8 @@ printf '```json\n%s\n```\n' "$JSON"
 
 The stdout of this single command is your entire response. Print it verbatim.
 
+**Note on timing:** the `compiles_cleanly` rule launches a Unity batch-mode compile when it can locate the editor (via `UNITY_PATH` or the project's editor version), so a real run can take **a few minutes** on first import. This is intended — it is the authoritative build check. It self-skips to a non-blocking `WARN` when no Unity is found or when `METICA_SKIP_COMPILE=1` is set; it never blocks on a missing toolchain. Do not add your own timeout or kill the command early.
+
 ## Output contract
 
 A single fenced ```` ```json ```` block. No human pre-summary at this stage — the orchestrator (integrator) parses the JSON and composes its own user-facing report. A dedicated `format-validator-report.sh` may be added later if the validator is invoked standalone by users.
@@ -71,7 +73,6 @@ For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appear as string literal values (comments stripped, identifier names ignored)
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder` as a delimited word, or is digits-only. Handles `@"..."`, `$"..."`, `$@"..."`, `@$"..."` verbatim/interpolated forms too
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
-- `mediation_enum_qualified` *(1.1.0)* — FAIL on bare `MeticaMediationType.MAX` (CS0103); it is a nested enum and must be qualified `MeticaMediationInfo.MeticaMediationType.MAX`. Emitted only when the mediation enum is referenced
-- `smartfloors_property_case` *(1.1.0)* — FAIL on camelCase `SmartFloors.isForcedHoldout` (CS1061); the property is PascalCase `IsForcedHoldout`. Emitted only when `SmartFloors.` is referenced
+- `compiles_cleanly` *(1.1.0)* — compiles the whole project in Unity batch-mode (via `scripts/compile-check.sh`) and emits one FAIL per `error CS####` with file:line; PASS when it builds clean; WARN (non-blocking) when skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or when Unity can't complete. This is the catch-all for compile errors — including the issue #8 docs-transcription bugs (unqualified nested enum, wrong property casing) — so there are no per-bug string rules
 
 These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output.

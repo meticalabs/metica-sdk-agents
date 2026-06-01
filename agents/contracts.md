@@ -65,7 +65,7 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
-- `checks[].level`: `PASS`, `FAIL`, `ADVISORY`
+- `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` added in 1.1.0 — a non-blocking "could not verify" signal, currently used only by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
 - `checks[].detail`: one-line message describing what was found.
@@ -84,10 +84,9 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder string (matched as a delimited word — `-`/`_` boundaries or quote anchors — so legitimate ids like `"contest-user-42"` or `"latest-build"` do not false-positive), or a digits-only string. Handles multi-line constructor calls via `scripts/lib/check-init-userid.awk`. The check's outer collector is string-aware, so a test value containing `(` or `)` (`"test)hacker"`) cannot bypass the check. Object-initializer form (`new MeticaInitConfig { UserId = … }`) is a known gap.
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
 - `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL when the format is used but `OnAdShowFailed` is not subscribed. Per the docs.metica.com Unity SDK example, both Interstitial and Rewarded subscribe `OnAdShowFailed` (signature `Action<MeticaAd, MeticaAdError>`). Without it the canonical reload-on-hidden loop stalls on the first show-failure: `OnAdHidden` does NOT fire after a show-fail, so the next ad is never loaded.
-- `mediation_enum_qualified` *(added in 1.1.0)* — FAIL when a bare `MeticaMediationType.MAX` appears (CS0103 — it is a **nested** enum and must be qualified `MeticaMediationInfo.MeticaMediationType.MAX`). PASS when only the qualified form is present. Emitted only when the mediation enum is referenced (skipped on no-Max projects). A cheap string-level guard for the docs-page transcription bug in issue #8 — no compiler required.
-- `smartfloors_property_case` *(added in 1.1.0)* — FAIL when `SmartFloors.isForcedHoldout` (camelCase) appears (CS1061 — the property is PascalCase `IsForcedHoldout`). PASS when `SmartFloors.*` is referenced without the camelCase form. Emitted only when `SmartFloors.` is referenced. Companion to `mediation_enum_qualified` (issue #8).
+- `compiles_cleanly` *(added in 1.1.0)* — the authoritative "does this integration actually build" check, delegated to `scripts/compile-check.sh` (Unity batch-mode — the only compiler that sees Unity's assemblies, asmdefs and scripting defines; a raw `csc`/`dotnet` pass would bury real errors in missing-`UnityEngine` noise, so we never fall back to it). **PASS** when the project compiles with no `error CS####`; **one FAIL per compile error** with `location` = `<file>:<line>` and `detail` carrying the `CS####: message` (this is what catches the docs-transcription class from issue #8 — unqualified nested enum, wrong property casing — without bespoke per-bug rules); **WARN** (non-blocking) when the check is skipped because no Unity editor could be located or `METICA_SKIP_COMPILE=1`, or when Unity ran but could not complete (license/timeout/crash). On by default; the plugin's own test suites export `METICA_SKIP_COMPILE=1` so synthetic fixtures never launch Unity.
 
-**Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` does not affect status.
+**Status rule:** `status = "FAIL"` if any check has `level: FAIL` OR top-level `error != null`. `ADVISORY` and `WARN` do not affect status.
 
 **Concrete example:**
 

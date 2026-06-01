@@ -17,6 +17,8 @@
 # It does NOT assert the agent applied a patch (not bash-observable).
 
 set -u
+# Synthetic fixtures — never launch Unity (see run-validator-tests.sh).
+export METICA_SKIP_COMPILE=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATE="$SCRIPT_DIR/../scripts/validate-integration.sh"
 FIX="$SCRIPT_DIR/validator-fixtures"

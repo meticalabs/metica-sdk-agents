@@ -18,6 +18,9 @@
 
 set -u
 
+# Synthetic rendered projects — never launch Unity (see run-validator-tests.sh).
+export METICA_SKIP_COMPILE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VALIDATE="$PLUGIN_DIR/scripts/validate-integration.sh"
