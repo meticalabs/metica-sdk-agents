@@ -1,6 +1,6 @@
 # metica-sdk-agents
 
-Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX.
+Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
 
 ## Install
 
@@ -11,9 +11,9 @@ Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/m
 /plugin install metica-sdk-agents@metica-sdk-agents
 ```
 
-That's it. Claude Code clones the repo, registers the three agents, and sets `$CLAUDE_PLUGIN_ROOT` for you.
+That's it. Claude Code clones the repo, registers the four agents, and sets `$CLAUDE_PLUGIN_ROOT` for you.
 
-**Verify:** launch Claude Code in your project and type `/agents` — you should see the three agents (listed under the `metica-sdk-agents` plugin if you installed via the marketplace, or as bare `unity-compat-checker` / `unity-integrator` / `unity-validator` if you used the one-line installer).
+**Verify:** launch Claude Code in your project and type `/agents` — you should see the four agents (listed under the `metica-sdk-agents` plugin if you installed via the marketplace, or as bare `unity-compat-checker` / `unity-integrator` / `unity-validator` / `ad-log-monitor` if you used the one-line installer).
 
 ## Use it
 
@@ -35,15 +35,16 @@ If you're outside the project, or you have several Unity projects in one workspa
 PROJECT=/absolute/path/to/your/unity/project
 ```
 
-## The three agents
+## The four agents
 
 | Agent                                     | Role                                                                                                                                |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `@metica-sdk-agents:unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
 | `@metica-sdk-agents:unity-integrator`     | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
 | `@metica-sdk-agents:unity-validator`      | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
+| `@metica-sdk-agents:ad-log-monitor`       | Runtime counterpart to the validator. Captures Android logcat / iOS idevicesyslog while QA plays, checks the same ad-lifecycle invariants from live events, and compares a holdout-user route against a trial-user route to flag regressions Metica may have introduced. |
 
-Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration).
+Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The ad-log-monitor is a separate workflow for QA — invoke it directly when you have a build on a device.
 
 ## Compatibility matrix
 
@@ -80,7 +81,8 @@ metica-sdk-agents/
 │   ├── contracts.md                   # JSON schemas for sub-agent outputs
 │   ├── unity-compat-checker.md
 │   ├── unity-integrator.md
-│   └── unity-validator.md
+│   ├── unity-validator.md
+│   └── ad-log-monitor.md              # runtime ad-lifecycle verification + trial-vs-holdout comparison
 ├── scripts/
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for the agents
 │   ├── detect-compat.sh
@@ -90,6 +92,8 @@ metica-sdk-agents/
 │   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
+│   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
+│   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2: stop + per-route rule checks + Markdown report
 │   ├── lib/                           # shared helpers: clean-source.sh + awk (clean-cs, strip-comments, check-init-userid)
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/

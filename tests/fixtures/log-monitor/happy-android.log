@@ -1,0 +1,38 @@
+06-02 12:00:00.001  1234  1234 I Unity   : Application start
+06-02 12:00:00.020  1234  1234 I Metica  : SetHasUserConsent(true)
+06-02 12:00:00.022  1234  1234 I Metica  : SetDoNotSell(false)
+06-02 12:00:00.050  1234  1234 I Metica  : MeticaSdk.Initialize(api=…, app=…, userId=u_abc)
+06-02 12:00:00.220  1234  1234 I Metica  : OnInitialized: SmartFloors group=trial userId=u_abc
+06-02 12:00:00.250  1234  1234 I AppLovinSdk: AppLovinSdk version 13.0.0 initialized
+06-02 12:00:00.300  1234  1234 D MaxInterstitialAd: setLocalExtraParameter dynamicBidFloor=2.45
+06-02 12:00:00.305  1234  1234 D MaxInterstitialAd: setLocalExtraParameter dynamicKeyName=cpm
+06-02 12:00:00.310  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' loadAd()
+06-02 12:00:01.880  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from LOADING to READY
+06-02 12:00:01.900  1234  1234 D MaxRewardedAd: setLocalExtraParameter dynamicBidFloor=4.10
+06-02 12:00:01.905  1234  1234 D MaxRewardedAd: ad unit 'rew_1' loadAd()
+06-02 12:00:03.500  1234  1234 D MaxRewardedAd: ad unit 'rew_1' Transitioning from LOADING to READY
+06-02 12:00:10.000  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from READY to SHOWING
+06-02 12:00:10.010  1234  1234 I AppLovinSdk: OnInterstitialDisplayedEvent networkName='AdColony' revenue=0.0098
+06-02 12:00:15.040  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from SHOWING to IDLE
+06-02 12:00:15.041  1234  1234 I AppLovinSdk: OnInterstitialHiddenEvent
+06-02 12:00:15.080  1234  1234 D MaxInterstitialAd: setLocalExtraParameter dynamicBidFloor=2.50
+06-02 12:00:15.082  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' loadAd()
+06-02 12:00:16.500  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from LOADING to READY
+06-02 12:00:30.000  1234  1234 D MaxRewardedAd: ad unit 'rew_1' Transitioning from READY to SHOWING
+06-02 12:00:30.010  1234  1234 I AppLovinSdk: OnRewardedAdDisplayedEvent networkName='Mintegral' revenue=0.0420
+06-02 12:00:34.500  1234  1234 I AppLovinSdk: OnRewardedAdReceivedRewardEvent
+06-02 12:00:34.560  1234  1234 D MaxRewardedAd: ad unit 'rew_1' Transitioning from SHOWING to IDLE
+06-02 12:00:34.580  1234  1234 I AppLovinSdk: OnRewardedAdHiddenEvent
+06-02 12:00:34.620  1234  1234 D MaxRewardedAd: setLocalExtraParameter dynamicBidFloor=4.20
+06-02 12:00:34.622  1234  1234 D MaxRewardedAd: ad unit 'rew_1' loadAd()
+06-02 12:00:36.100  1234  1234 D MaxRewardedAd: ad unit 'rew_1' Transitioning from LOADING to READY
+06-02 12:00:50.000  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from READY to SHOWING
+06-02 12:00:50.010  1234  1234 I AppLovinSdk: OnInterstitialDisplayedEvent networkName='AdColony' revenue=0.0110
+06-02 12:00:54.100  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from SHOWING to IDLE
+06-02 12:00:54.110  1234  1234 I AppLovinSdk: OnInterstitialHiddenEvent
+06-02 12:00:54.150  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' loadAd()
+06-02 12:00:55.700  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from LOADING to IDLE
+06-02 12:01:00.000  1234  1234 W AppLovinSdk: HTTP 503 from waterfall server (retrying)
+06-02 12:01:00.700  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' loadAd()
+06-02 12:01:02.300  1234  1234 D MaxInterstitialAd: ad unit 'inter_1' Transitioning from LOADING to READY
+06-02 12:01:10.000  1234  1234 I Unity   : QA stopped capture

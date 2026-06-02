@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is **not application code** — it is a Claude Code *plugin* that ships three Unity sub-agents. The "source" is:
+This is **not application code** — it is a Claude Code *plugin* that ships four Metica sub-agents: three for Unity integration (compat-checker, integrator, validator) plus a runtime ad-log monitor (`ad-log-monitor`) for on-device verification of any Metica integration. The "source" is:
 
-- **Agent definitions** — markdown-with-frontmatter directly under `agents/` (`unity-integrator.md`, `unity-validator.md`, `unity-compat-checker.md`). The frontmatter (`name`, `description`, `tools`, `model`) is the agent's contract; the body is its prompt. They live in `agents/` itself, **not** a subfolder, on purpose: a plugin subfolder becomes a scope segment in the mention token, so `agents/unity/unity-integrator.md` would register as `@agent-metica-sdk-agents:unity:unity-integrator`. Keeping them flat preserves the documented `@agent-metica-sdk-agents:unity-integrator`.
+- **Agent definitions** — markdown-with-frontmatter directly under `agents/` (`unity-integrator.md`, `unity-validator.md`, `unity-compat-checker.md`, `ad-log-monitor.md`). The frontmatter (`name`, `description`, `tools`, `model`) is the agent's contract; the body is its prompt. They live in `agents/` itself, **not** a subfolder, on purpose: a plugin subfolder becomes a scope segment in the mention token, so `agents/unity/unity-integrator.md` would register as `@agent-metica-sdk-agents:unity:unity-integrator`. Keeping them flat preserves the documented `@agent-metica-sdk-agents:unity-integrator`.
 - **Scripts** — `scripts/*.sh` hold all deterministic logic. Agents are thin: they run a script and relay its output. Editing behavior almost always means editing a script, not prose.
 - **Reference docs** — `agents/contracts.md` (the inter-agent JSON contracts) and `references/` (MaxSdk↔MeticaSdk API parity).
 
@@ -17,8 +17,9 @@ There is no build step and no compiled artifact. Changing an agent = editing its
 ```bash
 bash tests/run-all.sh                      # full suite; prints "ALL GREEN" or "FAILURES"
 bash tests/run-<suite>-tests.sh            # a single suite (compat, format, download,
-                                           # validator, citation, compile, input-validation,
-                                           # codegen-validator, autofix)
+                                           # validator, citation, semantic, compile,
+                                           # input-validation, codegen-validator, autofix,
+                                           # log-monitor)
 ```
 
 Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/validator-fixtures/`) and goldens (`tests/goldens/`). No framework, no install. Suites that probe a sibling `../max-agent-test/DemoApp` skip silently when it's absent — a clean clone runs the synthetic-fixture suites only.
@@ -36,6 +37,8 @@ Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/vali
 **MeticaSDK install is enforced, never performed.** The integrator does not download or import the SDK. The compat-checker's `metica_sdk` row BLOCKs if it's missing; the user imports it once, then re-runs. `scripts/download-metica-sdk.sh` exists only as a helper the integrator may *offer*.
 
 **The validator's `compiles_cleanly` rule actually builds the project.** `validate-integration.sh` shells out to `scripts/compile-check.sh`, which compiles the whole Unity project in batch-mode (the only compiler that sees Unity's assemblies/asmdefs/defines — we deliberately do **not** fall back to `csc`/`dotnet`, which would drown real errors in missing-`UnityEngine` noise) and emits one `compiles_cleanly` FAIL per `error CS####` with file:line. This is the catch-all for compile bugs (it is what would have caught issue #8's unqualified nested enum + wrong property casing), so resist re-adding bespoke per-bug string rules. It is **on by default** but self-skips to a non-blocking `WARN` when no Unity editor is located (`UNITY_PATH` overrides the version-derived Unity Hub search) — and **every test suite that invokes the validator exports `METICA_SKIP_COMPILE=1`** so synthetic fixtures never launch Unity. The script's arg/parse/skip/error paths are covered by `tests/run-compile-tests.sh` via a fake-Unity binary; keep that green when touching either file.
+
+**The `ad-log-monitor` agent is the runtime counterpart to the validator.** It verifies the same ad-lifecycle invariants from live device logs that the validator checks statically in source code. Three phases: **Phase 1** (`scripts/log-monitor-start.sh`) gates the toolchain (`adb` / `idevicesyslog` must be on PATH, hard BLOCK with install hint), detects platform from `adb devices` / `idevice_id -l`, launches a background capture into `./<label>-<platform>.log`, runs post-launch health checks (PID alive + non-empty file + first line isn't a tool error), and writes `./<label>.session` (shell-sourceable key=value). **Phase 2** (`scripts/log-monitor-stop.sh`) reads the session file, kills the capture, runs grep-based rule checks (init order, per-format load/show/hide parity, auto-reload-on-hidden, OnAdShowFailed recovery, rewarded reward sequencing, Metica→MAX floor handoff), and emits a Markdown report (`./<label>-analysis.md`). **Phase 3** is **entirely agent prose** — no script. The agent reads both per-route reports + both raw logs, computes the side-by-side delta table, applies verdict rules (`trial revenue/impression < holdout` → flag; trial-only FAILs → flag; trial-only errors → flag), and writes `./compare-trial-vs-holdout.md`. The mandatory **n=5 caveat** stays in the verdict prose — at five impressions per format the agent can spot directional regressions but cannot declare a revenue winner. The agent emits **no JSON** to an orchestrator (it isn't called by one), so it has no entry in `agents/contracts.md`.
 
 ## Design principles
 
