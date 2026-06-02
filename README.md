@@ -13,18 +13,6 @@ Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/m
 
 That's it. Claude Code clones the repo, registers the three agents, and sets `$CLAUDE_PLUGIN_ROOT` for you.
 
-**Via one-line installer** (no marketplace needed):
-
-```bash
-# Project-local (only the current Unity project sees the agents):
-curl -fsSL https://raw.githubusercontent.com/meticalabs/metica-sdk-agents/main/install.sh | bash
-
-# User-wide (every project sees the agents):
-curl -fsSL https://raw.githubusercontent.com/meticalabs/metica-sdk-agents/main/install.sh | bash -s -- --global
-```
-
-The script clones into `~/.metica-sdk-agents` and symlinks each agent into `.claude/agents/`.
-
 **Verify:** launch Claude Code in your project and type `/agents` — you should see the three agents (listed under the `metica-sdk-agents` plugin if you installed via the marketplace, or as bare `unity-compat-checker` / `unity-integrator` / `unity-validator` if you used the one-line installer).
 
 ## Use it
