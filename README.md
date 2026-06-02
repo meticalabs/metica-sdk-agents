@@ -33,15 +33,12 @@ From your Unity project's root in Claude Code, mention the integrator. The name 
 
 ```
 # Marketplace install (recommended):
-@agent-metica-sdk-agents:unity-integrator
-
-# One-line installer (symlinks, un-namespaced):
-@agent-unity-integrator
+@metica-sdk-agents:unity-integrator
 ```
 
 That's the whole invocation. The integrator auto-detects the Unity project (walks up from `$(pwd)` looking for `ProjectSettings/`) and fills missing API keys with placeholders you swap in later. You'll be shown a plan and asked to approve before any file is written.
 
-> **Tip:** unsure which form your install registered? Type `@agent-` and let autocomplete show it.
+> **Tip:** unsure which form your install registered? Type `@metica-sdk-agent` and let autocomplete show it.
 
 If you're outside the project, or you have several Unity projects in one workspace, pass it explicitly:
 
@@ -50,61 +47,24 @@ If you're outside the project, or you have several Unity projects in one workspa
 PROJECT=/absolute/path/to/your/unity/project
 ```
 
-## What it does
-
-The integrator runs in 7 steps:
-
-1. **Compat-check** — Unity ≥ 2021.3, Java ≥ 11, MaxSDK ≥ 8.2.0 (when present), Android API ≥ 23, MeticaSDK installed. Any FAIL → BLOCK with a specific remediation (e.g. the GitHub Releases URL if MeticaSDK isn't imported yet).
-2. **Discovery** — derives the integration shape inline. The key fact is **whether MaxSDK is present** (any `MaxSdk.` reference): when it is, the integrator replaces Max in the game's *direct* call sites (leaving a dedicated wrapper like `AdManager.cs` untouched); when it isn't, it does a clean standalone install. Discovery also inventories the direct Max call sites, any Max *wrapper* (a flow-based judgment, confirmed in the plan), the ad formats, placement strings, triggers, and (Step 2.5) the remote-config provider + dominant namespace. When Max is present the provider drives a **cohort-gating recipe** in the final report (Step 7), not a router/binding artifact; you wire your own gate.
-3. **Plan-mode preview** — Claude Code plan mode (or plain-text fallback) presents a two-tier preview: a one-line summary, a *confirm-these-inferences* list (wrapper / namespace / adapter folder / userId), then the full file plan. You approve — and provide the real `userId` expression here so validation passes on the first run.
-4. **Git snapshot** — tags `pre-metica-integration` for one-command rollback.
-5. **Codegen** — the integrator generates a **single `MeticaAdService` MonoBehaviour** with one drop-in/out region per ad format. It mirrors the docs example: `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` then runs `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with a **named `OnInitialized` callback** (not a lambda) that logs the `SmartFloors` group/userId and wires up each used format. Each format's region owns its callbacks (named methods you can extend — not inline lambdas); interstitial/rewarded add auto-reload on hidden + `OnAdShowFailed`-recovery, `IsReady`-guarded `Show()`, and **docs-verbatim exponential-backoff retry on load failure** (`Math.Pow(2, Math.Min(6, attempt))` → 2→4→8…→64s), while banner/MRec add `OnApplicationFocus` pause/resume + an `_…Showing` flag (the SDK refreshes them internally). It exposes per-format `Load*`/`Show*`/`Hide*` delegators for your game. By default it writes one `Assets/Scripts/Metica/MeticaAdService.cs` (attach it to a GameObject — `Start()` initializes it; no separate bootstrap); for a larger project the regions can be split into `MeticaAdService.<Format>.cs` `partial class` files. **When MaxSDK is present**, it additionally rewrites the game's direct Max call sites to call `MeticaAdService` directly. Existing `Assets/MaxSdk/` is **never** modified, and dedicated Max-wrapper files are also left alone. The namespace defaults to `<dominant>.Metica` if the project has a dominant namespace, no wrapper when the project uses no namespaces, and `MeticaIntegration` when ambiguous — never `Metica.AbTest`. When discovery found a wrapper or placement strings, codegen is conformed to the host via named **patch passes** (mirror the wrapper's public API, default the dominant placement, place the file next to the wrapper) — the template's structure is unchanged; the passes only add host-matching lines.
-6. **Validator** (read-only) — runs independent grep checks: `init_count`, `privacy_before_init`, per-format callbacks subscribed, load/show parity, `<format>_reload_on_hidden`, `<format>_show_failed_subscribed`, `<format>_show_ready_guard`, `placeholder_ids_replaced` (catches leftover `YOUR_*` literals), `user_id_not_test_value` (catches `null`/`"test"`/`"debug"` userId values), etc., plus `compiles_cleanly` — an authoritative Unity batch-mode build that surfaces real `error CS####` (one FAIL per error with file:line), so the whole class of compile bugs is caught rather than enumerated rule-by-rule. The compile pass self-skips to a non-blocking `WARN` when no Unity editor is found (set `UNITY_PATH` to enable; `METICA_SKIP_COMPILE=1` forces skip). Its JSON FAILs feed the integrator's autofix loop.
-7. **Validate + autofix, then final report** — on a validator FAIL the integrator runs an **autofix loop**: classify each FAIL `autofix` / `prompt` / `surface`, edit in place with an anchor re-check, re-validate (max 3 iterations). Only if it can't clear everything does it print the `git reset --hard pre-metica-integration` rollback **hint** (never auto-run). The report covers whether MaxSDK was present, SDK version, files changed, autofixes applied, validator summary, and (Max present + remote-config provider) the cohort-gating recipe.
-
-## Optional inputs
-
-Tune behavior by passing any of these after `PROJECT=...`:
-
-| Name | Default | Notes |
-|---|---|---|
-| `API_KEY` | `YOUR_METICA_API_KEY` | Metica API key |
-| `APP_ID` | `YOUR_METICA_APP_ID` | Metica App ID |
-| `MAX_SDK_KEY` | `YOUR_MAX_SDK_KEY` | Existing AppLovin MAX SDK key (used only when MaxSDK is present — MeticaSDK mediates through MAX) |
-| `FORMATS` | `interstitial` | Comma-sep: `banner,interstitial,rewarded,mrec` |
-| `USER_ID_EXPR` | `null` | C# expression for `MeticaInitConfig`'s userId arg. Default `null` makes the validator FAIL until you replace it. Common: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`. |
-| `VERSION` | `latest:` in `metica-versions.yaml` | Target MeticaSDK version |
-| `REMOTE_CONFIG_PROVIDER` | auto-detected | `firebase` / `appmetrica` / `unity-remote-config` / `none`. Report-only — drives the Step 7 cohort-gating recipe but does not change generated artifacts. |
-| `REMOTE_CONFIG_KEY` | `metica_rollout` | Boolean-typed key name suggested in the cohort-gating recipe. |
-| `NAMESPACE` | auto-detected | Explicit namespace for all generated files (overrides project-dominant detection). Pass an empty string to force bare/no-namespace. |
-| `ADAPTER_FOLDER` | `Assets/Scripts/Metica` | Explicit project-relative path for the Metica adapter folder (must start with `Assets/`; absolute paths and `..` segments are rejected). |
-
 ## The three agents
 
-| Agent | Role |
-|---|---|
-| `@agent-metica-sdk-agents:unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint. |
-| `@agent-metica-sdk-agents:unity-integrator` | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator. |
-| `@agent-metica-sdk-agents:unity-validator` | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
+| Agent                                     | Role                                                                                                                                |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `@metica-sdk-agents:unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
+| `@metica-sdk-agents:unity-integrator`     | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
+| `@metica-sdk-agents:unity-validator`      | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
 
 Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration).
-
-## What the Max replacement does and doesn't do
-
-When MaxSDK is present, the integrator rewrites your game's **direct** `MaxSdk.*` call sites (scene/UI/gameplay scripts) to call `MeticaAdService` instead, and deletes the corresponding `MaxSdkCallbacks.*` subscriptions (the per-format objects own those internally now). It does **not**:
-
-- **Touch a dedicated Max-wrapper file** (e.g. `AdManager.cs` / `MaxHelper.cs` whose primary purpose is wrapping MaxSDK). The integrator rewrites the game's call sites to **bypass** the wrapper and call MeticaSDK directly; the orphaned wrapper is yours to delete when you're ready.
-- **Touch `Assets/MaxSdk/`** — that's vendored MAX, never modified.
-- **Generate an A/B router or rollout-binding** — the integrator emits a single standalone `MeticaAdService` MonoBehaviour, not a router. If you want to roll out gradually, the Step 7 final report includes a copy-paste cohort-gating recipe tailored to your remote-config provider (Firebase / Unity Remote Config / AppMetrica), gating the rewritten call sites behind a boolean flag you add in your provider's dashboard. You wire the gate; the integrator doesn't.
 
 ## Compatibility matrix
 
 Defined in `metica-versions.yaml` (single source of truth):
 
-| MeticaSDK | Unity | Java | MAX | Android API |
-|---|---|---|---|---|
-| 2.4.0 (latest) | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23 |
-| 2.2.7 | ≥ 2021.3 | ≥ 11 | ≥ 8.0.0 | ≥ 23 |
+| MeticaSDK      | Unity    | Java | MAX     | Android API |
+| -------------- | -------- | ---- | ------- | ----------- |
+| 2.4.0 (latest) | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23        |
+| 2.2.7          | ≥ 2021.3 | ≥ 11 | ≥ 8.0.0 | ≥ 23        |
 
 The compat-checker reads this file. To add a new SDK version, add an entry and bump `latest:`.
 
@@ -138,6 +98,7 @@ metica-sdk-agents/
 │   ├── detect-compat.sh
 │   ├── format-compat-report.sh
 │   ├── validate-integration.sh
+│   ├── compile-check.sh               # batch-mode Unity build behind the validator's compiles_cleanly rule
 │   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
@@ -145,18 +106,8 @@ metica-sdk-agents/
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
-└── tests/                             # 8 test scripts + fixtures + goldens
+└── tests/                             # 9 suite scripts (+ run-all.sh) + fixtures + goldens
 ```
-
-## Rollback
-
-The integrator tags `pre-metica-integration` before any change. If anything looks wrong:
-
-```bash
-git reset --hard pre-metica-integration
-```
-
-This removes all generated files but does **not** delete the downloaded `.unitypackage` (it's gitignored). To clean that too: `rm -f Assets/MeticaSDK-*.unitypackage`.
 
 ## License
 
