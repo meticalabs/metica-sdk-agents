@@ -1,0 +1,3 @@
+Assets/Scripts/DeadReloadRewarded.cs	25	void OnRewardedHidden(MeticaAd ad)
+Assets/Scripts/DeadReloadRewarded.cs	27	if (_neverTrue)
+Assets/Scripts/DeadReloadRewarded.cs	9	bool _neverTrue = false;

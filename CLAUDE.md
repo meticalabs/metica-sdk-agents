@@ -17,7 +17,7 @@ There is no build step and no compiled artifact. Changing an agent = editing its
 ```bash
 bash tests/run-all.sh                      # full suite; prints "ALL GREEN" or "FAILURES"
 bash tests/run-<suite>-tests.sh            # a single suite (compat, format, download,
-                                           # validator, compile, input-validation,
+                                           # validator, citation, compile, input-validation,
                                            # codegen-validator, autofix)
 ```
 
@@ -25,7 +25,7 @@ Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/vali
 
 ## Architecture
 
-**Orchestrator + two thin wrappers.** `unity-integrator` (model: sonnet) is the only agent users invoke directly. It calls `unity-compat-checker` (haiku) and `unity-validator` (sonnet) as sub-agents. The compat-checker and validator do nothing but run a script and print its stdout verbatim — never paraphrase or summarize their output when editing them.
+**Orchestrator + one thin wrapper + one two-phase validator.** `unity-integrator` (model: sonnet) is the only agent users invoke directly. It calls `unity-compat-checker` (haiku) and `unity-validator` (sonnet) as sub-agents. The **compat-checker is still a thin wrapper** — it does nothing but run a script and print its stdout verbatim, so never paraphrase or summarize its output when editing it. The **validator is no longer thin** (as of `validator/1.2.0`): it runs the deterministic floor script (`validate-integration.sh`, `engine: "grep"`) *and* an in-context **semantic-adjudication** phase (`engine: "llm-adjudicator"`) where it reads the project's code and reasons about behaviors grep can't see (indirect reload loops, ready guards across call paths, placement-ID consistency), then merges both into one JSON block. Its grep floor stays golden-tested; its semantic verdicts are evidence-cited and verified by `scripts/check-citation.sh` (the one deterministic, unit-tested piece of the semantic path — `tests/run-citation-tests.sh`). The validator runs in a fresh context (the clean room the semantic review needs) and still emits exactly one final ` ```json ` block. See `agents/unity-validator.md`.
 
 **Agents talk to the orchestrator in versioned JSON.** Each sub-agent's final message ends with a fenced ` ```json ` block. The orchestrator parses **the last** such block (regex in `agents/contracts.md`), never the prose. Schemas are versioned `<name>/<major>.<minor>.<patch>`; the orchestrator accepts any minor/patch within an accepted major. **If you add a field to a script's JSON output, bump the minor and update `agents/contracts.md` — these three move together.** Contracts: `compat-checker/1.x`, `validator/1.x`. The integrator itself emits no JSON. (`mode-detect/2.x` was retired in v1.0 — see "Retired contracts" in `agents/contracts.md`.)
 

@@ -1,6 +1,12 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.1.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.2.0 schema (see agents/contracts.md).
+#
+# This is PHASE 1 (the deterministic floor) of the validator. The behavioral
+# rules it emits (reload-on-hidden, show-ready-guard, ...) are grep-based and
+# remain authoritative during the semantic-adjudication SHADOW phase; the
+# validator agent runs Phase 2 (LLM, in-context) alongside and logs agreement.
+# See agents/unity-validator.md and agents/contracts.md (`validator/1.2.0`).
 #
 # Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -35,7 +41,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.1.0",\n'
+    printf '  "schema": "validator/1.2.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
@@ -453,7 +459,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.1.0",\n'
+printf '  "schema": "validator/1.2.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"

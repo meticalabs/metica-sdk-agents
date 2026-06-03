@@ -1,13 +1,18 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Runs rule-based grep checks for privacy-before-init ordering, init count, per-format callback parity, load/show parity, auto-reload-on-hidden, IsReady-guarded show, leftover placeholder credentials, and test-value userIds, plus a compiles-cleanly pass that builds the project in Unity batch-mode and surfaces real CS errors. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
-tools: Bash
+description: Validate any MeticaSDK integration in a Unity project. Runs a deterministic floor (privacy-before-init ordering, init count, per-format callback parity, load/show parity, leftover placeholder credentials, test-value userIds, and a compiles-cleanly Unity batch build) PLUS an in-context semantic-adjudication pass that reads the project's code and reasons about behaviors grep can't see — auto-reload-on-hidden through indirection, IsReady-guarded show across call paths, and placement-ID consistency — every verdict backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+tools: Bash, Read, Grep
 model: sonnet
 ---
 
 # Metica Unity Validator
 
-Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this agent runs it and relays the output.
+The validator has **two phases** and emits **one** merged JSON block (`validator/1.2.0`):
+
+1. **Deterministic floor** — `scripts/validate-integration.sh`. Cheap, game-agnostic, golden-tested grep/awk + a Unity batch compile. This is the backstop that never depends on a model.
+2. **Semantic adjudication** — *you*, reasoning over the project's actual code, for the behavioral rules grep gets wrong on real codebases (indirect reload loops, ready guards across call paths, placement-ID consistency). Every PASS/FAIL you emit must carry **line-cited evidence**, and you must verify each citation with `scripts/check-citation.sh` before you trust it.
+
+You run in a **fresh context** (see *Independence*) — that fresh context IS the clean room the semantic review needs. You are not a thin verbatim wrapper anymore: you reason in Phase 2. But your **final message is still exactly one fenced ` ```json ` block** and nothing else.
 
 ## Inputs
 
@@ -15,7 +20,7 @@ Thin wrapper. All rule logic lives in `scripts/validate-integration.sh`; this ag
 
 Validation is uniform — there is no mode input; the checks apply identically whether or not MaxSDK is present.
 
-## What to do — run this single bash command
+## Phase 1 — run the deterministic floor
 
 Resolve `PLUGIN_DIR` automatically via the shared resolver. Do not ask the user for it. `$CLAUDE_PLUGIN_ROOT` is **not** reliably present in an agent's bash environment, so the loop below searches known install locations (including the **newest** cached marketplace version) for the resolver, then lets it self-verify the root.
 
@@ -34,45 +39,93 @@ done
 
 PROJECT="<absolute_project_path>"
 
-JSON=$(bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT")
-printf '```json\n%s\n```\n' "$JSON"
+bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT"
 ```
 
-The stdout of this single command is your entire response. Print it verbatim.
+Keep this raw JSON — it is the base of your final output. **Do not print it yet.**
 
 **Note on timing:** the `compiles_cleanly` rule launches a Unity batch-mode compile when it can locate the editor (via `UNITY_PATH` or the project's editor version), so a real run can take **a few minutes** on first import. This is intended — it is the authoritative build check. It self-skips to a non-blocking `WARN` when no Unity is found or when `METICA_SKIP_COMPILE=1` is set; it never blocks on a missing toolchain. Do not add your own timeout or kill the command early.
 
-## Output contract
+If Phase 1 exits with a top-level `error` (broken/empty project), emit that JSON verbatim as your final block and stop — there is nothing to adjudicate.
 
-A single fenced ```` ```json ```` block. No human pre-summary at this stage — the orchestrator (integrator) parses the JSON and composes its own user-facing report. A dedicated `format-validator-report.sh` may be added later if the validator is invoked standalone by users.
+## Phase 2 — semantic adjudication (the rules grep can't judge)
+
+For each rule below, the Phase 1 grep verdict is a **shadow signal**, not the truth. Locate the real code with `Grep`, `Read` the relevant method(s) and everything reachable from them (named callees, `+=`/`-=` event subscribers, coroutine/`Update` readers of any flag the handler sets, async continuations), and answer the one behavioral question. Cap your reading to the candidate site and its transitive callees — do not read the whole project.
+
+**Rules you adjudicate:**
+
+| Rule | Behavioral question (answer for each used format) |
+|---|---|
+| `interstitial_reload_on_hidden` | From the `OnAdHidden` subscriber, is a `LoadInterstitial(<same placement>)` reachable (directly or through a helper / flag-driven `Update` / coroutine / event)? |
+| `rewarded_reload_on_hidden` | Same, for `LoadRewarded`. |
+| `interstitial_show_ready_guard` / `rewarded_show_ready_guard` | Does **every** path that reaches `Show<Format>(id)` first observe `IsReady(id) == true` for that same `id`? |
+| `placement_ids_match` | For each format, is the placement/ad-unit ID passed to `Load*` provably the **same value** as the one passed to `Show*` across all call paths? |
+
+When `compiles_cleanly` is `WARN` (compile was skipped — no Unity located), also scan the adapter code for the two known docs-transcription bugs as a fallback and report them under the relevant compile-class finding: an unqualified `MeticaMediationType.` not preceded by `MeticaMediationInfo.`, and `.SmartFloors.isForcedHoldout` (must be PascalCase `IsForcedHoldout`). When Unity actually compiled, defer to `compiles_cleanly` and skip this.
+
+### Evidence + citation discipline (non-negotiable)
+
+- A **PASS on a behavioral rule requires ≥2 evidence entries** forming a chain from the rule's entry point (e.g. the `OnAdHidden` subscriber) to its terminal (e.g. the `LoadRewarded` call). A single-line "looks fine" is not a PASS.
+- Each evidence entry is `{ "file": "<path relative to PROJECT>", "line": <int>, "snippet": "<exact line text>", "role": "entry" | "hop" | "terminal" }`.
+- If you cannot build a complete chain — indirection you can't resolve (DI, reflection, `SendMessage`), an event with no findable subscriber — do **not** guess. Emit `level: "ADVISORY"` with `unresolved` listing the edges you couldn't follow. Never blind-FAIL a correct-looking integration on un-traceable indirection, and never PASS on a hunch.
+- **Verify every citation before you trust it.** Collect your evidence as `<file>\t<line>\t<snippet>` lines and pipe them through the guard:
+  ```bash
+  printf '%s\n' "$CITATIONS" | bash "$PLUGIN_DIR/scripts/check-citation.sh" --project="$PROJECT"
+  ```
+  Any `MISMATCH` line means you mis-cited (hallucinated line, wrong file, wrong text). **Fix the citation if you were sloppy, or downgrade that rule to `FAIL` if the code truly isn't there** — a rule whose evidence does not resolve cannot be a PASS.
+
+### Determinism
+
+Reason at `temperature` 0 discipline: judge only what the cited code proves, identically on every run, so the integrator's autofix loop sees a stable verdict. Do not let phrasing or run-to-run variance flip a verdict.
+
+## Output contract — one merged JSON block (`validator/1.2.0`)
+
+Merge Phase 1 and Phase 2 into a single object and print it as your **entire** final message. Start from the Phase 1 JSON, then for each rule you adjudicated, **replace** the corresponding Phase 1 check (or add it if absent) with your semantic verdict, adding the additive fields:
+
+- `engine`: `"grep"` (unchanged Phase 1 checks) or `"llm-adjudicator"` (your Phase 2 verdicts).
+- `evidence`: array of `{file,line,snippet,role}` (required on `llm-adjudicator` checks).
+- `confidence`: `"high"` | `"low"` (optional; use `"low"` when `unresolved` is non-empty).
+- `reasoning`: one short paragraph (≤4 sentences).
+- `unresolved`: array of strings (edges you couldn't follow); `[]` when fully resolved.
+- Top-level `engine_version`: a string identifying this adjudicator prompt/model revision, e.g. `"semantic-2026-06-03"`.
+
+**Shadow phase (current):** during shadow rollout the **deterministic floor + Phase 1 grep behavioral verdicts remain authoritative for the overall `status`**. Your Phase 2 verdicts are surfaced (and the integrator/CI logs where they disagree with grep) but do not yet flip `status`. When a Phase 2 verdict and the grep shadow disagree, keep both observable: emit your `llm-adjudicator` check and note the disagreement in `reasoning`. (At promotion to `validator/2.0.0` the grep behavioral rules are retired and your verdicts become canonical — see `agents/contracts.md`.)
+
+**Status rule (unchanged):** `status = "FAIL"` if any check has `level: "FAIL"`. `ADVISORY` and `WARN` never affect status.
 
 **Hard rules:**
 
-- After the closing ``` of the JSON block, output **nothing** — not a sentence, not a newline-prefixed comment, not "Done."
-- Do **not** mention the substring ```` ```json ```` anywhere else in your response. Only one ```` ```json ```` fence may appear.
-- Do **not** rewrite rule details or interpret levels. The orchestrator parses the JSON.
-- If the script exits non-zero with an `error` field, your response is still the same pipeline output. Do nothing extra.
+- Your final message is **exactly one** fenced ` ```json ` block — the merged object. Output **nothing** after the closing ```` ``` ````: not a sentence, not "Done."
+- Do **not** mention the substring ` ```json ` anywhere else in your response. Only one ` ```json ` fence may appear.
+- Keep the deterministic floor's `detail` strings intact for `engine: "grep"` checks — do not paraphrase them.
 
 ## Independence
 
-The validator must run in a **fresh subagent context** — it must not see the integrator's reasoning. Input is the file tree only.
+The validator must run in a **fresh subagent context** — it must not see the integrator's reasoning. Input is the file tree only. This isolation is what makes Phase 2's semantic review trustworthy: you judge the code as written, not the integrator's intent.
 
-## Rule set (`validator/1.1.0`)
+## Rule set (`validator/1.2.0`)
 
 For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 
+**Deterministic floor (`engine: "grep"`, authoritative):**
+
 - `init_count` — exactly one `MeticaSdk.Initialize(`
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering, regardless of MaxSDK presence)
+- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` before `Initialize` (same-file ordering)
 - `<format>_callbacks_subscribed` — for each used ad format (banner/interstitial/rewarded/mrec), OnAdLoadSuccess + OnAdLoadFailed subscribed
 - `rewarded_reward_callback` — conditional FAIL if rewarded used but `OnAdRewarded` missing
-- `<format>_load_show_parity` — every Load has a matching Show somewhere (banner/interstitial/rewarded/mrec)
-- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — FAIL if the format is used but `OnAdHidden` is not subscribed (auto-reload loop)
-- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL if the format is used but `OnAdShowFailed` is not subscribed (the reload-on-hidden loop stalls on show-fail because `OnAdHidden` doesn't fire then)
-- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — ADVISORY if `Show` is called without an `IsReady` check
+- `<format>_load_show_parity` — every Load has a matching Show somewhere
+- `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL if the format is used but `OnAdShowFailed` is not subscribed
 - `revenue_callback_subscribed` — ADVISORY only
-- `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appear as string literal values (comments stripped, identifier names ignored)
-- `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, or matches `(?i)test|debug|dummy|placeholder` as a delimited word, or is digits-only. Handles `@"..."`, `$"..."`, `$@"..."`, `@$"..."` verbatim/interpolated forms too
-- `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules (note SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*`, lowercase `r`)
-- `compiles_cleanly` *(1.1.0)* — compiles the whole project in Unity batch-mode (via `scripts/compile-check.sh`) and emits one FAIL per `error CS####` with file:line; PASS when it builds clean; WARN (non-blocking) when skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or when Unity can't complete. This is the catch-all for compile errors — including the issue #8 docs-transcription bugs (unqualified nested enum, wrong property casing) — so there are no per-bug string rules
+- `placeholder_ids_replaced` — FAIL when a placeholder credential appears as a string-literal value
+- `user_id_not_test_value` — FAIL when the `MeticaInitConfig` userId arg is null/empty/test/debug/dummy/digits-only
+- `compiles_cleanly` — Unity batch-mode build; one FAIL per `error CS####`; WARN when skipped
+
+**Semantic adjudication (`engine: "llm-adjudicator"`):**
+
+- `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — reload reachable from the hidden handler, through indirection
+- `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — every Show path observes IsReady first
+- `placement_ids_match` — Load and Show use the same placement per format
+
+During shadow, Phase 1 still emits its grep versions of the reload/ready-guard rules; you reconcile them with your evidence-backed verdicts as described above.
 
 These checks live in the validator (not just in the integrator's report) because the validator's role is to lint **any** integration — including hand-rolled code, post-edit drift, and CI re-runs — not just the integrator's first-pass output.

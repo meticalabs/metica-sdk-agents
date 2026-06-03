@@ -1,0 +1,3 @@
+Assets/Scripts/RewardedManager.cs	25	void OnRewardedHidden(MeticaAd ad)
+Assets/Scripts/RewardedManager.cs	27	if (_autoReload) RestartRewardedCycle();
+Assets/Scripts/RewardedManager.cs	32	MeticaSdk.Ads.LoadRewarded("rw_main");
