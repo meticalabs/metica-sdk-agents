@@ -68,7 +68,7 @@ assert_golden() {
 
 echo "== format-compat-report golden eval =="
 
-out=$(run_pipeline "$FIX/unity-too-low")
+out=$(MOCK_JAVA_VERSION=19.0.2 run_pipeline "$FIX/unity-too-low")
 assert_contains "unity-too-low: header + unity FAIL + Overall BLOCK" "$out" \
     "COMPAT REPORT — target MeticaSDK 2.4.0" \
     "Unity         2020.3.24f1" \
