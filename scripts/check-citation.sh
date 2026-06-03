@@ -17,7 +17,12 @@
 #                 - <file> is relative to --project (if given) or absolute/CWD.
 #                 - <line> is 1-based.
 #                 - <snippet> is the remainder of the line; may contain spaces.
-# Args:   --project=<root>   base dir for relative <file> paths (optional).
+# Args:   --project=<root>   base dir for relative <file> paths (optional). When
+#                            given, every citation must resolve INSIDE this root —
+#                            a path escaping via `../`, a symlink, or an absolute
+#                            path elsewhere is rejected ("path escapes project
+#                            root"), so the guard can't be satisfied with unrelated
+#                            files. With no --project, absolute paths are allowed.
 # Output: one record per citation on stdout, TAB-separated:
 #                 OK\t<file>\t<line>
 #                 MISMATCH\t<file>\t<line>\t<reason>
@@ -44,9 +49,17 @@ for arg in "$@"; do
     esac
 done
 
-if [ -n "$PROJECT" ] && [ ! -d "$PROJECT" ]; then
-    printf 'check-citation: project not found: %s\n' "$PROJECT" >&2
-    exit 2
+PROJ_CANON=""
+if [ -n "$PROJECT" ]; then
+    if [ ! -d "$PROJECT" ]; then
+        printf 'check-citation: project not found: %s\n' "$PROJECT" >&2
+        exit 2
+    fi
+    # Canonical project root (resolves symlinks + ..) for the containment check below.
+    PROJ_CANON="$(cd "$PROJECT" 2>/dev/null && pwd -P)" || {
+        printf 'check-citation: cannot resolve project: %s\n' "$PROJECT" >&2
+        exit 2
+    }
 fi
 
 # Normalize: strip leading/trailing whitespace, collapse internal runs to one space.
@@ -85,6 +98,19 @@ while IFS=$'\t' read -r file line snippet || [ -n "${file:-}" ]; do
     if [ ! -f "$path" ]; then
         emit_mismatch "$file" "$line" "file not found"
         continue
+    fi
+
+    # When a project root is given, the evidence MUST live inside it. A citation
+    # that escapes via `../`, a symlink, or an absolute path elsewhere is not
+    # evidence about the integration under review — reject it so the guard can't
+    # be satisfied with unrelated files. (With no --project, absolute paths are a
+    # supported mode and this check is skipped.)
+    if [ -n "$PROJ_CANON" ]; then
+        real="$(cd "$(dirname "$path")" 2>/dev/null && pwd -P)/$(basename "$path")"
+        case "$real" in
+            "$PROJ_CANON"/*) : ;;
+            *) emit_mismatch "$file" "$line" "path escapes project root"; continue ;;
+        esac
     fi
 
     # awk's NR is the true line count whether or not the file ends in a trailing

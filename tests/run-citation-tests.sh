@@ -109,6 +109,24 @@ out="$(printf '%s\t%s\t%s\n' "$F" "$((nlines + 1))" "anything" | bash "$CC" --pr
 { [ "$rc" = "1" ] && printf '%s' "$out" | grep -q "out of range"; } \
     && ok "one past EOF (newline-terminated) → out of range" || bad "one-past-EOF (rc=$rc, out=$out)"
 
+# 15. With --project set, an ABSOLUTE path outside the project root is rejected
+# (anti-hallucination: evidence must come from the project under review).
+outside="$(mktemp -t metica-outside-XXXXXX)"; printf 'secret unrelated line\n' > "$outside"
+out="$(printf '%s\t%s\t%s\n' "$outside" 1 "secret unrelated line" | bash "$CC" --project="$proj")"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q "escapes project root"; } \
+    && ok "absolute path outside project → escapes project root" || bad "escape-abs (rc=$rc, out=$out)"
+
+# 16. With --project set, a ../ traversal that resolves outside the root is rejected.
+out="$(printf '%s\t%s\t%s\n' "../$(basename "$outside")" 1 "secret unrelated line" | bash "$CC" --project="$proj")"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q "escapes project root"; } \
+    && ok "../ traversal escaping project → rejected" || bad "escape-dotdot (rc=$rc, out=$out)"
+rm -f "$outside"
+
+# 17. An ABSOLUTE path that IS inside the project still resolves (containment allows it).
+out="$(printf '%s\t%s\t%s\n' "$proj/$F" 8 "LoadRewarded" | bash "$CC" --project="$proj")"; rc=$?
+{ [ "$rc" = "0" ] && printf '%s' "$out" | grep -q "^OK"; } \
+    && ok "absolute path inside project (+ --project) → OK" || bad "abs-inside (rc=$rc, out=$out)"
+
 rm -rf "$proj"
 
 echo
