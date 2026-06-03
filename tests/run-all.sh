@@ -14,7 +14,8 @@ bash "$SCRIPT_DIR/run-semantic-tests.sh"   || any_fail=1; echo
 bash "$SCRIPT_DIR/run-compile-tests.sh"    || any_fail=1; echo
 bash "$SCRIPT_DIR/run-input-validation-tests.sh"  || any_fail=1; echo
 bash "$SCRIPT_DIR/run-codegen-validator-tests.sh" || any_fail=1; echo
-bash "$SCRIPT_DIR/run-autofix-tests.sh"           || any_fail=1
+bash "$SCRIPT_DIR/run-autofix-tests.sh"           || any_fail=1; echo
+bash "$SCRIPT_DIR/run-log-monitor-tests.sh"       || any_fail=1
 
 echo
 [ "$any_fail" -eq 0 ] && { echo "ALL GREEN"; exit 0; }
