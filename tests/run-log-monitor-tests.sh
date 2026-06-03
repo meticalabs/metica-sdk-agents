@@ -60,6 +60,24 @@ out="$(bash "$START" --label=t --platform=symbian 2>&1)"; rc=$?
     && ok "start: bad platform → FAIL" \
     || bad "start: bad platform (rc=$rc, out=$out)"
 
+# 5a. start.sh — log file already exists (no-clobber)
+tmp="$(mktemp -d)"
+: > "$tmp/dupe-android.log"
+out="$(bash "$START" --label=dupe --platform=android --output-dir="$tmp" 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'Log file already exists'; } \
+    && ok "start: log file already exists → FAIL with rename hint" \
+    || bad "start: log no-clobber (rc=$rc, out=$out)"
+rm -rf "$tmp"
+
+# 5b. start.sh — session file already exists (stale capture)
+tmp="$(mktemp -d)"
+: > "$tmp/stale.session"
+out="$(bash "$START" --label=stale --platform=android --output-dir="$tmp" 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'Session file already exists'; } \
+    && ok "start: stale .session → FAIL with stop-first hint" \
+    || bad "start: session no-clobber (rc=$rc, out=$out)"
+rm -rf "$tmp"
+
 echo
 echo "== log-monitor scripts: stop.sh argument gates =="
 
@@ -78,7 +96,7 @@ out="$(bash "$STOP" --label="Bad Label" 2>&1)"; rc=$?
 # 8. stop.sh — no session file for this label
 tmp="$(mktemp -d)"
 out="$(cd "$tmp" && bash "$STOP" --label=does-not-exist 2>&1)"; rc=$?
-{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -qE 'No session file|log-monitor-start.sh'; } \
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'No session file'; } \
     && ok "stop: missing session → FAIL with start-first hint" \
     || bad "stop: missing session (rc=$rc, out=$out)"
 rm -rf "$tmp"

@@ -110,18 +110,23 @@ if ! kill -0 "$PID" 2>/dev/null; then
   $first"
 fi
 
-# Give the device a couple of seconds to stream the first lines.
-sleep 2
+# Give the device a couple of seconds to stream the first lines. iOS
+# idevicesyslog needs longer than adb on a freshly-paired device — bump
+# the iOS wait to 4s so we don't false-fail healthy captures.
+case "$PLATFORM" in ios) sleep 4 ;; *) sleep 2 ;; esac
 
 if [ ! -s "$LOG_FILE" ]; then
     kill "$PID" 2>/dev/null || true
     rm -f "$LOG_FILE"
-    die "Capture wrote 0 bytes in 2s. Likely causes:
+    die "Capture wrote 0 bytes. Likely causes:
   - Android: device not authorized — accept the USB-debug RSA prompt on the device.
   - iOS:    pairing not trusted — accept the 'Trust this computer' prompt on the device.
   - Wrong device selected (multiple devices connected to the host)."
 fi
 
+# Patterns checked against real first lines from both tools — adb's normal
+# opener "--------- beginning of main" and idevicesyslog's connect banner do
+# NOT match any pattern here, so the happy path passes through cleanly.
 first="$(head -n 1 "$LOG_FILE" 2>/dev/null)"
 case "$first" in
     "error:"*|"ERROR:"*|"Could not"*|"No device"*|*"not found"*)

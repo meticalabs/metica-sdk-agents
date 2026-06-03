@@ -93,7 +93,7 @@ metica-sdk-agents/
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
-│   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2: stop + per-route rule checks + Markdown report
+│   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2a: stop capture + summary (analysis is agent prose, Phase 2b)
 │   ├── lib/                           # shared helpers: clean-source.sh + awk (clean-cs, strip-comments, check-init-userid)
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/

@@ -52,8 +52,11 @@ if kill -0 "$pid" 2>/dev/null; then
     sleep 0.3
     kill -9 "$pid" 2>/dev/null || true
 fi
-# `--` terminates pkill options so a $log_file starting with '-' isn't a flag.
-pkill -f -- "$log_file" 2>/dev/null || true
+# BSD pkill (macOS) does not accept `--` as an end-of-options marker, so we
+# can't lean on it. $log_file is safe from a leading dash in practice: $LABEL
+# is kebab-validated upstream and $OUTPUT_DIR defaults to $PWD (an absolute
+# path); only an explicit `--output-dir=-foo` could synthesize one.
+pkill -f "$log_file" 2>/dev/null || true
 
 # ---- summary printed for the agent ----------------------------------------
 

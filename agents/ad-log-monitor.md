@@ -87,7 +87,7 @@ The script kills the background capture, prints the log path + total line count 
 
 Read `<log_file>` from the script's output and write a Markdown analysis to `./<label>-analysis.md`. The shape of the report is the **template at the bottom of this section**; the substeps below are how you fill each table.
 
-All greps below assume `LOG="<log_file>"` from the stop script. Always run greps against the **raw** log, not a paraphrase.
+All greps below assume `LABEL="<label>"` and `LOG="<log_file>"` from the stop script's summary (both are needed: `$LABEL` names `./${LABEL}-filtered.txt` and `./${LABEL}-analysis.md`; `$LOG` is the raw capture). Always run greps against the **raw** log, not a paraphrase.
 
 #### Step 1. Filter ad-relevant lines (orient yourself)
 
@@ -396,5 +396,5 @@ Write a single Markdown file `./compare-<trial-label>-vs-<holdout-label>.md` (de
 ## Conventions
 
 - All output files (logs, session, filter file, per-route reports, comparison report) live in the **current working directory** — never in `/tmp`. Multiple captures coexist in the same folder by label.
-- File names: `./<label>-<platform>.log`, `./<label>.session`, `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial>-vs-<holdout>.md`.
+- File names: `./<label>-<platform>.log`, `./<label>.session`, `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial-label>-vs-<holdout-label>.md`.
 - All output is human-readable Markdown. This agent does **not** emit JSON to an orchestrator.
