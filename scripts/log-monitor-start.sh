@@ -14,6 +14,7 @@ LABEL=""
 PLATFORM="auto"
 APP=""
 OUTPUT_DIR="$PWD"
+OUTPUT_DIR_USER_PROVIDED=0
 
 die() { printf 'FAIL\t%s\n' "$1" >&2; exit 1; }
 
@@ -22,7 +23,7 @@ for arg in "$@"; do
         --label=*)      LABEL="${arg#*=}" ;;
         --platform=*)   PLATFORM="${arg#*=}" ;;
         --app=*)        APP="${arg#*=}" ;;
-        --output-dir=*) OUTPUT_DIR="${arg#*=}" ;;
+        --output-dir=*) OUTPUT_DIR="${arg#*=}"; OUTPUT_DIR_USER_PROVIDED=1 ;;
         -h|--help)
             sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
@@ -37,10 +38,39 @@ printf '%s' "$LABEL" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$' \
 
 case "$PLATFORM" in auto|android|ios) ;; *) die "Unknown --platform=$PLATFORM (auto|android|ios)" ;; esac
 
+# Session-file no-clobber check runs BEFORE platform detection and the
+# toolchain gate: a stale .session is a local-filesystem problem, doesn't
+# need adb / idevicesyslog to diagnose, and we'd rather tell the user to
+# clean up than confuse them with a toolchain hint.
+SESSION_FILE="$OUTPUT_DIR/$LABEL.session"
+if [ -e "$SESSION_FILE" ]; then
+    cleanup_hint="bash \"$(dirname "$0")/log-monitor-stop.sh\" --label=\"$LABEL\""
+    [ "$OUTPUT_DIR_USER_PROVIDED" = "1" ] && cleanup_hint="$cleanup_hint --output-dir=\"$OUTPUT_DIR\""
+    die "Session file already exists: $SESSION_FILE
+  An earlier capture for label '$LABEL' did not finish cleanly. Run
+    $cleanup_hint
+  to close it, or delete the stale .session and .log and retry."
+fi
+
+# Reject control characters in --app before they reach the session file,
+# where a newline would break the key=value parser in stop.sh.
+case "$APP" in
+    *$'\n'*|*$'\r'*|*$'\t'*) die "Invalid --app value: contains newline, carriage return, or tab." ;;
+esac
+
 # ---- platform detection -----------------------------------------------------
 
+# probe_ios accepts either idevice_id (preferred, gives device list) OR
+# idevicesyslog alone — otherwise an iOS-only host with just idevicesyslog
+# installed gets mis-reported as "no device".
 probe_android() { command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | awk 'NR>1 && $2=="device"' | grep -q .; }
-probe_ios()     { command -v idevice_id >/dev/null 2>&1 && idevice_id -l 2>/dev/null | grep -q .; }
+probe_ios()     {
+    if command -v idevice_id >/dev/null 2>&1; then
+        idevice_id -l 2>/dev/null | grep -q .
+    else
+        command -v idevicesyslog >/dev/null 2>&1
+    fi
+}
 
 if [ "$PLATFORM" = "auto" ]; then
     have_a=0; have_i=0
@@ -52,6 +82,12 @@ if [ "$PLATFORM" = "auto" ]; then
     else die "No Android or iOS device detected. Connect a device (and accept the USB-debug / Trust prompt) and retry."
     fi
 fi
+
+# Log-file no-clobber now that PLATFORM is resolved. Still runs before the
+# toolchain gate for the same reason as the session check.
+LOG_FILE="$OUTPUT_DIR/$LABEL-$PLATFORM.log"
+[ -e "$LOG_FILE" ] && die "Log file already exists: $LOG_FILE
+  Pick a different --label, or remove the old file (and its .session) and retry."
 
 # ---- toolchain gate (hard BLOCK with install hint) --------------------------
 
@@ -70,22 +106,15 @@ ios)
     Windows is not supported by libimobiledevice; use a Mac or Linux host." ;;
 esac
 
-# ---- output paths + no-clobber + no-stale-capture ---------------------------
-
-LOG_FILE="$OUTPUT_DIR/$LABEL-$PLATFORM.log"
-SESSION_FILE="$OUTPUT_DIR/$LABEL.session"
-
-[ -e "$LOG_FILE" ]     && die "Log file already exists: $LOG_FILE
-  Pick a different --label, or remove the old file (and its .session) and retry."
-[ -e "$SESSION_FILE" ] && die "Session file already exists: $SESSION_FILE
-  An earlier capture for label '$LABEL' did not finish cleanly. Run
-    bash $(dirname "$0")/log-monitor-stop.sh --label=$LABEL
-  to close it, or delete the stale .session and .log and retry."
-
 # ---- launch capture --------------------------------------------------------
 
 case "$PLATFORM" in
 android)
+    # NOTE: `adb logcat -c` clears the device's main log buffer for ALL apps,
+    # not just the target. This is intentional — it gives a clean capture
+    # uncluttered by earlier sessions — but other debugging workflows on the
+    # same device will lose their pre-existing log history. Agent prose
+    # (Phase 1) is expected to flag this to the user before running.
     adb logcat -c >/dev/null 2>&1 || die "adb logcat -c failed. Check 'adb devices' output."
     adb logcat -v threadtime >"$LOG_FILE" 2>&1 &
     PID=$!
@@ -139,15 +168,19 @@ esac
 # ---- session file ----------------------------------------------------------
 
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-# Shell-escape every value via %q so the file remains safely sourceable by
-# log-monitor-stop.sh even when --app or --output-dir contains spaces / quotes.
+# Plain key=value, one per line. Stop.sh parses this with a `read` loop
+# against a whitelist of keys — it does NOT source the file, so values
+# cannot inject shell code. Values cannot contain newlines: $LABEL is
+# kebab, $PLATFORM is android|ios, $PID is numeric, $started_at is ISO,
+# $LOG_FILE is a constructed path, and $APP was rejected above if it
+# contained control chars.
 {
-    printf 'label=%q\n'       "$LABEL"
-    printf 'platform=%q\n'    "$PLATFORM"
-    printf 'pid=%q\n'         "$PID"
-    printf 'log_file=%q\n'    "$LOG_FILE"
-    printf 'app=%q\n'         "$APP"
-    printf 'started_at=%q\n'  "$started_at"
+    printf 'label=%s\n'       "$LABEL"
+    printf 'platform=%s\n'    "$PLATFORM"
+    printf 'pid=%s\n'         "$PID"
+    printf 'log_file=%s\n'    "$LOG_FILE"
+    printf 'app=%s\n'         "$APP"
+    printf 'started_at=%s\n'  "$started_at"
 } > "$SESSION_FILE"
 
 # ---- confirmation ----------------------------------------------------------

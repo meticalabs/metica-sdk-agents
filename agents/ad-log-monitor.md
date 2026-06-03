@@ -59,6 +59,8 @@ If the user hasn't yet picked which route they're starting with, ask. Convention
 
 For iOS, ask whether they want to filter by app process name (`--app="App Name"`). Default to **no filter** — `idevicesyslog -p` is case-sensitive on the exact process name and losing logs to a name mismatch is worse than carrying extra lines and filtering at analysis time.
 
+**Android side-effect to flag to the user:** start.sh runs `adb logcat -c` to clear the device's main log buffer before capture, which gives a clean capture but **wipes existing log history for every app on the device**, not just the target. If QA is running other debugging workflows concurrently and might want their existing logs, warn them before you run the script.
+
 Then run the start script:
 
 ```bash

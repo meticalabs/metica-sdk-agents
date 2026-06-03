@@ -37,26 +37,40 @@ SESSION_FILE="$OUTPUT_DIR/$LABEL.session"
 [ -f "$SESSION_FILE" ] || die "No session file for label '$LABEL' at $SESSION_FILE.
   Run log-monitor-start.sh --label=$LABEL first."
 
-# shellcheck disable=SC1090
-. "$SESSION_FILE"
-: "${label:?session file missing label}"
-: "${platform:?session file missing platform}"
-: "${pid:?session file missing pid}"
-: "${log_file:?session file missing log_file}"
+# Parse the session as plain key=value data — do NOT source it. Sourcing
+# a tampered or corrupted .session is equivalent to arbitrary code
+# execution; this loop only assigns to a fixed whitelist of variables.
+label=""; platform=""; pid=""; log_file=""; app=""; started_at=""
+while IFS='=' read -r key value; do
+    case "$key" in
+        label)      label="$value" ;;
+        platform)   platform="$value" ;;
+        pid)        pid="$value" ;;
+        log_file)   log_file="$value" ;;
+        app)        app="$value" ;;
+        started_at) started_at="$value" ;;
+        # Anything else is silently dropped.
+    esac
+done < "$SESSION_FILE"
+
+[ -n "$label" ]    || die "session file missing label"
+[ -n "$platform" ] || die "session file missing platform"
+[ -n "$pid" ]      || die "session file missing pid"
+[ -n "$log_file" ] || die "session file missing log_file"
 [ -f "$log_file" ] || die "Captured log file not found: $log_file"
 
 # ---- stop capture ----------------------------------------------------------
 
+# We have the exact PID from the session file — kill that and stop. We
+# do NOT fall back to `pkill -f "$log_file"`: that's a regex match on the
+# full command line and can hit unrelated processes (an editor open on
+# the file, a `tail -f`, etc.). If the PID is stale, the user can clean
+# up manually rather than us nuking innocent processes.
 if kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null || true
     sleep 0.3
     kill -9 "$pid" 2>/dev/null || true
 fi
-# BSD pkill (macOS) does not accept `--` as an end-of-options marker, so we
-# can't lean on it. $log_file is safe from a leading dash in practice: $LABEL
-# is kebab-validated upstream and $OUTPUT_DIR defaults to $PWD (an absolute
-# path); only an explicit `--output-dir=-foo` could synthesize one.
-pkill -f "$log_file" 2>/dev/null || true
 
 # ---- summary printed for the agent ----------------------------------------
 
