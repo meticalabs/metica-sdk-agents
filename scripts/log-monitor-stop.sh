@@ -28,7 +28,8 @@ done
 
 [ -n "$LABEL" ] || die "Missing --label=<slug>"
 # Same kebab-case rule as start.sh — prevents path traversal via --label=../foo
-# when the value is then used to build $SESSION_FILE and `.` sourced.
+# when the value is then used to build $SESSION_FILE. (The session itself is
+# parsed as key=value below, never sourced, so this is defence in depth.)
 printf '%s' "$LABEL" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$' \
     || die "Label '$LABEL' is not kebab-case (lowercase letters, digits, dashes; no leading/trailing dash)."
 [ -d "$OUTPUT_DIR" ] || die "Output dir not found: $OUTPUT_DIR"

@@ -162,11 +162,15 @@ echo "== log-monitor: Phase 2a stop-and-summarise =="
 if [ -f "$FIXT_DIR/happy-android.log" ]; then
     tmp="$(mktemp -d)"
     cp "$FIXT_DIR/happy-android.log" "$tmp/happy-android.log"
-    # Non-existent PID so kill -0 returns false and the kill block is skipped.
+    # Spawn a real `sleep` so the session pid points at a process we own
+    # and can verify was killed. Defensive cleanup at the end of this block
+    # guarantees we don't leak the sleep on a test failure.
+    sleep 60 &
+    capture_pid=$!
     {
         printf 'label=happy\n'
         printf 'platform=android\n'
-        printf 'pid=99999\n'
+        printf 'pid=%s\n' "$capture_pid"
         printf 'log_file=%s/happy-android.log\n' "$tmp"
         printf 'app=\n'
         printf 'started_at=2026-06-02T12:00:00Z\n'
@@ -187,6 +191,18 @@ if [ -f "$FIXT_DIR/happy-android.log" ]; then
         echo "    --- stop.sh stdout ---"
         printf '%s\n' "$out" | sed 's/^/    /'
     fi
+
+    # Verify stop.sh actually killed our sleep. Give the kill a moment to
+    # propagate, then assert the PID is gone. If it isn't, the defensive
+    # cleanup below kills it so the test suite doesn't leak a 60s sleep.
+    sleep 0.5
+    if ! kill -0 "$capture_pid" 2>/dev/null; then
+        ok "stop: real session pid was terminated"
+    else
+        bad "stop: session pid $capture_pid still alive after stop.sh"
+        kill -9 "$capture_pid" 2>/dev/null || true
+    fi
+    wait "$capture_pid" 2>/dev/null || true
 
     # Session file cleaned up.
     if [ ! -f "$tmp/happy.session" ]; then
