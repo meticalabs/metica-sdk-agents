@@ -24,6 +24,10 @@ for arg in "$@"; do
 done
 
 [ -n "$LABEL" ] || die "Missing --label=<slug>"
+# Same kebab-case rule as start.sh — prevents path traversal via --label=../foo
+# when the value is then used to build $SESSION_FILE and `.` sourced.
+printf '%s' "$LABEL" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$' \
+    || die "Label '$LABEL' is not kebab-case (lowercase letters, digits, dashes; no leading/trailing dash)."
 [ -d "$OUTPUT_DIR" ] || die "Output dir not found: $OUTPUT_DIR"
 
 SESSION_FILE="$OUTPUT_DIR/$LABEL.session"
@@ -46,7 +50,8 @@ if kill -0 "$pid" 2>/dev/null; then
     kill -9 "$pid" 2>/dev/null || true
 fi
 # Fallback: kill any leftover capture writing to our log file.
-pkill -f "$log_file" 2>/dev/null || true
+# `--` terminates pkill options so a $log_file starting with '-' isn't treated as a flag.
+pkill -f -- "$log_file" 2>/dev/null || true
 
 LOG="$log_file"
 TOTAL_LINES=$(wc -l < "$LOG" | tr -d ' ')
@@ -106,7 +111,7 @@ REPORT="$OUTPUT_DIR/$LABEL-analysis.md"
 init_count=$(gcount 'MeticaSdk\.Initialize|MeticaSdk\s*=.*Initialize|\[Metica\].*[Ii]nitializ')
 consent_ln=$(first_lineno 'SetHasUserConsent')
 dns_ln=$(first_lineno 'SetDoNotSell')
-init_ln=$(first_lineno 'MeticaSdk\.Initialize')
+init_ln=$(first_lineno 'MeticaSdk\.Initialize|MeticaSdk\s*=.*Initialize|\[Metica\].*[Ii]nitializ')
 on_init_evidence=$(first_line 'OnInitialized|SmartFloors.*(group|userId)|Metica.*initialized.*group')
 
 init_count_level="PASS"; init_count_ev="found $init_count Initialize line(s) (expected 1)"
@@ -325,7 +330,7 @@ ERR_PATTERN='metica.*(error|exception|fail)|applovin.*error|MAX.*error|MaxSdk.*e
     rule_row "floor_value_sane"      "$handoff_val_level" "$handoff_val_ev"
 
     printf '\n## Errors & warnings\n\n'
-    err_count=$(grep -cEi "$ERR_PATTERN" "$LOG" 2>/dev/null || printf '0')
+    err_count=$(gcount "$ERR_PATTERN")
     printf 'Matched %s error/warning line(s) (regex: metica/applovin/MAX errors, loadAd failures, invalid keys, HTTP 4xx/5xx, FATAL EXCEPTION).\n\n' "$err_count"
     if [ "$err_count" -gt 0 ]; then
         printf '### Unique signatures (count × line)\n\n'

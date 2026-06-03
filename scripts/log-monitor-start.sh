@@ -134,13 +134,15 @@ esac
 # ---- session file ----------------------------------------------------------
 
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+# Shell-escape every value via %q so the file remains safely sourceable by
+# log-monitor-stop.sh even when --app or --output-dir contains spaces / quotes.
 {
-    printf 'label=%s\n'       "$LABEL"
-    printf 'platform=%s\n'    "$PLATFORM"
-    printf 'pid=%s\n'         "$PID"
-    printf 'log_file=%s\n'    "$LOG_FILE"
-    printf 'app=%s\n'         "$APP"
-    printf 'started_at=%s\n'  "$started_at"
+    printf 'label=%q\n'       "$LABEL"
+    printf 'platform=%q\n'    "$PLATFORM"
+    printf 'pid=%q\n'         "$PID"
+    printf 'log_file=%q\n'    "$LOG_FILE"
+    printf 'app=%q\n'         "$APP"
+    printf 'started_at=%q\n'  "$started_at"
 } > "$SESSION_FILE"
 
 # ---- confirmation ----------------------------------------------------------

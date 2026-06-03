@@ -80,10 +80,9 @@ echo "== log-monitor: Phase 2 happy-path against synthetic fixture =="
 if [ -f "$FIXT_DIR/happy-android.log" ]; then
     tmp="$(mktemp -d)"
     cp "$FIXT_DIR/happy-android.log" "$tmp/happy-android.log"
-    # Use a no-op PID for the session so kill is a noop. PID 1 always exists
-    # but is init; kill -0 succeeds. The actual kill is gated by kill -0 so it
-    # tries `kill 1` which will fail without privileges — that's fine, the
-    # script tolerates kill failure (|| true).
+    # Use a non-existent PID (99999) so kill -0 returns false and the kill /
+    # pkill block is skipped entirely. Reduces test flakiness and avoids
+    # depending on the script's tolerance of kill failure for unrelated PIDs.
     {
         printf 'label=happy\n'
         printf 'platform=android\n'
