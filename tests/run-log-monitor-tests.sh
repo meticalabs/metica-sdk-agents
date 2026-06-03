@@ -2,8 +2,13 @@
 # run-log-monitor-tests.sh — unit tests for ad-log-monitor scripts.
 #
 # Covers the script error paths (invalid args, missing toolchain, no-session)
-# plus one synthetic-logcat happy-path Phase 2 run that asserts the report
-# contains the expected rule rows.
+# plus one synthetic-logcat happy-path Phase 2a run that asserts stop.sh
+# stopped the capture, printed the summary, and cleaned up.
+#
+# Phase 2b (the analysis itself) is agent prose; there is nothing for a
+# script test to assert about the report — log shape varies enough between
+# games / SDK versions that locking goldens here gives false signals. See
+# agents/ad-log-monitor.md for the rationale.
 
 set -u
 
@@ -64,7 +69,13 @@ out="$(bash "$STOP" 2>&1)"; rc=$?
     && ok "stop: missing --label → FAIL exit 1" \
     || bad "stop: missing --label (rc=$rc, out=$out)"
 
-# 7. stop.sh — no session file for this label
+# 7. stop.sh — non-kebab label
+out="$(bash "$STOP" --label="Bad Label" 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'kebab-case'; } \
+    && ok "stop: non-kebab label → FAIL exit 1" \
+    || bad "stop: non-kebab label (rc=$rc, out=$out)"
+
+# 8. stop.sh — no session file for this label
 tmp="$(mktemp -d)"
 out="$(cd "$tmp" && bash "$STOP" --label=does-not-exist 2>&1)"; rc=$?
 { [ "$rc" = "1" ] && printf '%s' "$out" | grep -qE 'No session file|log-monitor-start.sh'; } \
@@ -73,16 +84,16 @@ out="$(cd "$tmp" && bash "$STOP" --label=does-not-exist 2>&1)"; rc=$?
 rm -rf "$tmp"
 
 echo
-echo "== log-monitor: Phase 2 happy-path against synthetic fixture =="
+echo "== log-monitor: Phase 2a stop-and-summarise =="
 
-# 8. stop.sh — run against a synthetic Android logcat fixture; verify the
-# report contains the headline sections + a PASS row we know should pass.
+# 9. stop.sh against a synthetic Android log fixture. The script no longer
+# writes a report (that's the agent's job in Phase 2b), so we assert only
+# that it stopped the capture, printed the summary block the agent expects,
+# and cleaned up the session file.
 if [ -f "$FIXT_DIR/happy-android.log" ]; then
     tmp="$(mktemp -d)"
     cp "$FIXT_DIR/happy-android.log" "$tmp/happy-android.log"
-    # Use a non-existent PID (99999) so kill -0 returns false and the kill /
-    # pkill block is skipped entirely. Reduces test flakiness and avoids
-    # depending on the script's tolerance of kill failure for unrelated PIDs.
+    # Non-existent PID so kill -0 returns false and the kill block is skipped.
     {
         printf 'label=happy\n'
         printf 'platform=android\n'
@@ -93,35 +104,33 @@ if [ -f "$FIXT_DIR/happy-android.log" ]; then
     } > "$tmp/happy.session"
 
     out="$(cd "$tmp" && bash "$STOP" --label=happy 2>&1)"; rc=$?
-    report="$tmp/happy-analysis.md"
 
-    if [ "$rc" = "0" ] && [ -f "$report" ] \
-        && grep -q '^# Ad Log Analysis' "$report" \
-        && grep -q '## Init checks' "$report" \
-        && grep -q '## Interstitial' "$report" \
-        && grep -q '## Metica → MAX handoff' "$report" \
-        && grep -q '## Errors & warnings' "$report"; then
-        ok "stop: synthetic Android fixture → report has expected sections"
+    if [ "$rc" = "0" ] \
+        && printf '%s' "$out" | grep -q '^OK	capture stopped' \
+        && printf '%s' "$out" | grep -q '  label:    happy' \
+        && printf '%s' "$out" | grep -q '  platform: android' \
+        && printf '%s' "$out" | grep -q "  log:      $tmp/happy-android.log" \
+        && printf '%s' "$out" | grep -qE '  lines:    [0-9]+' \
+        && printf '%s' "$out" | grep -q 'Proceed with analysis'; then
+        ok "stop: synthetic fixture → summary printed for agent"
     else
-        bad "stop: synthetic fixture (rc=$rc) — report missing sections"
+        bad "stop: summary (rc=$rc)"
         echo "    --- stop.sh stdout ---"
         printf '%s\n' "$out" | sed 's/^/    /'
-        [ -f "$report" ] && { echo "    --- report ---"; sed 's/^/    /' "$report"; }
     fi
 
-    # The fixture is constructed so that privacy_before_init must PASS.
-    if [ -f "$report" ] && grep -E '^\| privacy_before_init \| PASS' "$report" > /dev/null; then
-        ok "stop: privacy_before_init = PASS on happy fixture"
-    else
-        bad "stop: privacy_before_init expected PASS"
-        [ -f "$report" ] && grep -E '^\| privacy_before_init' "$report" | sed 's/^/    /'
-    fi
-
-    # And session file should be removed after a successful run.
+    # Session file cleaned up.
     if [ ! -f "$tmp/happy.session" ]; then
         ok "stop: session file cleaned up after run"
     else
         bad "stop: session file lingered"
+    fi
+
+    # stop.sh must NOT write an analysis report — that's Phase 2b's job.
+    if [ ! -f "$tmp/happy-analysis.md" ]; then
+        ok "stop: no analysis report written by the script (correct — agent does it)"
+    else
+        bad "stop: unexpected analysis report written by the script"
     fi
 
     rm -rf "$tmp"
