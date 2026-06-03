@@ -101,6 +101,57 @@ out="$(cd "$tmp" && bash "$STOP" --label=does-not-exist 2>&1)"; rc=$?
     || bad "stop: missing session (rc=$rc, out=$out)"
 rm -rf "$tmp"
 
+# 8a. stop.sh — session with malicious pid (0). Must refuse before signalling.
+tmp="$(mktemp -d)"
+: > "$tmp/evil-android.log"
+{
+    printf 'label=evil\n'
+    printf 'platform=android\n'
+    printf 'pid=0\n'
+    printf 'log_file=%s/evil-android.log\n' "$tmp"
+    printf 'app=\n'
+    printf 'started_at=2026-06-02T12:00:00Z\n'
+} > "$tmp/evil.session"
+out="$(cd "$tmp" && bash "$STOP" --label=evil 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'Refusing to signal pid=0'; } \
+    && ok "stop: pid=0 → refuse before kill" \
+    || bad "stop: pid=0 (rc=$rc, out=$out)"
+rm -rf "$tmp"
+
+# 8b. stop.sh — session with non-numeric pid. Must refuse.
+tmp="$(mktemp -d)"
+: > "$tmp/evil-android.log"
+{
+    printf 'label=evil\n'
+    printf 'platform=android\n'
+    printf 'pid=$(rm -rf $HOME)\n'
+    printf 'log_file=%s/evil-android.log\n' "$tmp"
+    printf 'app=\n'
+    printf 'started_at=2026-06-02T12:00:00Z\n'
+} > "$tmp/evil.session"
+out="$(cd "$tmp" && bash "$STOP" --label=evil 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'Invalid pid in session file'; } \
+    && ok "stop: non-numeric pid → refuse before kill" \
+    || bad "stop: non-numeric pid (rc=$rc, out=$out)"
+rm -rf "$tmp"
+
+# 8c. stop.sh — session label doesn't match --label.
+tmp="$(mktemp -d)"
+: > "$tmp/right-android.log"
+{
+    printf 'label=other\n'
+    printf 'platform=android\n'
+    printf 'pid=99999\n'
+    printf 'log_file=%s/right-android.log\n' "$tmp"
+    printf 'app=\n'
+    printf 'started_at=2026-06-02T12:00:00Z\n'
+} > "$tmp/right.session"
+out="$(cd "$tmp" && bash "$STOP" --label=right 2>&1)"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'label mismatch'; } \
+    && ok "stop: session/--label mismatch → refuse" \
+    || bad "stop: label mismatch (rc=$rc, out=$out)"
+rm -rf "$tmp"
+
 echo
 echo "== log-monitor: Phase 2a stop-and-summarise =="
 

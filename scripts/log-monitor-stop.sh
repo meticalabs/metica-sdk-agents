@@ -59,6 +59,23 @@ done < "$SESSION_FILE"
 [ -n "$log_file" ] || die "session file missing log_file"
 [ -f "$log_file" ] || die "Captured log file not found: $log_file"
 
+# Defensive validation against a tampered or corrupted .session before we
+# pass anything to `kill`. A non-numeric pid trips set -u arithmetic; pid=0
+# would `kill` the caller's entire process group; a negative pid broadcasts
+# the signal to every process the caller can signal. Refuse anything that
+# isn't strictly > 1 (PID 1 is init / launchd — also wrong to signal).
+case "$pid" in
+    ''|*[!0-9]*) die "Invalid pid in session file: '$pid' (expected a positive integer)" ;;
+esac
+[ "$pid" -gt 1 ] || die "Refusing to signal pid=$pid from session file (must be > 1)."
+
+# Sanity-check: the label embedded in the session file should match the
+# label we were invoked with. A mismatch means the user renamed the
+# .session file or pointed --label at the wrong session — bail rather
+# than acting on the wrong capture.
+[ "$label" = "$LABEL" ] \
+    || die "Session label mismatch: file says '$label', --label=$LABEL. Refusing to act on the wrong capture."
+
 # ---- stop capture ----------------------------------------------------------
 
 # We have the exact PID from the session file — kill that and stop. We
