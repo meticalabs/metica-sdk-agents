@@ -1,6 +1,8 @@
 # check-init-userid.awk — locate every MeticaInitConfig(...) constructor call
 # in a C# source and flag any whose 3rd positional argument (userId) is a
-# null / empty / test / debug / dummy / placeholder / digits-only literal.
+# test / debug / dummy / placeholder / digits-only literal. `null` and `""`
+# (empty) are NOT flagged: the SDK treats empty the same as null and substitutes
+# its own stable id, so neither is a bug.
 #
 # Handles multi-line constructor calls by accumulating until the matching ')'.
 # Does NOT cover the object-initializer form (`new MeticaInitConfig { UserId = ... }`)
@@ -9,7 +11,7 @@
 # Each emitted line is TAB-separated (so file paths containing ':' do not
 # corrupt downstream parsing):
 #   <FNAME>\t<start_line>\t<reason>\t<arg_value>
-# reason ∈ {null, empty, test-value, digits-only}. Empty output = no problems.
+# reason ∈ {test-value, digits-only}. Empty output = no problems.
 #
 # Input MUST be the source AFTER strip-comments.awk so commented-out test
 # values do not trigger false positives. Caller passes the original filename
@@ -33,11 +35,12 @@ function flag(arg, line,    a, normalized) {
     normalized = a
     sub(/^\$?@/, "", normalized)   # strip leading @ or $@
     sub(/^@?\$/, "", normalized)   # strip leading $ or @$ (already partly stripped above)
-    if (a == "null") {
-        printf "%s\t%d\tnull\tnull\n", FNAME, line
-    } else if (a == "\"\"" || normalized == "\"\"") {
-        printf "%s\t%d\tempty\t%s\n", FNAME, line, a
-    } else if (normalized ~ /^"(.*[-_])?([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])([-_].*)?"$/) {
+    # NOTE: `null` and `""` (empty) are deliberately NOT flagged. The SDK treats an
+    # empty userId the same as null — it substitutes its own stable id (anonymous
+    # mode), so neither is a bug. We only flag values that would actively COLLAPSE
+    # many users into one identity and corrupt analytics/SmartFloors cohorts: a
+    # hardcoded test/debug/dummy/placeholder word, or a digits-only literal.
+    if (normalized ~ /^"(.*[-_])?([Tt][Ee][Ss][Tt]|[Dd][Ee][Bb][Uu][Gg]|[Dd][Uu][Mm][Mm][Yy]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr])([-_].*)?"$/) {
         # 'test'/'debug'/'dummy'/'placeholder' as a standalone word — bounded by
         # the surrounding quotes or by - / _ separators. Avoids false positives
         # on legitimate ids like "contest-user-42" or "latest-build". The

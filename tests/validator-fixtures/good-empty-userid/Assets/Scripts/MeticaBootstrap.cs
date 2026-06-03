@@ -1,28 +1,20 @@
 using UnityEngine;
 
+// userId passed as "" (empty) — NOT a failure: the SDK treats empty the same as
+// null and substitutes its own stable id. Must report user_id_not_test_value PASS.
 public class MeticaBootstrap : MonoBehaviour
 {
     void Start()
     {
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += ad => Debug.Log("loaded");
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed += err => Debug.Log("failed");
+        MeticaAdsCallbacks.Interstitial.OnAdShowFailed += (ad, err) => MeticaSdk.Ads.LoadInterstitial("inter_main");
         MeticaAdsCallbacks.Interstitial.OnAdHidden += ad => MeticaSdk.Ads.LoadInterstitial("inter_main");
 
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
 
-        // BUG: multi-line constructor with a hardcoded test userId (exercises the
-        // awk's cross-line arg accumulation). null/empty would be fine; a test
-        // literal collapses all users into one identity and must FAIL.
-        MeticaSdk.Initialize(
-            new MeticaInitConfig(
-                "real-key",
-                "real-app-id",
-                "dummy-user"
-            ),
-            null,
-            response => {}
-        );
+        MeticaSdk.Initialize(new MeticaInitConfig("real-key", "real-app-id", ""), null, response => {});
 
         MeticaSdk.Ads.LoadInterstitial("inter_main");
     }

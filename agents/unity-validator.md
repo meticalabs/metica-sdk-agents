@@ -63,6 +63,20 @@ For each rule below, the Phase 1 grep verdict is a **shadow signal**, not the tr
 
 When `compiles_cleanly` is `WARN` (compile was skipped — no Unity located), also scan the adapter code for the two known docs-transcription bugs as a fallback and report them under the relevant compile-class finding: an unqualified `MeticaMediationType.` not preceded by `MeticaMediationInfo.`, and `.SmartFloors.isForcedHoldout` (must be PascalCase `IsForcedHoldout`). When Unity actually compiled, defer to `compiles_cleanly` and skip this.
 
+### `trial_holdout_integrity` — does the ad logic risk biasing the SmartFloors experiment? (report only on WARN/FAIL)
+
+Metica SmartFloors runs an A/B experiment: a **Trial** cohort gets Metica-optimized floors and a **Holdout** cohort gets the baseline, and Metica measures the revenue difference. The measurement is only valid if the ad logic treats both cohorts **identically except for the floor Metica itself applies**. Read the ad logic and judge whether anything could bias or break that measurement. Look specifically for:
+
+- **Mediation bypass on a shared path** — a direct `MaxSdk.Show*` / `MaxSdk.Load*` (or another mediator) that serves ads on a path Metica also serves, so some impressions skip Metica's floor. Leaks treatment across cohorts. → **FAIL**.
+- **Per-cohort divergent serving** — ad cadence, frequency caps, placements, or whether an ad shows at all that branch on the SmartFloors group, `IsForcedHoldout`, or the userId/cohort. Changing UX by cohort (beyond the floor) confounds the result. → **FAIL**.
+- **Hardcoded floor / price override** that defeats the floor Metica sets. → **FAIL**.
+- **Unstable user identity** — a userId that rotates per launch/session (e.g. `Guid.NewGuid()` or `DateTime`-derived passed to `MeticaInitConfig`), so the same player is reassigned a cohort each run and the experiment can't accumulate. (Note: `null`/`""` is fine — the SDK supplies a *stable* id; a freshly-random id every launch is the problem.) → **FAIL**.
+- **Re-initialization** that could reassign the cohort mid-lifecycle (e.g. `MeticaSdk.Initialize` reachable on scene reload), beyond the single-init the floor expects. → **WARN**.
+- **Missing revenue attribution** — `OnAdRevenuePaid` not wired, so the experiment's KPI (revenue) can't be measured for this app. → **WARN**.
+- Anything else you can argue would correlate the cohort with the player experience.
+
+**Emission rule (unique to this check):** report it **only when your verdict is `WARN` or `FAIL`** — when the ad logic is clean, **omit the check entirely** (do not emit a PASS entry). This keeps the report quiet unless there is something the integrator should act on. When you do emit it, set `engine: "llm-adjudicator"`, cite the offending line(s) in `evidence`, and explain the risk in `reasoning`. If a risk is real but you can't fully trace it, emit `WARN` with `unresolved` populated rather than `FAIL`.
+
 ### Evidence + citation discipline (non-negotiable)
 
 - A **PASS on a behavioral rule requires ≥2 evidence entries** forming a chain from the rule's entry point (e.g. the `OnAdHidden` subscriber) to its terminal (e.g. the `LoadRewarded` call). A single-line "looks fine" is not a PASS.
@@ -119,7 +133,7 @@ For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 - `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL if the format is used but `OnAdShowFailed` is not subscribed
 - `revenue_callback_subscribed` — ADVISORY only
 - `placeholder_ids_replaced` — FAIL when a placeholder credential appears as a string-literal value
-- `user_id_not_test_value` — FAIL when the `MeticaInitConfig` userId arg is null/empty/test/debug/dummy/digits-only
+- `user_id_not_test_value` — FAIL when the `MeticaInitConfig` userId arg is a test/debug/dummy/placeholder or digits-only literal (`null` and `""` are NOT flagged — the SDK treats empty as null and supplies its own stable id)
 - `compiles_cleanly` — Unity batch-mode build; one FAIL per `error CS####`; WARN when skipped
 
 **Semantic adjudication (`engine: "llm-adjudicator"`):**
@@ -127,6 +141,7 @@ For the full canonical schema, see [`agents/contracts.md`](contracts.md).
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — reload reachable from the hidden handler, through indirection
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — every Show path observes IsReady first
 - `placement_ids_match` — Load and Show use the same placement per format
+- `trial_holdout_integrity` — does the ad logic risk biasing the SmartFloors Trial/Holdout experiment (mediation bypass, per-cohort serving, floor override, unstable userId, …)? **Reported only on WARN/FAIL — omitted entirely when clean** (no PASS entry)
 
 During shadow, Phase 1 still emits its grep versions of the reload/ready-guard rules; you reconcile them with your evidence-backed verdicts as described above.
 

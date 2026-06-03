@@ -12,6 +12,10 @@ behavioral rules wrong on real codebases, in **both** directions:
   through a helper (`OnAdHidden → RestartRewardedCycle() → LoadRewarded`). The
   semantic pass PASSes *with a cited 3-hop evidence chain*, so the green result
   is proven rather than assumed.
+- **Floor-clean but experiment-unsafe** — `mediation-bypass-bad/`: every floor
+  rule PASSes, but a direct `MaxSdk.ShowInterstitial` on a shared path bypasses
+  Metica's SmartFloor, biasing Trial/Holdout. Only the semantic
+  `trial_holdout_integrity` check catches it (target verdict `FAIL`).
 
 ## How this corpus is used
 
@@ -41,6 +45,10 @@ Two layers, by design:
 - `<fixture>/expected-evidence.tsv` — `<file>\t<line>\t<snippet>`, the evidence
   chain the adjudicator should be able to cite; verified by `check-citation.sh`.
 - `expected-verdicts.tsv` — `fixture, rule, grep_shadow, semantic_expected, note`.
+  `grep_shadow` is the deterministic floor's verdict for that rule, or **`n/a`**
+  for a semantic-only rule that has no floor counterpart (e.g.
+  `trial_holdout_integrity`); `n/a` rows skip the floor-stability assertion but
+  still have their evidence resolved.
 
 When you add a fixture, add its row(s) to `expected-verdicts.tsv` and (for rows
 whose `semantic_expected` is a confident verdict) an `expected-evidence.tsv`.

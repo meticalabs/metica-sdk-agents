@@ -145,6 +145,15 @@ assert_case bad-test-userid               "FAIL"        \
 assert_case bad-userid-multiline          "FAIL"        \
     "user_id_not_test_value:FAIL"
 
+# null and "" (empty) userId are NOT failures — the SDK treats empty the same as
+# null and substitutes its own stable id. Only collapsing literals (test/digits)
+# fail. These two fixtures lock that in.
+assert_case good-null-userid               "PASS"        \
+    "user_id_not_test_value:PASS"
+
+assert_case good-empty-userid              "PASS"        \
+    "user_id_not_test_value:PASS"
+
 # Commented-out test value must NOT trip the check (strip-comments.awk gates).
 assert_case good-commented-test-userid    "PASS"        \
     "placeholder_ids_replaced:PASS" "user_id_not_test_value:PASS"

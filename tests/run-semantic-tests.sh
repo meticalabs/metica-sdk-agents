@@ -48,6 +48,13 @@ echo "== semantic-fixtures: deterministic guards =="
 while IFS=$'\t' read -r fixture rule grep_shadow semantic_expected note; do
     [ "$fixture" = "fixture" ] && continue   # header
     [ -z "$fixture" ] && continue
+    # grep_shadow = "n/a" → a semantic-only rule (no deterministic floor rule, e.g.
+    # trial_holdout_integrity). Nothing to assert against the floor; the evidence
+    # for these is still resolved in step (b) below.
+    if [ "$grep_shadow" = "n/a" ]; then
+        ok "semantic-only rule (no grep shadow): $fixture/$rule (semantic target: $semantic_expected)"
+        continue
+    fi
     out="$(bash "$VALIDATE" --project="$FIX/$fixture" 2>&1)" || true
     got="$(level_of_rule "$out" "$rule")"
     if [ "$got" = "$grep_shadow" ]; then

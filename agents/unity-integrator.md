@@ -20,7 +20,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used when MaxSDK is present, where MeticaSDK mediates through AppLovin MAX). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
-- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` (the integrator then prompts the user to replace it; the validator's `user_id_not_test_value` check FAILs until a real expression is wired). Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
+- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null`, which is **valid** — the SDK substitutes its own stable anonymous id and the validator does **not** FAIL on `null`/`""` (only on test/debug/dummy/digits literals). The integrator still prompts for a real identity expression at plan time because a stable real user id gives the best SmartFloors cohorting/attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name suggested in the cohort-gating recipe. Default: `metica_rollout`.
@@ -355,11 +355,12 @@ Confirm these inferences:
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one (OQ2) — never default silently.
 
-**Collect `USER_ID_EXPR` here (Review-OQ A).** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
+**Collect `USER_ID_EXPR` here (Review-OQ A).** `null` / `""` is *accepted* — the SDK falls back to its own stable anonymous id, and the validator does not flag it. But a real, stable per-player id gives materially better SmartFloors cohorting and revenue attribution, so ask now — as part of this preview — rather than shipping anonymous by default:
 
 ```
-userId is currently unset (defaults to null, which the validator will reject).
-Provide the C# expression for the player identity:
+userId is currently unset (defaults to null → the SDK uses its own stable
+anonymous id). A real, stable per-player id is recommended for best SmartFloors
+results. Provide the C# expression for the player identity:
   1) SystemInfo.deviceUniqueIdentifier
   2) PlayerProfile.PlayerId
   3) something else (type the expression)
@@ -560,7 +561,7 @@ echo "Generated MeticaAdService.cs in $ADAPTER_FOLDER (formats: $FORMATS)"
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
-USER_ID_EXPR="${USER_ID_EXPR:-null}"          # validator FAILs until replaced with a real expression
+USER_ID_EXPR="${USER_ID_EXPR:-null}"          # null is accepted (SDK uses a stable anonymous id); a real expr is recommended for best SmartFloors results
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" below
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
@@ -698,10 +699,10 @@ Then the standard summary (whether MaxSDK was present, SDK version, files change
 
 #### Credential hygiene (now validator-driven)
 
-The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and null/test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
+The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and test/debug/dummy/digits userId literals (`null` and `""` are accepted — the SDK supplies its own stable id). When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
 
 ```
-⚠ The validator flagged credential placeholders / a null userId.
+⚠ The validator flagged credential placeholders / a test-value userId.
   These will be caught on every re-run of the validator (CI, post-edit, audit).
   Replace with your real values, then re-run @agent-unity-validator to confirm green.
 ```

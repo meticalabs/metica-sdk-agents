@@ -370,9 +370,11 @@ else
 fi
 
 # 10. user_id_not_test_value — fail if the userId arg passed to
-# MeticaInitConfig(api, app, userId) is null, empty string, or a test/debug/
-# dummy/placeholder literal, or a digits-only string. Handles multi-line
-# constructor calls via the awk parser. Object-initializer form
+# MeticaInitConfig(api, app, userId) is a test/debug/dummy/placeholder literal or
+# a digits-only string. `null` and `""` (empty) are NOT flagged — the SDK treats
+# empty the same as null and substitutes its own stable id, so neither is a bug;
+# only values that collapse many users into one identity are flagged. Handles
+# multi-line constructor calls via the awk parser. Object-initializer form
 # (`new MeticaInitConfig { UserId = … }`) is NOT covered — the integrator
 # emits the positional form; if it ever switches, extend check-init-userid.awk.
 USERID_CHECK_AWK="$SCRIPT_DIR/lib/check-init-userid.awk"
