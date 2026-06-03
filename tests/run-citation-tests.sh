@@ -102,6 +102,13 @@ out="$(bash "$CC" --bogus 2>&1)"; rc=$?
 out="$(bash "$CC" --project=/no/such/dir 2>&1 <<<'')"; rc=$?
 [ "$rc" = "2" ] && ok "nonexistent --project → exit 2" || bad "bad project (rc=$rc, out=$out)"
 
+# 14. Exactly one line past EOF on a newline-terminated file → "out of range",
+# NOT a confusing "snippet not found" (regression guard for the awk NR line count).
+nlines="$(awk 'END{print NR}' "$proj/$F")"
+out="$(printf '%s\t%s\t%s\n' "$F" "$((nlines + 1))" "anything" | bash "$CC" --project="$proj")"; rc=$?
+{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q "out of range"; } \
+    && ok "one past EOF (newline-terminated) → out of range" || bad "one-past-EOF (rc=$rc, out=$out)"
+
 rm -rf "$proj"
 
 echo

@@ -80,7 +80,9 @@ Reason at `temperature` 0 discipline: judge only what the cited code proves, ide
 
 ## Output contract — one merged JSON block (`validator/1.2.0`)
 
-Merge Phase 1 and Phase 2 into a single object and print it as your **entire** final message. Start from the Phase 1 JSON, then for each rule you adjudicated, **replace** the corresponding Phase 1 check (or add it if absent) with your semantic verdict, adding the additive fields:
+Merge Phase 1 and Phase 2 into a single object and print it as your **entire** final message. Start from the Phase 1 JSON, then for each rule you adjudicated add your semantic verdict, with the additive fields below. **During the shadow phase, do not delete the Phase 1 grep check — keep it and add your `llm-adjudicator` check alongside it**, so both signals are observable in one object. This means a behavioral rule (e.g. `rewarded_reload_on_hidden`) may legitimately appear **twice during shadow** — once with `engine: "grep"` and once with `engine: "llm-adjudicator"` — and consumers key on the (`rule`, `engine`) pair. (At promotion to `validator/2.0.0` the grep behavioral checks are removed and your verdict is the single entry for that rule.)
+
+Additive fields:
 
 - `engine`: `"grep"` (unchanged Phase 1 checks) or `"llm-adjudicator"` (your Phase 2 verdicts).
 - `evidence`: array of `{file,line,snippet,role}` (required on `llm-adjudicator` checks).
@@ -91,7 +93,7 @@ Merge Phase 1 and Phase 2 into a single object and print it as your **entire** f
 
 **Shadow phase (current):** during shadow rollout the **deterministic floor + Phase 1 grep behavioral verdicts remain authoritative for the overall `status`**. Your Phase 2 verdicts are surfaced (and the integrator/CI logs where they disagree with grep) but do not yet flip `status`. When a Phase 2 verdict and the grep shadow disagree, keep both observable: emit your `llm-adjudicator` check and note the disagreement in `reasoning`. (At promotion to `validator/2.0.0` the grep behavioral rules are retired and your verdicts become canonical — see `agents/contracts.md`.)
 
-**Status rule (unchanged):** `status = "FAIL"` if any check has `level: "FAIL"`. `ADVISORY` and `WARN` never affect status.
+**Status rule (shadow-aware):** during the shadow phase `status` is computed from the **deterministic floor only** — i.e. `status = "FAIL"` if any check **whose `engine` is not `"llm-adjudicator"`** has `level: "FAIL"`. `engine: "llm-adjudicator"` checks **never affect `status`** during shadow, even when their `level` is `FAIL` (they are surfaced for calibration, not gating); `ADVISORY` and `WARN` never affect status either. So a shadow run can carry a semantic `FAIL` and still report `status: "PASS"` from the floor — that is intended. (At promotion to `validator/2.0.0` the semantic verdicts become floor-equivalent and the qualifier is dropped: `status = "FAIL"` if any check is `FAIL`.)
 
 **Hard rules:**
 

@@ -87,16 +87,18 @@ while IFS=$'\t' read -r file line snippet || [ -n "${file:-}" ]; do
         continue
     fi
 
-    total="$(wc -l < "$path" | tr -d ' ')"
-    # wc counts newlines; a final line without a trailing newline still exists, so
-    # allow line == total+1.
-    if [ "$line" -lt 1 ] || [ "$line" -gt $((total + 1)) ]; then
-        emit_mismatch "$file" "$line" "line out of range (file has ~$total lines)"
+    # awk's NR is the true line count whether or not the file ends in a trailing
+    # newline (the final partial line still counts as a record), so there is no
+    # off-by-one to fudge: a line past EOF is reported as "out of range", not as a
+    # confusing "snippet not found" on a phantom line.
+    total="$(awk 'END { print NR }' "$path")"
+    if [ "$line" -lt 1 ] || [ "$line" -gt "$total" ]; then
+        emit_mismatch "$file" "$line" "line out of range (file has $total lines)"
         continue
     fi
 
     actual="$(awk -v n="$line" 'NR==n { print; exit }' "$path")"
-    if [ -z "$actual" ] && [ "$line" -le "$total" ]; then
+    if [ -z "$actual" ]; then
         # Genuinely blank source line can never contain a non-empty snippet.
         emit_mismatch "$file" "$line" "cited line is blank"
         continue
