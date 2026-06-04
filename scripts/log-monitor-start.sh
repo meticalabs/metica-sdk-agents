@@ -43,15 +43,34 @@ case "$PLATFORM" in auto|android|ios) ;; *) die "Unknown --platform=$PLATFORM (a
 # need adb / idevicesyslog to diagnose, and we'd rather tell the user to
 # clean up than confuse them with a toolchain hint.
 SESSION_FILE="$OUTPUT_DIR/$LABEL.session"
-if [ -e "$SESSION_FILE" ]; then
+# Atomically claim the session file using bash's noclobber (`set -C`):
+# under noclobber, the `>` redirection refuses to overwrite an existing
+# file and the subshell exits non-zero. Two near-simultaneous invocations
+# can't both pass this check — file creation is atomic at the filesystem
+# level, so only one wins the claim. (A plain `[ -e ]` check would have
+# a TOCTOU window between the test and the eventual write.)
+if ! ( set -C; : > "$SESSION_FILE" ) 2>/dev/null; then
     cleanup_hint="bash \"$(dirname "$0")/log-monitor-stop.sh\" --label=\"$LABEL\""
     [ "$OUTPUT_DIR_USER_PROVIDED" = "1" ] && cleanup_hint="$cleanup_hint --output-dir=\"$OUTPUT_DIR\""
     die "Session file already exists: $SESSION_FILE
-  An earlier capture for label '$LABEL' did not finish cleanly. Run
+  Either a concurrent capture is already running with this label, or an
+  earlier capture for label '$LABEL' did not finish cleanly. Run
     $cleanup_hint
   to close it, or delete the stale .session and retry. (Old timestamped
   .log files don't conflict with a new run and can be left in place.)"
 fi
+
+# From the atomic claim onward, every failure path must clean up after
+# itself: the empty .session we just created, the .log file once it's
+# been opened, and the capture process once it's been launched. A single
+# EXIT trap centralises that. The success path disarms the trap at the
+# very end (just before `exit 0`).
+cleanup_on_failure() {
+    [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null || true
+    [ -n "${LOG_FILE:-}" ] && rm -f "$LOG_FILE"
+    rm -f "$SESSION_FILE"
+}
+trap cleanup_on_failure EXIT
 
 # Reject control characters in --app before they reach the session file,
 # where a newline would break the key=value parser in stop.sh.
@@ -86,11 +105,17 @@ fi
 
 # Capture filename embeds an ISO-basic UTC timestamp so multiple runs with
 # the same label (different days, different builds) don't clobber each other.
-# No log-file no-clobber check is needed once timestamps are in the name —
-# the session-file check above already prevents concurrent runs with the
-# same label.
 TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 LOG_FILE="$OUTPUT_DIR/$LABEL-$PLATFORM-$TIMESTAMP.log"
+
+# Defensive: the timestamp is only second-resolution, so two captures
+# started within the same second (after the previous session has been
+# stopped) would land on identical $LOG_FILE paths. Catch that with a
+# light existence check and tell the user the cause — they just need to
+# wait one second and retry.
+[ -e "$LOG_FILE" ] && die "Log file already exists at $LOG_FILE
+  Two captures within the same second collided on the UTC timestamp.
+  Wait one second and retry."
 
 # ---- toolchain gate (hard BLOCK with install hint) --------------------------
 
@@ -185,6 +210,11 @@ started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     printf 'app=%s\n'         "$APP"
     printf 'started_at=%s\n'  "$started_at"
 } > "$SESSION_FILE"
+
+# Capture is healthy and the session is fully populated. Disarm the
+# EXIT trap so the cleanup function doesn't tear it all down on the
+# normal `exit 0` below.
+trap - EXIT
 
 # ---- confirmation ----------------------------------------------------------
 
