@@ -1,9 +1,9 @@
 #!/bin/bash
 # log-monitor-stop.sh — Phase 2a of ad-log-monitor.
 # Stop the capture identified by --label and print a minimal summary the
-# agent uses to drive its analysis. This script does NOT analyse the log;
+# skill uses to drive its analysis. This script does NOT analyse the log;
 # log shape varies enough between games and SDK versions that rule-based
-# grep counting gives false PASS/FAIL. Analysis is agent prose (Phase 2b).
+# grep counting gives false PASS/FAIL. Analysis is skill prose (Phase 2b).
 #
 # Usage: log-monitor-stop.sh --label=<slug> [--output-dir=<dir>]
 # Exit:  0 = capture stopped, log present, summary printed.
@@ -90,7 +90,7 @@ if kill -0 "$pid" 2>/dev/null; then
     kill -9 "$pid" 2>/dev/null || true
 fi
 
-# ---- summary printed for the agent ----------------------------------------
+# ---- summary printed for the skill ----------------------------------------
 
 TOTAL_LINES=$(wc -l < "$log_file" | tr -d ' ')
 

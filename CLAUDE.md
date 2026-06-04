@@ -17,10 +17,10 @@ There is no build step and no compiled artifact. Changing an agent or skill = ed
 
 ```bash
 bash tests/run-all.sh                      # full suite; prints "ALL GREEN" or "FAILURES"
-bash tests/run-<suite>-tests.sh            # a single suite (compat, format, download,
-                                           # validator, citation, semantic, compile,
-                                           # input-validation, codegen-validator, autofix,
-                                           # log-monitor)
+bash tests/run-<suite>-tests.sh            # a single suite (resolver, compat, format,
+                                           # download, validator, citation, semantic,
+                                           # compile, input-validation, codegen-validator,
+                                           # autofix, log-monitor)
 ```
 
 Tests are plain bash assertions against fixtures (`tests/fixtures/`, `tests/validator-fixtures/`) and goldens (`tests/goldens/`). No framework, no install. Suites that probe a sibling `../max-agent-test/DemoApp` skip silently when it's absent — a clean clone runs the synthetic-fixture suites only.
