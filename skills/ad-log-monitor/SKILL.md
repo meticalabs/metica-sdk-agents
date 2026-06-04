@@ -1,27 +1,27 @@
 ---
 name: ad-log-monitor
-description: Verify a Metica integration's runtime ad lifecycle on a connected device (Android logcat or iOS idevicesyslog) and compare a holdout-user route against a trial-user route. Captures the log, then in agent prose extracts ad unit IDs, network attribution, revenue per impression, lifecycle events, load strategy (timestamps), Metica→MAX floor handoff, and errors — and writes a per-route Markdown analysis. Phase 3 reads both per-route analyses and produces a side-by-side comparison with the mandatory n=5 caveat. Use when the user wants to QA an ad integration, smoke-test trial vs holdout, capture logcat/syslog for ad events, or investigate Metica/AppLovin runtime errors.
-tools: Bash, Read, Write, Edit
-model: sonnet
+description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle on a connected device (Android logcat / iOS idevicesyslog), and compare a holdout-user route against a trial-user route. Captures the log, then extracts ad unit IDs, network attribution, revenue per impression, lifecycle events, load strategy (timestamps), Metica→MAX floor handoff, and errors — and writes a per-route Markdown analysis. A trial-vs-holdout comparison produces a side-by-side verdict with the mandatory n=5 caveat. Use when the user wants to QA an ad integration, smoke-test trial vs holdout, capture logcat/syslog for ad events, analyse an existing ad log, or investigate Metica/AppLovin runtime errors. Trigger phrases include "start ad-log monitoring", "monitor logcat for ads", "capture ad events", "analyse this logcat", "stop and analyse the capture", "compare trial vs holdout", "ad lifecycle check".
 ---
 
 # Metica Ad-Log Monitor
 
-This agent verifies a Metica + AppLovin MAX integration from live device logs. Three phases:
+> Was an `@agent-metica-sdk-agents:ad-log-monitor` sub-agent through v1.4.0. Converted to a skill in v1.5.0 because the workflow is interactive (start → user plays → stop → analyse → repeat → compare) and benefits from staying in the main conversation, where the user can ask follow-up questions on the analysis without context-switching to a sub-agent.
+
+This skill verifies a Metica + AppLovin MAX integration from live device logs. Three phases:
 
 1. **Phase 1 — capture.** Kick off a background log capture on a connected device. *Scripted.*
-2. **Phase 2 — analyse one route.** Stop the capture, then read the log and produce a structured Markdown analysis for one route (trial or holdout). *Stop is scripted; the analysis itself is agent prose.*
-3. **Phase 3 — compare trial vs holdout.** Once both per-route analyses exist, write a comparison report. *Entirely agent prose.*
+2. **Phase 2 — analyse one route.** Stop the capture, then read the log and produce a structured Markdown analysis for one route (trial or holdout). *Stop is scripted; the analysis itself is your job.*
+3. **Phase 3 — compare trial vs holdout.** Once both per-route analyses exist, write a comparison report. *Entirely prose.*
 
-## Why Phase 2 is agent prose, not a deterministic script
+## Why Phase 2 is prose, not a deterministic script
 
-Log shape varies between games and SDK versions: class names, prefixes, log levels, custom wrappers, log volume, even AppLovin's internal state-machine strings drift across MAX releases. A grep-counting script written against one game's log produces false PASS/FAIL on another game. Instead, the agent **runs targeted greps, reads the actual lines, and interprets them** — the same approach the user-level `monitor-ad-logcat` skill uses, and the reason this agent absorbed that skill's extraction surface.
+Log shape varies between games and SDK versions: class names, prefixes, log levels, custom wrappers, log volume, even AppLovin's internal state-machine strings drift across MAX releases. A grep-counting script written against one game's log produces false PASS/FAIL on another game. Instead, you **run targeted greps, read the actual lines, and interpret them**.
 
 Counts on their own are evidence, not verdict. Always quote actual lines / timestamps in the report so the human can verify your reading.
 
 ## Resolve the plugin root
 
-Every bash command in this agent must start by resolving `PLUGIN_DIR`. `$CLAUDE_PLUGIN_ROOT` is **not** reliably exported into an agent's bash environment, so the loop below searches known install locations (including the newest cached marketplace version) for the resolver, then lets it self-verify the root.
+Defensive — `$CLAUDE_PLUGIN_ROOT` is sometimes unset in plugin bash environments, so locate the resolver across known install locations and self-verify the root.
 
 ```bash
 PLUGIN_DIR=""
@@ -351,7 +351,7 @@ Once the file is written, summarise to the user: which formats appeared, headlin
 
 ## Phase 3 — compare trial vs holdout
 
-**Entirely agent prose. No script.** You read both per-route analyses + both raw logs and reason.
+**Entirely prose. No script.** You read both per-route analyses + both raw logs and reason.
 
 ### 1. Read both per-route analyses
 
@@ -410,12 +410,12 @@ Write a single Markdown file `./compare-<trial-label>-vs-<holdout-label>.md` (de
 
 - **Do not** invent metrics that aren't in the log (revenue values, network names, floor prices) — say "not observed in this session" and move on.
 - **Do not** declare a revenue winner on n=5. Always include the caveat.
-- **Do not** edit any game code. This agent is read-only against the device log + working directory. Code changes are the integrator's / developer's job after the human reads your verdict.
+- **Do not** edit any game code. This skill is read-only against the device log + working directory. Code changes are the integrator's / developer's job after the human reads your verdict.
 - **Do not** delete the raw log files or per-route reports as part of Phase 3 — the human may want to keep them as evidence.
 - **Do not** turn the analysis into a deterministic grep-and-count script. Log shape varies between games / SDK versions; counts on their own are evidence, not verdict. Always quote actual lines / timestamps.
 
 ## Conventions
 
 - All output files (logs, session, filter file, per-route reports, comparison report) live in the **current working directory** — never in `/tmp`. Multiple captures coexist in the same folder by label and timestamp.
-- File names: `./<label>-<platform>-<YYYYMMDDThhmmssZ>.log` (capture; timestamp is UTC, embedded by start.sh so re-running with the same label doesn't clobber a previous log), `./<label>.session` (one in flight per label at a time), `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial-label>-vs-<holdout-label>.md`. The session file always carries the exact `log_file` path, so the agent reads the real path from there — never reconstructs it from `<label>-<platform>.log`.
-- All output is human-readable Markdown. This agent does **not** emit JSON to an orchestrator.
+- File names: `./<label>-<platform>-<YYYYMMDDThhmmssZ>.log` (capture; timestamp is UTC, embedded by start.sh so re-running with the same label doesn't clobber a previous log), `./<label>.session` (one in flight per label at a time), `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial-label>-vs-<holdout-label>.md`. The session file always carries the exact `log_file` path, so the skill reads the real path from there — never reconstructs it from `<label>-<platform>.log`.
+- All output is human-readable Markdown. This skill does **not** emit JSON to an orchestrator.

@@ -1,6 +1,6 @@
 # metica-sdk-agents
 
-Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
+Claude Code subagents and a skill that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
 
 ## Install
 
@@ -11,11 +11,11 @@ Claude Code subagents that integrate [MeticaSDK](https://github.com/meticalabs/m
 /plugin install metica-sdk-agents@metica-sdk-agents
 ```
 
-That's it. Claude Code clones the repo, registers the four agents, and sets `$CLAUDE_PLUGIN_ROOT` for you.
+That's it. Claude Code clones the repo, registers three agents and one skill, and sets `$CLAUDE_PLUGIN_ROOT` for you.
 
-**Verify:** launch Claude Code in your project and type `/agents` — you should see the four agents (listed under the `metica-sdk-agents` plugin if you installed via the marketplace, or as bare `unity-compat-checker` / `unity-integrator` / `unity-validator` / `ad-log-monitor` if you used the one-line installer).
+**Verify:** launch Claude Code in your project and type `/agents` — you should see the three Unity agents under the `metica-sdk-agents` plugin. The `ad-log-monitor` skill shows up via `/` autocomplete (`/metica-sdk-agents:ad-log-monitor`) and via natural-language triggers (see "Use the ad-log-monitor skill" below).
 
-## Use it
+## Use the integrator
 
 From your Unity project's root in Claude Code, mention the integrator. The name depends on how you installed:
 
@@ -35,16 +35,68 @@ If you're outside the project, or you have several Unity projects in one workspa
 PROJECT=/absolute/path/to/your/unity/project
 ```
 
-## The four agents
+## Use the ad-log-monitor skill
 
-| Agent                                     | Role                                                                                                                                |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `@metica-sdk-agents:unity-compat-checker` | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
-| `@metica-sdk-agents:unity-integrator`     | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
-| `@metica-sdk-agents:unity-validator`      | Independent verification of any integration. Runs rule-based grep checks for init-count, privacy-before-init, callback parity, etc. |
-| `@metica-sdk-agents:ad-log-monitor`       | Runtime counterpart to the validator. Captures Android logcat / iOS idevicesyslog while QA plays, checks the same ad-lifecycle invariants from live events, and compares a holdout-user route against a trial-user route to flag regressions Metica may have introduced. |
+Use this when you have a build on a device and want to QA the runtime ad behaviour. It works for **any** Metica integration — fresh or already shipped — and is built around a **two-route protocol** (record the holdout user, then the trial user, then compare).
 
-Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The ad-log-monitor is a separate workflow for QA — invoke it directly when you have a build on a device.
+**How to trigger it.** Any of these in the main conversation:
+
+| Form | Example |
+|---|---|
+| Slash (explicit) | `/metica-sdk-agents:ad-log-monitor` |
+| Mention (explicit) | `@metica-sdk-agents:ad-log-monitor start monitoring` |
+| Natural language (auto-loads the skill from its description) | "start ad-log monitoring", "capture logcat for ads", "analyse this logcat at `./trial-user-android-….log`", "compare trial vs holdout" |
+
+The skill will pick the right phase from your prompt: a bare invocation starts a new capture (Phase 1); "done playing" stops and analyses (Phase 2); "compare" produces the trial-vs-holdout verdict (Phase 3).
+
+**Two-route protocol.** Plan to run it twice on the same device, same build, same network — once for each route — so the comparison is apples-to-apples. Target **~5 interstitials and ~5 rewarded ads** per route.
+
+> "We'll run two captures so we can compare. First with the **holdout user** (control), then with the **trial user** (Metica active). On each run, play until you've seen roughly 5 interstitials and 5 rewarded ads. Don't change device, network, or app version between the two runs."
+
+**Minimal example.** In the main conversation, three turns end-to-end:
+
+```
+you  >  @metica-sdk-agents:ad-log-monitor start the holdout capture
+claude > [runs log-monitor-start.sh --label=holdout-user, prints session block,
+         "now play the game"]
+you  >  [plays ~5 interstitials + ~5 rewarded ads, comes back]
+       done
+claude > [runs log-monitor-stop.sh, reads the log, writes ./holdout-user-analysis.md]
+you  >  [swaps to the trial user on the device, repeats: "start the trial capture"
+         → play → "done" → analysis lands at ./trial-user-analysis.md]
+you  >  compare
+claude > [reads both analyses + both raw logs, writes ./compare-trial-vs-holdout.md]
+```
+
+If you already have logs from elsewhere and want to skip the capture:
+
+```
+you  >  @metica-sdk-agents:ad-log-monitor analyse the 2 existing logs at
+        ./holdout-user-android-….log and ./trial-user-android-….log
+```
+
+**Output artifacts** (all written to the current working directory; multiple captures coexist by label and timestamp):
+
+| File | Source | What it is |
+|---|---|---|
+| `./<label>-<platform>-<YYYYMMDDThhmmssZ>.log` | start.sh | Raw capture (Android logcat or iOS syslog) |
+| `./<label>.session` | start.sh | Shell-readable handoff state (label/platform/pid/log path). Removed by stop.sh; never sourced. |
+| `./<label>-filtered.txt` | the skill | Grep-filtered subset, useful for browsing |
+| `./<label>-analysis.md` | the skill | Per-route analysis (stack inventory, per-format stats, network attribution, revenue, floor handoff, load strategy, errors) |
+| `./compare-<trial>-vs-<holdout>.md` | the skill | Phase 3 side-by-side verdict with the n=5 caveat |
+
+The Phase 1 script clears the device's main `logcat` buffer for a clean capture — that wipes existing log history for every app on the device, not just the target. The skill warns the user before it runs the script.
+
+## The four components
+
+| Name                                        | Type  | Role                                                                                                                                |
+| ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `@metica-sdk-agents:unity-compat-checker`   | Agent | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
+| `@metica-sdk-agents:unity-integrator`       | Agent | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
+| `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Two-phase: deterministic grep + in-context semantic adjudication (line-cited evidence). |
+| `@metica-sdk-agents:ad-log-monitor`         | Skill | Runtime QA on a connected device. Captures Android logcat / iOS idevicesyslog while QA plays, extracts ad unit IDs / network / revenue / lifecycle / Metica→MAX floor handoff, and compares holdout vs trial. |
+
+Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The `ad-log-monitor` skill is a separate runtime-QA workflow — invoke it directly when you have a build on a device.
 
 ## Compatibility matrix
 
@@ -64,7 +116,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Test suites cover: `compat`, `format`, `download`, `validator`, `compile` (compile-check arg/parse/skip paths driven by a fake Unity binary), `codegen` (no-Max and Max-present), `autofix`, `input-validation`, and `resolver`.
+Test suites cover: `compat`, `format`, `download`, `validator`, `citation`, `semantic`, `compile`, `codegen`, `autofix`, `input-validation`, `resolver`, and `log-monitor`.
 
 A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
 
@@ -81,24 +133,27 @@ metica-sdk-agents/
 │   ├── contracts.md                   # JSON schemas for sub-agent outputs
 │   ├── unity-compat-checker.md
 │   ├── unity-integrator.md
-│   ├── unity-validator.md
-│   └── ad-log-monitor.md              # runtime ad-lifecycle verification + trial-vs-holdout comparison
+│   └── unity-validator.md
+├── skills/
+│   └── ad-log-monitor/
+│       └── SKILL.md                   # runtime ad-lifecycle verification + trial-vs-holdout comparison
 ├── scripts/
-│   ├── resolve-plugin-dir.sh          # auto-detects plugin root for the agents
+│   ├── resolve-plugin-dir.sh          # auto-detects plugin root for agents + skill
 │   ├── detect-compat.sh
 │   ├── format-compat-report.sh
 │   ├── validate-integration.sh
 │   ├── compile-check.sh               # batch-mode Unity build behind the validator's compiles_cleanly rule
+│   ├── check-citation.sh              # deterministic anti-hallucination guard for the validator's semantic phase
 │   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── git-snapshot.sh
 │   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
-│   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2a: stop capture + summary (analysis is agent prose, Phase 2b)
+│   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2a: stop capture + summary (analysis is the skill's job, Phase 2b)
 │   ├── lib/                           # shared helpers: clean-source.sh + awk (clean-cs, strip-comments, check-init-userid)
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/
 │   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
-└── tests/                             # 9 suite scripts (+ run-all.sh) + fixtures + goldens
+└── tests/                             # 12 suite scripts (+ run-all.sh) + fixtures + goldens
 ```
 
 ## License
