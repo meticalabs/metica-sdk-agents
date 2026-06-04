@@ -60,7 +60,7 @@ out="$(bash "$START" --label=t --platform=symbian 2>&1)"; rc=$?
     && ok "start: bad platform → FAIL" \
     || bad "start: bad platform (rc=$rc, out=$out)"
 
-# 5a. start.sh — session file already exists (stale capture).
+# 6. start.sh — session file already exists (stale capture).
 # The log-file no-clobber check was removed in v1.4.0: capture filenames
 # now embed a UTC timestamp (<label>-<platform>-<YYYYMMDDThhmmssZ>.log) so
 # sequential runs with the same label can't collide.
@@ -74,7 +74,6 @@ rm -rf "$tmp"
 
 echo
 echo "== log-monitor scripts: stop.sh argument gates =="
-
 
 
 # 6. stop.sh — missing --label

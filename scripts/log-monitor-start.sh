@@ -49,7 +49,8 @@ if [ -e "$SESSION_FILE" ]; then
     die "Session file already exists: $SESSION_FILE
   An earlier capture for label '$LABEL' did not finish cleanly. Run
     $cleanup_hint
-  to close it, or delete the stale .session and .log and retry."
+  to close it, or delete the stale .session and retry. (Old timestamped
+  .log files don't conflict with a new run and can be left in place.)"
 fi
 
 # Reject control characters in --app before they reach the session file,

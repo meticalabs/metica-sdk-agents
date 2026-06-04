@@ -62,6 +62,8 @@ LOG="<the existing path the user gave you>"
 
 and proceed directly to Phase 2b. The session file is not needed — it only hands state from start to stop, both of which you're skipping.
 
+**Label hygiene.** If the filename follows the canonical pattern `<label>-<platform>-<YYYYMMDDThhmmssZ>.log` you can pull the label off the front. If it doesn't (e.g. `crash-repro.log`, `client-build-2.txt`), **ask the user** what kebab-case label to use — `$LABEL` becomes the stem of `./<label>-analysis.md` and (via Phase 3) of `./compare-<trial-label>-vs-<holdout-label>.md`, so it has to be a clean slug or those output filenames break.
+
 If two logs are given (a holdout route and a trial route), run Phase 2b for each in sequence, then Phase 3. Be explicit in your replies about which file you're analysing in which step.
 
 ---
@@ -84,7 +86,7 @@ Then run the start script:
 bash "$PLUGIN_DIR/scripts/log-monitor-start.sh" --label=<slug> [--platform=auto|android|ios] [--app="App Name"]
 ```
 
-The script handles: kebab-case validation, platform auto-detection (`adb devices` / `idevice_id -l`), the toolchain gate (hard BLOCK with install hint if `adb` / `idevicesyslog` are missing), no-clobber checks on the output and session files, and post-launch health checks (PID alive + non-empty file + first line isn't a tool error). On any failure it cleans up and exits non-zero with an actionable message — relay the message and stop.
+The script handles: kebab-case validation, platform auto-detection (`adb devices` / `idevice_id -l`), the toolchain gate (hard BLOCK with install hint if `adb` / `idevicesyslog` are missing), session-file no-clobber check (interlock against concurrent captures with the same label), and post-launch health checks (PID alive + non-empty file + first line isn't a tool error). On any failure it cleans up and exits non-zero with an actionable message — relay the message and stop.
 
 On success, relay the script's confirmation block verbatim. Then hand off: "Play the game on the device. When you've seen ~5 interstitials and ~5 rewarded ads, tell me you're done."
 
