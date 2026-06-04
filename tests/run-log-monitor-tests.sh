@@ -60,16 +60,10 @@ out="$(bash "$START" --label=t --platform=symbian 2>&1)"; rc=$?
     && ok "start: bad platform → FAIL" \
     || bad "start: bad platform (rc=$rc, out=$out)"
 
-# 5a. start.sh — log file already exists (no-clobber)
-tmp="$(mktemp -d)"
-: > "$tmp/dupe-android.log"
-out="$(bash "$START" --label=dupe --platform=android --output-dir="$tmp" 2>&1)"; rc=$?
-{ [ "$rc" = "1" ] && printf '%s' "$out" | grep -q 'Log file already exists'; } \
-    && ok "start: log file already exists → FAIL with rename hint" \
-    || bad "start: log no-clobber (rc=$rc, out=$out)"
-rm -rf "$tmp"
-
-# 5b. start.sh — session file already exists (stale capture)
+# 6. start.sh — session file already exists (stale capture).
+# The log-file no-clobber check was removed in v1.4.0: capture filenames
+# now embed a UTC timestamp (<label>-<platform>-<YYYYMMDDThhmmssZ>.log) so
+# sequential runs with the same label can't collide.
 tmp="$(mktemp -d)"
 : > "$tmp/stale.session"
 out="$(bash "$START" --label=stale --platform=android --output-dir="$tmp" 2>&1)"; rc=$?
@@ -80,6 +74,7 @@ rm -rf "$tmp"
 
 echo
 echo "== log-monitor scripts: stop.sh argument gates =="
+
 
 # 6. stop.sh — missing --label
 out="$(bash "$STOP" 2>&1)"; rc=$?
