@@ -5,10 +5,10 @@
 # plus one synthetic-logcat happy-path Phase 2a run that asserts stop.sh
 # stopped the capture, printed the summary, and cleaned up.
 #
-# Phase 2b (the analysis itself) is agent prose; there is nothing for a
+# Phase 2b (the analysis itself) is skill prose; there is nothing for a
 # script test to assert about the report — log shape varies enough between
 # games / SDK versions that locking goldens here gives false signals. See
-# agents/ad-log-monitor.md for the rationale.
+# skills/ad-log-monitor/SKILL.md for the rationale.
 
 set -u
 
@@ -151,8 +151,8 @@ echo
 echo "== log-monitor: Phase 2a stop-and-summarise =="
 
 # 9. stop.sh against a synthetic Android log fixture. The script no longer
-# writes a report (that's the agent's job in Phase 2b), so we assert only
-# that it stopped the capture, printed the summary block the agent expects,
+# writes a report (that's the skill's job in Phase 2b), so we assert only
+# that it stopped the capture, printed the summary block the skill expects,
 # and cleaned up the session file.
 if [ -f "$FIXT_DIR/happy-android.log" ]; then
     tmp="$(mktemp -d)"
@@ -180,7 +180,7 @@ if [ -f "$FIXT_DIR/happy-android.log" ]; then
         && printf '%s' "$out" | grep -q "  log:      $tmp/happy-android.log" \
         && printf '%s' "$out" | grep -qE '  lines:    [0-9]+' \
         && printf '%s' "$out" | grep -q 'Proceed with analysis'; then
-        ok "stop: synthetic fixture → summary printed for agent"
+        ok "stop: synthetic fixture → summary printed for skill"
     else
         bad "stop: summary (rc=$rc)"
         echo "    --- stop.sh stdout ---"
@@ -208,7 +208,7 @@ if [ -f "$FIXT_DIR/happy-android.log" ]; then
 
     # stop.sh must NOT write an analysis report — that's Phase 2b's job.
     if [ ! -f "$tmp/happy-analysis.md" ]; then
-        ok "stop: no analysis report written by the script (correct — agent does it)"
+        ok "stop: no analysis report written by the script (correct — skill does it)"
     else
         bad "stop: unexpected analysis report written by the script"
     fi
