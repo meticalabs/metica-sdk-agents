@@ -83,11 +83,13 @@ if [ "$PLATFORM" = "auto" ]; then
     fi
 fi
 
-# Log-file no-clobber now that PLATFORM is resolved. Still runs before the
-# toolchain gate for the same reason as the session check.
-LOG_FILE="$OUTPUT_DIR/$LABEL-$PLATFORM.log"
-[ -e "$LOG_FILE" ] && die "Log file already exists: $LOG_FILE
-  Pick a different --label, or remove the old file (and its .session) and retry."
+# Capture filename embeds an ISO-basic UTC timestamp so multiple runs with
+# the same label (different days, different builds) don't clobber each other.
+# No log-file no-clobber check is needed once timestamps are in the name —
+# the session-file check above already prevents concurrent runs with the
+# same label.
+TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+LOG_FILE="$OUTPUT_DIR/$LABEL-$PLATFORM-$TIMESTAMP.log"
 
 # ---- toolchain gate (hard BLOCK with install hint) --------------------------
 

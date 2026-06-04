@@ -39,13 +39,30 @@ done
 
 ## Phase decision
 
-Pick the phase from the user's message and the working directory's state:
+**The user's prompt is the routing signal — read what they actually wrote and pick the phase to match.** Do not let directory state override an explicit instruction.
 
-- If the user is starting fresh, or says "begin / start / start monitoring / about to play / connect device" → **Phase 1**.
-- If `./<label>.session` exists in the working directory and the user says "done / stop / analyse / finished playing" → **Phase 2**.
-- If both `./holdout-user-analysis.md` and `./trial-user-analysis.md` exist (or the user explicitly asks to compare) → **Phase 3**.
+- **Phase 1 (new capture)** — the default. Triggers: a bare `@metica-sdk-agents:ad-log-monitor` invocation, "begin / start / start monitoring / new capture / about to play / connect device", or any prompt that doesn't clearly point at an existing artifact.
+- **Phase 2 (analyse one route)** — when the user has finished playing and wants the per-route report. Triggers: "done / stop / analyse / finished playing". Also when the user explicitly points you at an existing captured log (e.g. *"analyse `./trial-user-android-20260604T123045Z.log`"*) — in that case **skip Phase 2a** (the stop script) and go directly to Phase 2b against the file the user named.
+- **Phase 3 (compare trial vs holdout)** — triggers: "compare / verdict / trial vs holdout / which is better". Also when the user hands you two existing logs to compare (e.g. *"analyse the 2 existing logs for holdout and trial"*) — run Phase 2b for each first if no per-route `<label>-analysis.md` exists yet, then Phase 3.
 
-When in doubt ask one short clarifying question. The session file is the authoritative signal that a capture is in flight.
+**Default to Phase 1, not Phase 2.** Do **not** silently route to Phase 2 just because a `.session` file is sitting in the working directory — that's almost always residue from a prior run the user has forgotten about. Stale sessions are caught by the start script's no-clobber check; relay the BLOCK message and let the user choose (stop the old session, or pick a different `--label`).
+
+The session file's role is a safety interlock against concurrent captures with the same label, **not** a phase-routing signal.
+
+---
+
+## Analysing existing logs (skip Phase 1 and 2a)
+
+If the user gives you an existing log file (or two), skip both scripts. Set:
+
+```bash
+LABEL="<from the file name, or whatever the user prefers>"
+LOG="<the existing path the user gave you>"
+```
+
+and proceed directly to Phase 2b. The session file is not needed — it only hands state from start to stop, both of which you're skipping.
+
+If two logs are given (a holdout route and a trial route), run Phase 2b for each in sequence, then Phase 3. Be explicit in your replies about which file you're analysing in which step.
 
 ---
 
@@ -397,6 +414,6 @@ Write a single Markdown file `./compare-<trial-label>-vs-<holdout-label>.md` (de
 
 ## Conventions
 
-- All output files (logs, session, filter file, per-route reports, comparison report) live in the **current working directory** — never in `/tmp`. Multiple captures coexist in the same folder by label.
-- File names: `./<label>-<platform>.log`, `./<label>.session`, `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial-label>-vs-<holdout-label>.md`.
+- All output files (logs, session, filter file, per-route reports, comparison report) live in the **current working directory** — never in `/tmp`. Multiple captures coexist in the same folder by label and timestamp.
+- File names: `./<label>-<platform>-<YYYYMMDDThhmmssZ>.log` (capture; timestamp is UTC, embedded by start.sh so re-running with the same label doesn't clobber a previous log), `./<label>.session` (one in flight per label at a time), `./<label>-filtered.txt`, `./<label>-analysis.md`, `./compare-<trial-label>-vs-<holdout-label>.md`. The session file always carries the exact `log_file` path, so the agent reads the real path from there — never reconstructs it from `<label>-<platform>.log`.
 - All output is human-readable Markdown. This agent does **not** emit JSON to an orchestrator.
