@@ -64,7 +64,7 @@ and proceed directly to Phase 2b. The session file is not needed — it only han
 
 **Label hygiene.** If the filename follows the canonical pattern `<label>-<platform>-<YYYYMMDDThhmmssZ>.log` you can pull the label off the front. If it doesn't (e.g. `crash-repro.log`, `client-build-2.txt`), **ask the user** what kebab-case label to use — `$LABEL` becomes the stem of `./<label>-analysis.md` and (via Phase 3) of `./compare-<trial-label>-vs-<holdout-label>.md`, so it has to be a clean slug or those output filenames break.
 
-If two logs are given (a holdout route and a trial route), run Phase 2b for each in sequence, then Phase 3. Be explicit in your replies about which file you're analysing in which step.
+If two logs are given (a holdout route and a trial route), run Phase 2b for each in sequence, then Phase 3. Be explicit in your replies about which file you're analysing in which step. If a third `baseline` log (the store build) is also provided, analyse it too and fold it into Phase 3 as the fidelity anchor.
 
 ---
 
