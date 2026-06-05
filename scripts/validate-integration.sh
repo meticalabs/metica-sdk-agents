@@ -466,6 +466,14 @@ if [ -f "$API_MAP" ]; then
     UNSUPPORTED_HIT=0
 
     while IFS=$'\t' read -r MAP_PAT MAP_REPL MAP_KIND MAP_NOTES; do
+        # Strip trailing CR from each field so a Windows-edited TSV (CRLF line
+        # endings) doesn't silently break MAP_KIND comparisons by carrying a
+        # \r into the value (e.g. "rename\r" ≠ "rename").
+        MAP_PAT="${MAP_PAT%$'\r'}"
+        MAP_REPL="${MAP_REPL%$'\r'}"
+        MAP_KIND="${MAP_KIND%$'\r'}"
+        MAP_NOTES="${MAP_NOTES%$'\r'}"
+
         case "$MAP_PAT" in ''|\#*) continue ;; esac
         [ -n "$MAP_KIND" ] || continue
         [ "$MAP_KIND" = "exempt" ] && continue
@@ -478,6 +486,14 @@ if [ -f "$API_MAP" ]; then
 
         while IFS= read -r f; do
             [ -n "$f" ] || continue
+            # Fast pre-check: if the literal pattern isn't even in the raw
+            # file, the cleaned source can't contain it either. Skip the
+            # awk call for the vast majority of files in a large project.
+            # (Worst case the pattern is only inside a comment/string — then
+            # the cleaned pass below finds nothing and we don't emit a row,
+            # same outcome as before, just with an extra grep we'd have done
+            # anyway.)
+            grep -qF -- "$MAP_PAT" "$f" 2>/dev/null || continue
             matches="$(clean_source "$f" 2>/dev/null | grep -nF -- "$MAP_PAT" 2>/dev/null || true)"
             [ -z "$matches" ] && continue
             while IFS= read -r m; do
@@ -525,6 +541,13 @@ if [ -f "$API_MAP" ]; then
 
     [ "$REPLACEABLE_HIT" = "0" ]  && add_check "max_api_use_metica"  "" "PASS" "No MaxSdk.* calls require rewriting to MeticaSdk equivalents."
     [ "$UNSUPPORTED_HIT" = "0" ]  && add_check "max_api_unsupported" "" "PASS" "No MaxSdk.* calls without a MeticaSdk equivalent found."
+else
+    # If the API map is missing (packaging error / partial checkout), the
+    # MaxSdk surface check can't run. Emit explicit WARN rows for both
+    # rules so the absence is visible in the report rather than silently
+    # skipped — the contract is that these rules always appear.
+    add_check "max_api_use_metica"  "" "WARN" "MaxSdk↔MeticaSdk API map missing at $API_MAP; surface check skipped (rule will resume once the map is restored)."
+    add_check "max_api_unsupported" "" "WARN" "MaxSdk↔MeticaSdk API map missing at $API_MAP; surface check skipped."
 fi
 
 # DEFERRED to a future patch (known validator gaps):
