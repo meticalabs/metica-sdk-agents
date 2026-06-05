@@ -93,7 +93,7 @@ The Phase 1 script clears the device's main `logcat` buffer for a clean capture 
 | ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `@metica-sdk-agents:unity-compat-checker`   | Agent | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
 | `@metica-sdk-agents:unity-integrator`       | Agent | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
-| `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Two-phase: deterministic grep + in-context semantic adjudication (line-cited evidence). |
+| `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Reads the project's code and reasons about every rule (structural + behavioral), with line-cited evidence, plus a Unity batch compile. |
 | `@metica-sdk-agents:ad-log-monitor`         | Skill | Runtime QA on a connected device. Captures Android logcat / iOS idevicesyslog while QA plays, extracts ad unit IDs / network / revenue / lifecycle / Metica→MAX floor handoff, and compares holdout vs trial. |
 
 Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The `ad-log-monitor` skill is a separate runtime-QA workflow — invoke it directly when you have a build on a device.
@@ -116,9 +116,9 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Test suites cover: `compat`, `format`, `download`, `validator`, `citation`, `semantic`, `compile`, `codegen`, `autofix`, `input-validation`, `resolver`, and `log-monitor`.
+Test suites cover the four surviving scripts: `resolver`, `download`, `compile`, and `log-monitor`. The verification logic now lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
 
-A few suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent. On a fresh clone those rows skip cleanly; the synthetic-fixture suites all run.
+A couple of suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent.
 
 ## Repo layout
 
@@ -137,24 +137,17 @@ metica-sdk-agents/
 ├── skills/
 │   └── ad-log-monitor/
 │       └── SKILL.md                   # runtime ad-lifecycle verification + trial-vs-holdout comparison
-├── scripts/
+├── scripts/                           # only what an agent can't do in prose
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for agents + skill
-│   ├── detect-compat.sh
-│   ├── format-compat-report.sh
-│   ├── validate-integration.sh
 │   ├── compile-check.sh               # batch-mode Unity build behind the validator's compiles_cleanly rule
-│   ├── check-citation.sh              # deterministic anti-hallucination guard for the validator's semantic phase
-│   ├── validate-keys.sh               # input-validation + escaping helper called by the integrator at codegen time
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
-│   ├── git-snapshot.sh
 │   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
 │   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2a: stop capture + summary (analysis is the skill's job, Phase 2b)
-│   ├── lib/                           # shared helpers: clean-source.sh + awk (clean-cs, strip-comments, check-init-userid)
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/
-│   ├── max-metica-api-map.tsv         # machine-readable MaxSdk → MeticaSdk map; consumed by both validator + integrator
+│   ├── max-metica-api-map.tsv         # machine-readable MaxSdk → MeticaSdk map; read by both validator + integrator
 │   └── max-vs-metica-2.4.0-api.md     # narrative parity doc (keep in sync with the TSV)
-└── tests/                             # 12 suite scripts (+ run-all.sh) + fixtures + goldens
+└── tests/                             # 4 suite scripts (+ run-all.sh) + log-monitor fixture
 ```
 
 ## License

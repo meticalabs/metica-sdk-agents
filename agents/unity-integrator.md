@@ -9,7 +9,7 @@ model: sonnet
 
 Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
 
-Accepted sub-agent contract versions: `compat-checker/1.x`, `validator/1.x`. See `agents/contracts.md` for schemas and JSON extraction regex. (MaxSDK presence is derived inline during Step 2 discovery — there is no mode-detection sub-agent.)
+Accepted sub-agent contract versions: `compat-checker/1.x`, `validator/2.x`. See `agents/contracts.md` for schemas and JSON extraction regex. (MaxSDK presence is derived inline during Step 2 discovery — there is no mode-detection sub-agent.)
 
 ## Inputs from user
 
@@ -166,12 +166,9 @@ Rules for the rendering:
 
 Discovery produces everything later steps need — MaxSDK presence, the game's direct call sites, any Max wrapper, the ad formats, placements, and triggers (plus, in Step 2.5, the namespace + remote-config provider). It also replaces the old Step 5 call-site inventory. It is **one inline step** run via the Bash / Grep / Read tools — there is **no script and no JSON contract**. The findings accumulate into a **structured Markdown block** that is shown to the user in Step 3 and reused as input to codegen in Step 5. Some signals are inherently fuzzy (wrapper detection, trigger pattern); keeping them in prose is deliberate — the user confirms them in the Step 3 plan, so perfect precision is not required (and forcing them into JSON would make the fuzziness *look* precise, which is worse).
 
-Source the shared cleaned-source accessor once so every scan ignores matches inside string literals and comments — byte-identical to what the validator sees (the cleaned-source cache lands behind this same seam later; see RFC v1.0 OQ4):
+Scan only the game's own C# — exclude the vendored SDKs and Unity-managed dirs:
 
 ```bash
-source "$PLUGIN_DIR/scripts/lib/clean-source.sh"
-clean_source_selftest || { echo "clean-source accessor is broken; aborting." >&2; exit 1; }
-
 # Game C# only — exclude both vendored SDKs and Unity-managed dirs.
 game_cs() {
     find "$PROJECT/Assets" "$PROJECT/Packages" -type f -name '*.cs' 2>/dev/null \
@@ -180,14 +177,20 @@ game_cs() {
 }
 ```
 
+A raw `grep` for a `MaxSdk.` token also matches commented-out code and string literals. There
+is no awk stripper anymore: when a hit matters (the wrapper classification, a call site you'll
+rewrite), **Read the surrounding lines and confirm it's live code** before acting on it. The
+discovery findings are reviewed by the user in Step 3, so a stray comment match that slips
+through the first grep is caught there.
+
 #### Is MaxSDK present? (a discovered fact, not a mode)
 
-Compute `HAS_MAX` inline — any cleaned `MaxSdk.` reference in game code. This is the same signal the validator's checks are agnostic to; it is **not** a "mode," just a fact about the project that the rest of discovery and codegen adapt to:
+Compute `HAS_MAX` inline — any real `MaxSdk.` reference in game code. This is the same signal the validator's checks are agnostic to; it is **not** a "mode," just a fact about the project that the rest of discovery and codegen adapt to:
 
 ```bash
 HAS_MAX=false
 while IFS= read -r f; do
-    clean_source "$f" 2>/dev/null | grep -qF 'MaxSdk.' && { HAS_MAX=true; break; }
+    grep -qF 'MaxSdk.' "$f" && { HAS_MAX=true; break; }
 done < <(game_cs)
 
 # Corroborating signals (report-only context):
@@ -203,7 +206,7 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 
 | Signal | How | Goes in the block under |
 |---|---|---|
-| Direct `MaxSdk.*` call sites | `game_cs` → `clean_source` → `grep -nE '(MaxSdkBase\|MaxSdkCallbacks\|MaxSdk\|MaxCmpService)\.'` (covers every non-exempt namespace in `references/max-metica-api-map.tsv` — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`; **excludes** `MaxSdkUtils.` because the regex `MaxSdk\.` won't match `MaxSdkUtils.` — different character at position 7). For each hit, classify against the TSV: `rename` / `signature-change` → rewrite; `drop` → remove (collect for the Step 7 "Dropped — no Metica equivalent" section). Emit `<file>:<line>:<snippet> [kind]` | `Direct Max call sites` |
+| Direct `MaxSdk.*` call sites | `game_cs` → `grep -nE '(MaxSdkBase\|MaxSdkCallbacks\|MaxSdk\|MaxCmpService)\.'`, then Read each hit's context to drop comment/string matches (covers every non-exempt namespace in `references/max-metica-api-map.tsv` — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`; **excludes** `MaxSdkUtils.` because the regex `MaxSdk\.` won't match `MaxSdkUtils.` — different character at position 7). For each hit, classify against the TSV: `rename` / `signature-change` → rewrite; `drop` → remove (collect for the Step 7 "Dropped — no Metica equivalent" section). Emit `<file>:<line>:<snippet> [kind]` | `Direct Max call sites` |
 | **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test (OQ1):** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
 | **Multiple wrapper candidates (OQ2)** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
 | Formats in use | which of `LoadBanner` / `LoadInterstitial` / `LoadRewarded(Ad)` / `LoadMRec` appear | `Formats used` |
@@ -380,11 +383,21 @@ The user may correct any inference here ("no, the wrapper is `AdsService.cs`") �
 
 ### Step 4 — Git snapshot
 
+Tag the current state so the user has a one-command rollback. **If the working tree is
+dirty, stop** and tell the user to commit or stash first — do **not** auto-commit on their
+behalf, and do not tag over uncommitted work:
+
 ```bash
-bash "$PLUGIN_DIR/scripts/git-snapshot.sh" pre-metica-integration
+if [ -n "$(git -C "$PROJECT" status --porcelain 2>/dev/null)" ]; then
+    echo "Working tree is dirty. Commit or stash your changes first, then re-run." >&2
+    exit 1
+fi
+git -C "$PROJECT" tag -f pre-metica-integration
+echo "Tagged pre-metica-integration — roll back any time with: git reset --hard pre-metica-integration"
 ```
 
-If the working tree is dirty (script exits non-zero), stop and tell the user to commit or stash first. Do **not** auto-commit on their behalf.
+If `$PROJECT` is not a git repo, tell the user to `git init` (or run from inside their repo)
+so the rollback safety net exists before any file is written.
 
 ### Step 5 — Apply code changes
 
@@ -404,7 +417,7 @@ Propose rewrites that target the game's single `MeticaAdService` instance direct
 
 **Source of truth for rewrites and drops:** `references/max-metica-api-map.tsv`. Each row is `<MaxSdk-pattern>\t<MeticaSdk-replacement>\t<kind>\t<notes>` where `kind` is `rename` (direct swap), `signature-change` (Metica equivalent exists but caller needs adjustment — e.g. `SetBannerBackgroundColor` switches from `UnityEngine.Color` to a hex string), `drop` (no Metica equivalent — remove the call and surface it in Step 7), or `exempt` (`MaxSdkUtils.*`). The validator's `max_api_use_metica` and `max_api_unsupported` rules consume the same file — the integrator and validator stay in lockstep that way. When a `drop` row matches and the user approves, **remove the call** during the rewrite pass; collect the list and surface it in Step 7 under a "Dropped — no Metica equivalent" section so the user can decide whether to lose the feature or keep a Max-only code path. The narrative form of the TSV lives in `references/max-vs-metica-2.4.0-api.md`.
 
-Use the Bash tool with `grep`, piped through `clean-cs.awk` to ignore matches inside string literals and comments. There is no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
+Use the Bash tool with `grep` to locate candidates, then Read each hit's surrounding lines to drop matches inside comments and string literals. There is no awk stripper and no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
 
 `ADAPTER_FOLDER` is the adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). It must be project-relative and start with `Assets/`. If the user passed an absolute path that begins with `$PROJECT/`, strip the prefix; reject any other absolute path or any path containing `..` segments (do **not** silently use a path outside the project root).
 
@@ -428,8 +441,7 @@ scan_max_callsites() {
         | grep -v -e "/MaxSdk/" -e "/MeticaSdk/" -e "/$ADAPTER_REL/" \
                   -e "/PackageCache/" -e "/Library/" -e "/Temp/" -e "/obj/" \
         | while IFS= read -r f; do
-            awk -f "$PLUGIN_DIR/scripts/lib/clean-cs.awk" "$f" \
-              | grep -nE 'MaxSdk(\.|Callbacks\.)' \
+            grep -nE 'MaxSdk(\.|Callbacks\.)' "$f" \
               | sed "s|^|${f#$project/}:|"
           done
 }
@@ -437,7 +449,7 @@ scan_max_callsites() {
 scan_max_callsites "$PROJECT"
 ```
 
-For each hit (lines emitted as `<relative_path>:<line>:<cleaned_snippet>`), Read enough surrounding context to assign a **category**:
+For each hit (lines emitted as `<relative_path>:<line>:<snippet>`), **Read enough surrounding context** to (a) confirm it is live code and not a comment/string match, and (b) assign a **category**:
 
 - **`bootstrap`** — `MaxSdk.SetSdkKey(...)`, `MaxSdk.InitializeSdk()`, `MaxSdk.SetHasUserConsent(...)`, `MaxSdk.SetDoNotSell(...)`. **Propose the bootstrap rewrite below in the SAME file** where the user's Max init lives today (so privacy ordering is enforceable by the validator's `privacy_before_init` rule).
 - **`method_call`** — `MaxSdk.LoadInterstitial`, `ShowInterstitial`, `LoadBanner`, `ShowBanner`, `HideBanner`, `DestroyBanner`, `CreateBanner`, `LoadRewardedAd`, `IsRewardedAdReady`, `ShowRewardedAd`, `IsInterstitialReady`. Simple receiver swap (plus the rewarded name remap: `LoadRewardedAd → LoadRewarded`, etc.).
@@ -505,9 +517,9 @@ Event-name table (Max → Metica):
 4. After every file edit, re-scan **only the file just edited** to confirm the callsite is gone (or recategorize remaining ones):
 
     ```bash
-    awk -f "$PLUGIN_DIR/scripts/lib/clean-cs.awk" "<edited_file>" \
-      | grep -nE 'MaxSdk(\.|Callbacks\.)' || echo "OK: no MaxSdk callsites remain in <edited_file>"
+    grep -nE 'MaxSdk(\.|Callbacks\.)' "<edited_file>" || echo "OK: no MaxSdk callsites remain in <edited_file>"
     ```
+    If a match remains, Read it to confirm whether it's a live call still needing a rewrite or just a comment/string.
 5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
 
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
@@ -526,17 +538,24 @@ NAMESPACE="<resolved namespace>"              # dominant + .Metica, else (empty)
 FORMATS="<formats the game actually uses>"   # detected from the Max call sites (Step 5 scan); subset of {banner, interstitial, rewarded, mrec}
 ```
 
-**Input validation + escaping** — call `scripts/validate-keys.sh --type=string-literal` for every key (API_KEY, APP_ID, MAX_SDK_KEY). The helper rejects empty values and control chars and emits the C#-escaped form. Exit non-zero on failure; do not write any file. `USER_ID_EXPR` is not run through the string-literal escaper — it is a C# *expression* embedded verbatim (e.g. `SystemInfo.deviceUniqueIdentifier`), not a string literal.
+**Input validation + escaping (inline)** — each key (API_KEY, APP_ID, MAX_SDK_KEY) is embedded as a C# string literal, so validate and escape it before substituting: **reject** an empty value or one containing a control char (newline / CR / tab), and **escape** `\` → `\\` then `"` → `\"`. If any key is invalid, stop and ask the user — do not write any file. `USER_ID_EXPR` is **not** escaped — it is a C# *expression* embedded verbatim (e.g. `SystemInfo.deviceUniqueIdentifier`), not a string literal.
 
 ```bash
-API_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$API_KEY")"     || exit 1
-APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$APP_ID")"      || exit 1
-MAX_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$MAX_SDK_KEY")" || exit 1
+esc_cs_literal() {  # reject empty/control chars, emit C#-escaped form
+    case "$1" in
+        "") echo "empty key value" >&2; return 1 ;;
+        *[$'\n\r\t']*) echo "key contains a control char" >&2; return 1 ;;
+    esac
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+API_KEY_ESC="$(esc_cs_literal "$API_KEY")"   || exit 1
+APP_ID_ESC="$(esc_cs_literal  "$APP_ID")"    || exit 1
+MAX_KEY_ESC="$(esc_cs_literal "$MAX_SDK_KEY")" || exit 1
 ```
 
 Then generate:
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (from `validate-keys.sh`), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<MAX_KEY_ESC>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped via `esc_cs_literal`), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<MAX_KEY_ESC>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
 
 2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them).
 
@@ -572,14 +591,12 @@ NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" be
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
 ```
 
-**Input validation + escaping** — the agent **must** call `scripts/validate-keys.sh` for every key it embeds. The helper rejects empty values and control chars (newline / CR / tab) and emits the C#-escaped form on stdout. Exit non-zero on any failure; do not write any file.
+**Input validation + escaping (inline)** — validate and escape every key the agent embeds, using the same `esc_cs_literal` helper as the Max-present path: reject an empty value or a control char (newline / CR / tab); escape `\` → `\\` then `"` → `\"`. Stop and ask the user on any failure; do not write any file.
 
 ```bash
-API_KEY_ESC="$(bash "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$API_KEY")" || exit 1
-APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal "$APP_ID")"  || exit 1
+API_KEY_ESC="$(esc_cs_literal "$API_KEY")" || exit 1
+APP_ID_ESC="$(esc_cs_literal  "$APP_ID")"  || exit 1
 ```
-
-`tests/run-input-validation-tests.sh` exercises the helper's invariants (empty rejection, control-char rejection, `\` and `"` escape, `&`/`/` preservation, injection-resistance). Do not duplicate the escape logic in the agent's reasoning — call the helper.
 
 **Resolved namespace rule** (applies whether or not MaxSDK is present, per Step 2.5):
 
@@ -596,7 +613,7 @@ APP_ID_ESC="$(bash  "$PLUGIN_DIR/scripts/validate-keys.sh" --type=string-literal
 
 **File to generate** (under `$ADAPTER_FOLDER`):
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (from `validate-keys.sh`) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. The result is a single self-initializing `MonoBehaviour` (mirrors the docs.metica.com example): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, `OnAdShowFailed`-recovery, and docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`); banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag and no app-side retry. Reference shape (the actual template; mirrored by `tests/run-codegen-validator-tests.sh`'s `emit_standalone`):
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped via `esc_cs_literal`) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. The result is a single self-initializing `MonoBehaviour` (mirrors the docs.metica.com example): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, `OnAdShowFailed`-recovery, and docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`); banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag and no app-side retry. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
@@ -640,17 +657,16 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 
 ### Step 6 — Validator (fresh subagent context, always)
 
-Invoke `@agent-unity-validator` with the project path. Validation is uniform — it does not take or depend on any mode. The wrapped bash command:
+Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
+share your reasoning with it). Validation is uniform — it does not take or depend on any
+mode. There is no validation script to call directly; the validator reasons over the code
+and returns one `validator/2.0.0` JSON block.
 
-```bash
-bash "$PLUGIN_DIR/scripts/validate-integration.sh" --project="$PROJECT"
-```
-
-Extract the JSON and read `.status`. The validator now enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
+Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
-The **validator stays read-only** (Review-OQ B): it lints and emits `validator/1.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default.
+The **validator stays read-only** (Review-OQ B): it lints and emits `validator/2.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
 
 Run the loop on `status: FAIL`, **max 3 iterations**:
 

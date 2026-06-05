@@ -1,3 +1,0 @@
-fixture	rule	grep_shadow	semantic_expected	note
-indirect-reload-good	rewarded_reload_on_hidden	PASS	PASS	Reload via helper (OnAdHidden->RestartRewardedCycle->LoadRewarded); semantic confirms with a 3-hop chain.
-dead-reload-bad	rewarded_reload_on_hidden	PASS	FAIL	Grep false-positive: reload is dead code behind a const-false flag, never reachable at runtime.
