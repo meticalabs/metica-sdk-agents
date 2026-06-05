@@ -89,7 +89,9 @@ ones grep gets wrong):
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
 
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
-`<pattern>\t<replacement>\t<kind>\t<notes>`). For each `MaxSdk.*` call site in the project:
+`<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
+**all non-exempt namespaces** — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`
+(the same set the integrator rewrites; `MaxSdkUtils.*` is exempt). For each such call site:
 
 - `max_api_use_metica` — for rows with `kind=rename` or `signature-change`: emit one row per
   match. **FAIL** in any file that also references `MeticaSdk.` (Metica owns init, so the

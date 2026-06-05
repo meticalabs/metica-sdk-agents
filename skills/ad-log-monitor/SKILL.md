@@ -365,7 +365,7 @@ Once the file is written, summarise to the user: which formats appeared, headlin
 
 ### 2. Build the side-by-side delta table (per format observed in either run)
 
-| Metric | Holdout | Trial | Δ | Baseline* |
+| Metric | Holdout | Trial | Δ | Baseline |
 |---|---|---|---|---|
 | Load requests | … | … | … | … |
 | Fill rate (Loaded / Loads) | …% | …% | … | …% |
