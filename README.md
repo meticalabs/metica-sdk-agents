@@ -118,7 +118,7 @@ bash tests/run-all.sh
 
 Test suites cover the four surviving scripts: `resolver`, `download`, `compile`, and `log-monitor`. The verification logic now lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
 
-A couple of suites probe a sibling project under `../max-agent-test/DemoApp` for "real-world" assertions and silently skip when absent.
+The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-2.4.0.unitypackage` and silently skips when it's absent; the other three run on any clean clone.
 
 ## Repo layout
 

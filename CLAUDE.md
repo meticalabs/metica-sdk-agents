@@ -27,8 +27,8 @@ suites. The verification logic moved into agent prose, which is reviewed by the 
 time rather than golden-tested, so the old `compat` / `format` / `validator` / `citation` /
 `semantic` / `codegen` / `autofix` / `input-validation` suites and their fixtures/goldens were
 removed. Tests are plain bash assertions against `tests/fixtures/` (now just `log-monitor/`).
-No framework, no install. Suites that probe a sibling `../max-agent-test/DemoApp` skip silently
-when it's absent.
+No framework, no install. The `download` suite skips silently when its local SDK build
+(`../Metica SDK builds/MeticaSdk-2.4.0.unitypackage`) is absent; the other three always run.
 
 ## Architecture
 
