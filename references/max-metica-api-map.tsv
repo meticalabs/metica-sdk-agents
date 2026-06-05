@@ -1,0 +1,206 @@
+# max-metica-api-map.tsv — machine-readable source of truth for the MaxSdk ↔
+# MeticaSdk API surface. Drives unity-validator (scripts/validate-integration.sh)
+# and unity-integrator (codegen rewrite + drop pass) so the two stay in lockstep.
+# The narrative form of this map lives in references/max-vs-metica-2.4.0-api.md;
+# keep them in sync when the SDK bumps.
+#
+# Columns (tab-delimited):
+#   1. pattern      — literal grep -F substring to find in user C# source
+#                     (typically `MaxSdk.Method(` with the open paren, or the
+#                     event identifier `MaxSdkCallbacks.X.OnYEvent`).
+#   2. replacement  — the MeticaSdk equivalent the user should write instead,
+#                     or `-` for `drop` rows.
+#   3. kind         — one of:
+#                       rename            — direct name swap; signature compatible
+#                       signature-change  — Metica equivalent exists but the
+#                                           caller needs adjusting (param type,
+#                                           dropped callback, etc.); validator
+#                                           still flags but emits a TODO hint
+#                       drop              — no MeticaSdk equivalent; remove the
+#                                           call or isolate it behind a Max-only
+#                                           code path
+#                       exempt            — never flagged (stateless helpers
+#                                           like MaxSdkUtils.* mix-safe under a
+#                                           Metica integration)
+#   4. notes        — one-line human note; surfaces in validator evidence and
+#                     in the integrator's plan / report.
+#
+# Rules of the road:
+# - `MaxSdkUtils.*` is exempt globally — see the trailing exempt row.
+# - Patterns should be as specific as the call site allows; for methods, include
+#   the open paren so `MaxSdk.Load` doesn't accidentally match `MaxSdk.LoadBanner(`.
+# - Lines starting with `#` and blank lines are skipped by the loader.
+
+# ============================================================================
+# Initialization
+# ============================================================================
+MaxSdk.InitializeSdk(	-	drop	Metica owns the AppLovinSdk init; the integrator's own InitializeSdk call must be removed.
+MaxSdk.IsInitialized(	MeticaSdk.Ads.Max.IsSuccessfullyInitialized	rename
+MaxSdk.SetUserId(	MeticaInitConfig.UserId (set at init time)	signature-change	UserId moves into MeticaInitConfig constructor — not a runtime setter.
+MaxSdk.Version	MeticaSdk.Version	rename
+MaxSdkCallbacks.OnSdkInitializedEvent	Action<MeticaInitResponse> callback to MeticaSdk.Initialize	signature-change	Replace static event subscription with the callback parameter on MeticaSdk.Initialize.
+
+# ============================================================================
+# Privacy
+# ============================================================================
+MaxSdk.SetHasUserConsent(	MeticaSdk.Ads.SetHasUserConsent	rename
+MaxSdk.SetDoNotSell(	MeticaSdk.Ads.SetDoNotSell	rename
+MaxSdk.HasUserConsent(	MeticaSdk.Ads.Max.HasUserConsent	rename
+MaxSdk.IsUserConsentSet(	MeticaSdk.Ads.Max.IsUserConsentSet	rename
+MaxSdk.CmpService.ShowCmpForExistingUser(	MeticaSdk.Ads.Max.ShowCmpForExistingUser()	signature-change	MeticaSdk version drops the Action<MaxCmpError> callback parameter.
+
+# ============================================================================
+# Banners
+# ============================================================================
+MaxSdk.CreateBanner(	MeticaSdk.Ads.CreateBanner	signature-change	AdViewConfiguration → MeticaAdViewConfiguration (no IsAdaptive property).
+MaxSdk.LoadBanner(	MeticaSdk.Ads.LoadBanner	rename
+MaxSdk.ShowBanner(	MeticaSdk.Ads.ShowBanner	rename
+MaxSdk.HideBanner(	MeticaSdk.Ads.HideBanner	rename
+MaxSdk.DestroyBanner(	MeticaSdk.Ads.DestroyBanner	rename
+MaxSdk.SetBannerPlacement(	MeticaSdk.Ads.SetBannerPlacement	rename
+MaxSdk.StartBannerAutoRefresh(	MeticaSdk.Ads.StartBannerAutoRefresh	rename	Metica banners do NOT auto-refresh by default — call this explicitly after Show.
+MaxSdk.StopBannerAutoRefresh(	MeticaSdk.Ads.StopBannerAutoRefresh	rename
+MaxSdk.SetBannerBackgroundColor(	MeticaSdk.Ads.SetBannerBackgroundColor	signature-change	UnityEngine.Color → hex color string. Convert at the call site (ColorUtility.ToHtmlStringRGB).
+MaxSdk.SetBannerExtraParameter(	MeticaSdk.Ads.SetBannerExtraParameter	rename
+MaxSdk.SetBannerLocalExtraParameter(	MeticaSdk.Ads.SetBannerLocalExtraParameter	rename	APS bid signals (amazon_ad_response / amazon_ad_error) land here.
+MaxSdk.SetBannerCustomData(	MeticaSdk.Ads.SetBannerCustomData	rename
+MaxSdk.SetBannerWidth(	MeticaSdk.Ads.SetBannerWidth	rename
+MaxSdk.UpdateBannerPosition(	-	drop	No MeticaSdk equivalent. Must destroy and recreate the banner to reposition.
+MaxSdk.GetBannerLayout(	-	drop	No MeticaSdk equivalent for querying banner Rect.
+
+# ============================================================================
+# MRECs (note casing change: MRec → Mrec)
+# ============================================================================
+MaxSdk.CreateMRec(	MeticaSdk.Ads.CreateMrec	signature-change	Casing change (MRec → Mrec). AdViewConfiguration → MeticaAdViewConfiguration.
+MaxSdk.LoadMRec(	MeticaSdk.Ads.LoadMrec	rename	Casing change.
+MaxSdk.ShowMRec(	MeticaSdk.Ads.ShowMrec	rename	Casing change.
+MaxSdk.HideMRec(	MeticaSdk.Ads.HideMrec	rename	Casing change.
+MaxSdk.DestroyMRec(	MeticaSdk.Ads.DestroyMrec	rename	Casing change.
+MaxSdk.SetMRecPlacement(	MeticaSdk.Ads.SetMrecPlacement	rename	Casing change.
+MaxSdk.StartMRecAutoRefresh(	MeticaSdk.Ads.StartMrecAutoRefresh	rename	Casing change.
+MaxSdk.StopMRecAutoRefresh(	MeticaSdk.Ads.StopMrecAutoRefresh	rename	Casing change.
+MaxSdk.SetMRecExtraParameter(	MeticaSdk.Ads.SetMrecExtraParameter	rename	Casing change.
+MaxSdk.SetMRecLocalExtraParameter(	MeticaSdk.Ads.SetMrecLocalExtraParameter	rename	Casing change.
+MaxSdk.SetMRecCustomData(	MeticaSdk.Ads.SetMrecCustomData	rename	Casing change.
+MaxSdk.UpdateMRecPosition(	-	drop	No MeticaSdk equivalent.
+MaxSdk.GetMRecLayout(	-	drop	No MeticaSdk equivalent.
+
+# ============================================================================
+# Interstitials
+# ============================================================================
+MaxSdk.LoadInterstitial(	MeticaSdk.Ads.LoadInterstitial	rename	MeticaSdk also offers LoadInterstitial(adUnitId, MeticaAdConfig?) with bid-floor override.
+MaxSdk.IsInterstitialReady(	MeticaSdk.Ads.IsInterstitialReady	rename
+MaxSdk.ShowInterstitial(	MeticaSdk.Ads.ShowInterstitial	rename
+MaxSdk.SetInterstitialExtraParameter(	MeticaSdk.Ads.SetInterstitialExtraParameter	rename	Re-apply after each ad creation — pre-creation calls land on a not-yet-created instance and are silently dropped.
+MaxSdk.SetInterstitialLocalExtraParameter(	MeticaSdk.Ads.SetInterstitialLocalExtraParameter	rename	APS bid signals land here. Re-apply after each load.
+
+# ============================================================================
+# Rewarded Ads (note renames: LoadRewardedAd → LoadRewarded, etc.)
+# ============================================================================
+MaxSdk.LoadRewardedAd(	MeticaSdk.Ads.LoadRewarded	rename	Method renamed (drops "Ad" suffix). Also offers LoadRewarded(adUnitId, MeticaAdConfig?).
+MaxSdk.IsRewardedAdReady(	MeticaSdk.Ads.IsRewardedReady	rename	Method renamed.
+MaxSdk.ShowRewardedAd(	MeticaSdk.Ads.ShowRewarded	rename	Method renamed.
+MaxSdk.SetRewardedAdExtraParameter(	MeticaSdk.Ads.SetRewardedAdExtraParameter	rename	Re-apply after each load.
+MaxSdk.SetRewardedAdLocalExtraParameter(	MeticaSdk.Ads.SetRewardedAdLocalExtraParameter	rename	APS bid signals land here. Re-apply after each load.
+
+# ============================================================================
+# App Open Ads — NOT SUPPORTED by MeticaSdk
+# ============================================================================
+MaxSdk.LoadAppOpenAd(	-	drop	App Open Ads not supported in MeticaSdk 2.4.0. Remove or keep in a Max-only path.
+MaxSdk.IsAppOpenAdReady(	-	drop	App Open Ads not supported.
+MaxSdk.ShowAppOpenAd(	-	drop	App Open Ads not supported.
+MaxSdk.SetAppOpenAdExtraParameter(	-	drop	App Open Ads not supported.
+MaxSdk.SetAppOpenAdLocalExtraParameter(	-	drop	App Open Ads not supported.
+
+# ============================================================================
+# Settings / Configuration
+# ============================================================================
+MaxSdk.SetMuted(	MeticaSdk.Ads.Max.SetMuted	rename
+MaxSdk.IsMuted(	MeticaSdk.Ads.Max.IsMuted	rename
+MaxSdk.SetExtraParameter(	MeticaSdk.Ads.Max.SetExtraParameter	rename	Global MAX param. Per-format goes through MeticaSdk.Ads.SetXxxExtraParameter.
+MaxSdk.SetVerboseLogging(	MeticaSdk.SetLogEnabled	rename	Different surface — MeticaSdk.* (not .Ads.*).
+MaxSdk.ShowMediationDebugger(	MeticaSdk.Ads.Max.ShowMediationDebugger	rename
+MaxSdk.ShowCreativeDebugger(	-	drop	No MeticaSdk equivalent.
+MaxSdk.SetCreativeDebuggerEnabled(	-	drop	No MeticaSdk equivalent.
+MaxSdk.SetTestDeviceAdvertisingIdentifiers(	-	drop	No MeticaSdk equivalent.
+MaxSdk.DisableStubAds(	-	drop	No MeticaSdk equivalent (editor testing only).
+MaxSdk.IsVerboseLoggingEnabled(	-	drop	No MeticaSdk read-back for log state.
+MaxSdk.SetExceptionHandlerEnabled(	-	drop	No MeticaSdk equivalent.
+
+# ============================================================================
+# Privacy read-back (not in MeticaSdk)
+# ============================================================================
+MaxSdk.IsDoNotSell(	-	drop	No MeticaSdk equivalent for read-back.
+MaxSdk.IsDoNotSellSet(	-	drop	No MeticaSdk equivalent for read-back.
+MaxSdk.GetSdkConfiguration(	-	drop	No unified MeticaSdk config object; individual properties on MeticaSdk.Ads.Max.
+
+# ============================================================================
+# SDK information / utilities (not in MeticaSdk)
+# ============================================================================
+MaxSdk.GetAvailableMediatedNetworks(	-	drop	No MeticaSdk equivalent.
+MaxSdk.GetAdValue(	-	drop	No MeticaSdk equivalent for arbitrary ad-value lookup.
+MaxSdk.GetSafeAreaInsets(	-	drop	No MeticaSdk equivalent.
+MaxSdk.TrackEvent(	-	drop	MeticaSdk has its own event system (MeticaSdk.Events.*). Migrate or drop.
+MaxSdk.SetSegmentCollection(	-	drop	MaxSegmentCollection not supported in MeticaSdk; remove targeting via MAX segments.
+
+# ============================================================================
+# Callbacks / events — replaceable
+# ============================================================================
+MaxSdkCallbacks.Banner.OnAdLoadedEvent	MeticaAdsCallbacks.Banner.OnAdLoadSuccess	signature-change	Action<string,AdInfo> → Action<MeticaAd>.
+MaxSdkCallbacks.Banner.OnAdLoadFailedEvent	MeticaAdsCallbacks.Banner.OnAdLoadFailed	signature-change	Action<string,ErrorInfo> → Action<MeticaAdError> (adUnitId now lives on the error).
+MaxSdkCallbacks.Banner.OnAdClickedEvent	MeticaAdsCallbacks.Banner.OnAdClicked	signature-change	Action<string,AdInfo> → Action<MeticaAd>.
+MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent	MeticaAdsCallbacks.Banner.OnAdRevenuePaid	signature-change	Action<string,AdInfo> → Action<MeticaAd>.
+MaxSdkCallbacks.MRec.OnAdLoadedEvent	MeticaAdsCallbacks.Mrec.OnAdLoadSuccess	signature-change	Casing change + signature.
+MaxSdkCallbacks.MRec.OnAdLoadFailedEvent	MeticaAdsCallbacks.Mrec.OnAdLoadFailed	signature-change	Casing change + signature.
+MaxSdkCallbacks.MRec.OnAdClickedEvent	MeticaAdsCallbacks.Mrec.OnAdClicked	signature-change	Casing change + signature.
+MaxSdkCallbacks.MRec.OnAdRevenuePaidEvent	MeticaAdsCallbacks.Mrec.OnAdRevenuePaid	signature-change	Casing change + signature.
+MaxSdkCallbacks.Interstitial.OnAdLoadedEvent	MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess	signature-change	Loaded → LoadSuccess; signature change.
+MaxSdkCallbacks.Interstitial.OnAdLoadFailedEvent	MeticaAdsCallbacks.Interstitial.OnAdLoadFailed	signature-change	Signature change.
+MaxSdkCallbacks.Interstitial.OnAdDisplayedEvent	MeticaAdsCallbacks.Interstitial.OnAdShowSuccess	signature-change	Displayed → ShowSuccess; signature change.
+MaxSdkCallbacks.Interstitial.OnAdDisplayFailedEvent	MeticaAdsCallbacks.Interstitial.OnAdShowFailed	signature-change	DisplayFailed → ShowFailed; param order reversed (ad first, error second).
+MaxSdkCallbacks.Interstitial.OnAdHiddenEvent	MeticaAdsCallbacks.Interstitial.OnAdHidden	signature-change	Reload the next ad from this handler — Metica's continuous loader subscribes here too.
+MaxSdkCallbacks.Interstitial.OnAdClickedEvent	MeticaAdsCallbacks.Interstitial.OnAdClicked	signature-change
+MaxSdkCallbacks.Interstitial.OnAdRevenuePaidEvent	MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid	signature-change
+MaxSdkCallbacks.Rewarded.OnAdLoadedEvent	MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess	signature-change
+MaxSdkCallbacks.Rewarded.OnAdLoadFailedEvent	MeticaAdsCallbacks.Rewarded.OnAdLoadFailed	signature-change
+MaxSdkCallbacks.Rewarded.OnAdDisplayedEvent	MeticaAdsCallbacks.Rewarded.OnAdShowSuccess	signature-change
+MaxSdkCallbacks.Rewarded.OnAdDisplayFailedEvent	MeticaAdsCallbacks.Rewarded.OnAdShowFailed	signature-change	Param order reversed.
+MaxSdkCallbacks.Rewarded.OnAdHiddenEvent	MeticaAdsCallbacks.Rewarded.OnAdHidden	signature-change
+MaxSdkCallbacks.Rewarded.OnAdClickedEvent	MeticaAdsCallbacks.Rewarded.OnAdClicked	signature-change
+MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent	MeticaAdsCallbacks.Rewarded.OnAdRevenuePaid	signature-change
+MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent	MeticaAdsCallbacks.Rewarded.OnAdRewarded	signature-change	Simplified: Action<string,Reward,AdInfo> → Action<MeticaAd>; no Reward.Label / Reward.Amount.
+
+# ============================================================================
+# Callbacks / events — not in MeticaSdk
+# ============================================================================
+MaxSdkCallbacks.Banner.OnAdExpandedEvent	-	drop	No MeticaSdk equivalent. Alternative: use OnApplicationFocus to pause/resume gameplay.
+MaxSdkCallbacks.Banner.OnAdCollapsedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.MRec.OnAdExpandedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.MRec.OnAdCollapsedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Interstitial.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Rewarded.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.AppOpen.OnExpiredAdReloadedEvent	-	drop	App Open Ads not supported at all.
+MaxSdkCallbacks.OnApplicationStateChangedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Banner.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent (ad review creative ID surfacing).
+MaxSdkCallbacks.MRec.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Interstitial.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Rewarded.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.AppOpen.OnAdReviewCreativeIdGeneratedEvent	-	drop	App Open Ads not supported at all.
+
+# All App Open callbacks are unsupported (App Open Ads not in MeticaSdk).
+MaxSdkCallbacks.AppOpen.	-	drop	App Open Ads not supported in MeticaSdk 2.4.0.
+
+# ============================================================================
+# Misc — not in MeticaSdk
+# ============================================================================
+MaxSdkBase.InvokeEventsOnUnityMainThread	-	drop	No MeticaSdk equivalent for main-thread event control.
+MaxCmpService.HasSupportedCmp	-	drop	No MeticaSdk equivalent for CMP capability check.
+
+# ============================================================================
+# Exempt — never flagged
+# ============================================================================
+# MaxSdkUtils.* are stateless helper functions that don't depend on MaxSdk being
+# initialised. They mix-safe inside a Metica integration. The loader filters
+# exempt rows by `kind=exempt` before matching, so this row's position in the
+# file doesn't affect correctness — it's grouped here for readability.
+MaxSdkUtils.	-	exempt	Stateless helpers, mix-safe under Metica.

@@ -60,16 +60,16 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (using `gre
 
 ---
 
-## `validator/1.2.0`
+## `validator/1.3.0`
 
-The validator is a **two-phase** producer (see `agents/unity-validator.md`): a deterministic floor (`scripts/validate-integration.sh`, `engine: "grep"`) plus an in-context **semantic-adjudication** pass (`engine: "llm-adjudicator"`) that reasons over the project's code for the behavioral rules grep gets wrong. Both phases merge into one JSON object. 1.2.0 adds only **optional** fields (additive, backward-compatible) on top of 1.1.0 — consumers pinning `validator/1.x` need no change.
+The validator is a **two-phase** producer (see `agents/unity-validator.md`): a deterministic floor (`scripts/validate-integration.sh`, `engine: "grep"`) plus an in-context **semantic-adjudication** pass (`engine: "llm-adjudicator"`) that reasons over the project's code for the behavioral rules grep gets wrong. Both phases merge into one JSON object. **1.3.0** adds two new rules (`max_api_use_metica`, `max_api_unsupported`) driven by `references/max-metica-api-map.tsv`; the JSON shape is unchanged from 1.2.0, only the set of `checks[].rule` values grows. 1.2.0 added only **optional** fields (additive, backward-compatible) on top of 1.1.0 — consumers pinning `validator/1.x` need no change.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` is a non-blocking "could not verify" signal, used by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
-- `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
+- `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component should be treated by consumers as **opaque** — its format depends on how the validator was invoked (`--project=` with an absolute path yields absolute file paths; a relative `--project=` yields relative paths). Do not parse or join against it; pass it through to the user verbatim. Splitting on the **last** `:` is safe since neither component contains an unescaped colon.
 - `checks[].detail`: one-line message describing what was found.
 - `checks[].engine` *(1.2.0, optional)*: `"grep"` (deterministic floor) or `"llm-adjudicator"` (semantic pass). Absent ⇒ treat as `"grep"`.
 - `checks[].evidence` *(1.2.0, optional)*: array of `{ "file", "line", "snippet", "role" }` where `role` ∈ `entry` | `hop` | `terminal`. **Required on `llm-adjudicator` checks; a PASS on a behavioral rule needs ≥2 entries forming an entry→terminal chain.** Every citation is verified by `scripts/check-citation.sh` (opens the file at the cited line, confirms the snippet); a citation that does not resolve forces the rule to `FAIL`.
@@ -96,6 +96,8 @@ The validator is a **two-phase** producer (see `agents/unity-validator.md`): a d
 - `mrec_callbacks_subscribed` / `mrec_load_show_parity` — same shape as the banner/interstitial/rewarded rules. Note the SDK casing: `MeticaSdk.Ads.LoadMrec` / `MeticaAdsCallbacks.Mrec.*` (lowercase `r`).
 - `interstitial_show_failed_subscribed` / `rewarded_show_failed_subscribed` — FAIL when the format is used but `OnAdShowFailed` is not subscribed. Per the docs.metica.com Unity SDK example, both Interstitial and Rewarded subscribe `OnAdShowFailed` (signature `Action<MeticaAd, MeticaAdError>`). Without it the canonical reload-on-hidden loop stalls on the first show-failure: `OnAdHidden` does NOT fire after a show-fail, so the next ad is never loaded.
 - `compiles_cleanly` *(added in 1.1.0)* — the authoritative "does this integration actually build" check, delegated to `scripts/compile-check.sh` (Unity batch-mode — the only compiler that sees Unity's assemblies, asmdefs and scripting defines; a raw `csc`/`dotnet` pass would bury real errors in missing-`UnityEngine` noise, so we never fall back to it). **PASS** when the project compiles with no `error CS####`; **one FAIL per compile error** with `location` = `<file>:<line>` and `detail` carrying the `CS####: message` (this is what catches the docs-transcription class from issue #8 — unqualified nested enum, wrong property casing — without bespoke per-bug rules); **WARN** (non-blocking) when the check is skipped because no Unity editor could be located or `METICA_SKIP_COMPILE=1`, or when Unity ran but could not complete (license/timeout/crash). On by default; the plugin's own test suites export `METICA_SKIP_COMPILE=1` so synthetic fixtures never launch Unity.
+- `max_api_use_metica` *(added in 1.3.0)* — emits **one row per match** for every `MaxSdk.*` call site whose replacement is documented in `references/max-metica-api-map.tsv` with `kind=rename` or `kind=signature-change`. `level` is **FAIL** in any file that also references `MeticaSdk.` (the file is participating in the Metica integration; the direct `MaxSdk.*` call is dead because Metica owns the live `AppLovinSdk` instance) and **ADVISORY** in a pure-Max file (e.g. a side-by-side `AdManager.cs` wrapper). `detail` carries the suggested replacement and, for `signature-change` rows, a caller-adjustment hint. Single **PASS** row when no matches anywhere. **WARN** when the API map file is missing (packaging error).
+- `max_api_unsupported` *(added in 1.3.0)* — companion rule for `references/max-metica-api-map.tsv` rows with `kind=drop` (no MeticaSdk equivalent — App Open Ads, segment targeting, expanded/collapsed banner callbacks, etc.). Same FAIL/ADVISORY/PASS/WARN model as `max_api_use_metica`. `detail` advises removing the call or isolating it behind a Max-only code path. `MaxSdkUtils.*` is exempt globally (stateless helpers, mix-safe).
 
 **Status rule (shadow-aware, 1.2.0):** `status = "FAIL"` if top-level `error != null`, **or** if any check **whose `engine` is not `"llm-adjudicator"`** has `level: FAIL`. During the shadow phase `engine: "llm-adjudicator"` checks **never affect `status`** — even at `level: "FAIL"` — so a run may carry a semantic `FAIL` and still be `status: "PASS"` from the floor; that is intended (the semantic verdict is surfaced for calibration, not gating). `ADVISORY` and `WARN` never affect status. (At promotion to `validator/2.0.0` the qualifier is dropped and the semantic verdicts gate status like any floor check: `status = "FAIL"` if any check is `FAIL`.)
 
@@ -103,7 +105,7 @@ The validator is a **two-phase** producer (see `agents/unity-validator.md`): a d
 
 ```json
 {
-  "schema": "validator/1.2.0",
+  "schema": "validator/1.3.0",
   "status": "FAIL",
   "error": null,
   "engine_version": "semantic-2026-06-03",

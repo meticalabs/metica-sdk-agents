@@ -1,12 +1,12 @@
 #!/bin/bash
 # validate-integration.sh — verify a Unity project's MeticaSDK integration.
-# Emits JSON per the validator/1.2.0 schema (see agents/contracts.md).
+# Emits JSON per the validator/1.3.0 schema (see agents/contracts.md).
 #
 # This is PHASE 1 (the deterministic floor) of the validator. The behavioral
 # rules it emits (reload-on-hidden, show-ready-guard, ...) are grep-based and
 # remain authoritative during the semantic-adjudication SHADOW phase; the
 # validator agent runs Phase 2 (LLM, in-context) alongside and logs agreement.
-# See agents/unity-validator.md and agents/contracts.md (`validator/1.2.0`).
+# See agents/unity-validator.md and agents/contracts.md (`validator/1.3.0`).
 #
 # Usage: validate-integration.sh --project=<path>
 # Exit:  0 = PASS, 1 = FAIL, 2 = invocation/structural error (still JSON).
@@ -41,7 +41,7 @@ json_escape() {
 die_json() {
     local msg="$1"
     printf '{\n'
-    printf '  "schema": "validator/1.2.0",\n'
+    printf '  "schema": "validator/1.3.0",\n'
     printf '  "status": "FAIL",\n'
     printf '  "error": "%s",\n' "$(json_escape "$msg")"
     printf '  "warnings": [],\n'
@@ -443,6 +443,117 @@ if [ -x "$COMPILE_CHECK" ] || [ -f "$COMPILE_CHECK" ]; then
     esac
 fi
 
+# 12. MaxSdk API surface — TSV-driven check against references/max-metica-api-map.tsv
+# For each `MaxSdk.*` pattern in the map, scan user source. Emit one check row
+# per match, classified by file context:
+#   - file references `MeticaSdk.` somewhere → FAIL (the file is participating in
+#     the Metica integration; any direct MaxSdk.* call is dead because Metica
+#     owns the live AppLovinSdk instance)
+#   - file does NOT reference `MeticaSdk.` → ADVISORY (likely a side-by-side
+#     Max-wrapper file; the calls still no-op under Metica but the user may have
+#     a reason to keep them — surface as a hint, not a block)
+# `MaxSdkUtils.*` is exempt globally (stateless helpers, mix-safe).
+API_MAP="$PLUGIN_DIR/references/max-metica-api-map.tsv"
+if [ -f "$API_MAP" ]; then
+    # Set of files that contain a MeticaSdk. reference. Computed once.
+    METICA_AWARE_FILES="$(files_with 'MeticaSdk.')"
+
+    # Dedup key per (file:line:rule) so catch-all and specific rows in the TSV
+    # can't both fire on the same call site. First match (TSV order) wins.
+    SEEN_FILELINES=""
+
+    REPLACEABLE_HIT=0
+    UNSUPPORTED_HIT=0
+
+    while IFS=$'\t' read -r MAP_PAT MAP_REPL MAP_KIND MAP_NOTES; do
+        # Strip trailing CR from each field so a Windows-edited TSV (CRLF line
+        # endings) doesn't silently break MAP_KIND comparisons by carrying a
+        # \r into the value (e.g. "rename\r" ≠ "rename").
+        MAP_PAT="${MAP_PAT%$'\r'}"
+        MAP_REPL="${MAP_REPL%$'\r'}"
+        MAP_KIND="${MAP_KIND%$'\r'}"
+        MAP_NOTES="${MAP_NOTES%$'\r'}"
+
+        case "$MAP_PAT" in ''|\#*) continue ;; esac
+        [ -n "$MAP_KIND" ] || continue
+        [ "$MAP_KIND" = "exempt" ] && continue
+
+        case "$MAP_KIND" in
+            rename|signature-change) rule_name="max_api_use_metica" ;;
+            drop)                    rule_name="max_api_unsupported" ;;
+            *)                       continue ;;
+        esac
+
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            # Fast pre-check: if the literal pattern isn't even in the raw
+            # file, the cleaned source can't contain it either. Skip the
+            # awk call for the vast majority of files in a large project.
+            # (Worst case the pattern is only inside a comment/string — then
+            # the cleaned pass below finds nothing and we don't emit a row,
+            # same outcome as before, just with an extra grep we'd have done
+            # anyway.)
+            grep -qF -- "$MAP_PAT" "$f" 2>/dev/null || continue
+            matches="$(clean_source "$f" 2>/dev/null | grep -nF -- "$MAP_PAT" 2>/dev/null || true)"
+            [ -z "$matches" ] && continue
+            while IFS= read -r m; do
+                [ -z "$m" ] && continue
+                ln="$(printf '%s' "$m" | cut -d: -f1)"
+                case "$ln" in ''|*[!0-9]*) continue ;; esac
+
+                # Suppress MaxSdkUtils.* hits: a line like
+                #   MaxSdkUtils.GetAdaptiveBannerHeight(...)
+                # will grep-match a pattern that's `MaxSdk.` something-shorter
+                # only if our pattern is a true prefix; the TSV patterns all
+                # begin with `MaxSdk.` (with a `.` separator), so this won't
+                # actually trigger from `MaxSdkUtils.`. Defensive belt-and-
+                # braces: rewrite MaxSdkUtils. → sentinel in the matched line
+                # and re-test the pattern — if it still matches there's a real
+                # MaxSdk. call alongside the Utils call.
+                line_content="$(printf '%s' "$m" | cut -d: -f2-)"
+                stripped="$(printf '%s' "$line_content" | sed 's/MaxSdkUtils\./__UTILS__./g')"
+                printf '%s' "$stripped" | grep -qF -- "$MAP_PAT" || continue
+
+                key="$f:$ln:$rule_name"
+                # Fixed-string membership check. The earlier `case` form did
+                # glob matching, so a file path containing *, ?, [, or ]
+                # could either spuriously match (skipping a real finding) or
+                # fail to dedup. `grep -qF` treats the key literally.
+                grep -qF -- "|$key|" <<< "$SEEN_FILELINES" && continue
+                SEEN_FILELINES="${SEEN_FILELINES}|$key|"
+
+                level="ADVISORY"
+                if printf '%s\n' "$METICA_AWARE_FILES" | grep -qxF "$f"; then
+                    level="FAIL"
+                fi
+
+                case "$MAP_KIND" in
+                    rename)
+                        detail="$MAP_PAT — replace with $MAP_REPL.${MAP_NOTES:+ $MAP_NOTES}" ;;
+                    signature-change)
+                        detail="$MAP_PAT — replace with $MAP_REPL (signature change${MAP_NOTES:+: $MAP_NOTES})" ;;
+                    drop)
+                        detail="$MAP_PAT — no MeticaSdk equivalent. Remove or isolate in a Max-only code path.${MAP_NOTES:+ $MAP_NOTES}" ;;
+                esac
+                add_check "$rule_name" "$f:$ln" "$level" "$detail"
+
+                [ "$rule_name" = "max_api_use_metica" ]   && REPLACEABLE_HIT=1
+                [ "$rule_name" = "max_api_unsupported" ]  && UNSUPPORTED_HIT=1
+            done <<< "$matches"
+        done < "$CS_LIST"
+    done < "$API_MAP"
+
+    [ "$REPLACEABLE_HIT" = "0" ]  && add_check "max_api_use_metica"  "" "PASS" "No MaxSdk.* calls require rewriting to MeticaSdk equivalents."
+    [ "$UNSUPPORTED_HIT" = "0" ]  && add_check "max_api_unsupported" "" "PASS" "No MaxSdk.* calls without a MeticaSdk equivalent found."
+else
+    # If the API map is missing (packaging error / partial checkout), the
+    # MaxSdk surface check can't run. Emit explicit WARN rows for both
+    # rules so the absence is visible in the report rather than silently
+    # skipped — the contract is that these rules always appear.
+    add_check "max_api_use_metica"  "" "WARN" "MaxSdk↔MeticaSdk API map missing at $API_MAP; surface check skipped (rule will resume once the map is restored)."
+    add_check "max_api_unsupported" "" "WARN" "MaxSdk↔MeticaSdk API map missing at $API_MAP; surface check skipped."
+fi
+
 # DEFERRED to a future patch (known validator gaps):
 #   - mediation_info_passed:        Initialize call must pass MeticaMediationInfo(MAX, sdkKey), not null
 #   - load_while_showing (WARN):    flag LoadInterstitial/LoadRewarded invoked while an ad of the same
@@ -459,7 +570,7 @@ if printf '%s' "$CHECKS" | grep -q '"level": "FAIL"'; then STATUS="FAIL"; fi
 # ---- emit JSON --------------------------------------------------------------
 
 printf '{\n'
-printf '  "schema": "validator/1.2.0",\n'
+printf '  "schema": "validator/1.3.0",\n'
 printf '  "status": "%s",\n' "$STATUS"
 printf '  "error": null,\n'
 printf '  "warnings": [%s],\n' "$WARNINGS"
