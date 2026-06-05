@@ -207,8 +207,8 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 | Signal | How | Goes in the block under |
 |---|---|---|
 | Direct `MaxSdk.*` call sites | `game_cs` → `grep -nE '(MaxSdkBase\|MaxSdkCallbacks\|MaxSdk\|MaxCmpService)\.'`, then Read each hit's context to drop comment/string matches (covers every non-exempt namespace in `references/max-metica-api-map.tsv` — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`; **excludes** `MaxSdkUtils.` because the regex `MaxSdk\.` won't match `MaxSdkUtils.` — different character at position 7). For each hit, classify against the TSV: `rename` / `signature-change` → rewrite; `drop` → remove (collect for the Step 7 "Dropped — no Metica equivalent" section). Emit `<file>:<line>:<snippet> [kind]` | `Direct Max call sites` |
-| **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test (OQ1):** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
-| **Multiple wrapper candidates (OQ2)** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
+| **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test:** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
+| **Multiple wrapper candidates** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
 | Formats in use | which of `LoadBanner` / `LoadInterstitial` / `LoadRewarded(Ad)` / `LoadMRec` appear | `Formats used` |
 | Placement strings (with counts) | 2nd arg to `Show<Format>(adUnitId, "placement"…)`; record each distinct string **with its occurrence count** (e.g. `"level_complete" (3), "shop_continue" (1)`) so the "default placement" patch pass can pick the most-frequent | `Placement strings observed` |
 | Custom-data strings | 3rd arg to `Show<Format>(…)` | `Custom data observed` |
@@ -218,7 +218,7 @@ Remote-config provider + the gate around ad calls, and the dominant namespace, a
 
 #### The structured discovery block
 
-Assemble findings into a Markdown block with the anchors above (see the RFC v1.0 §4 worked example for the exact shape). This block is **not** a JSON contract — it is read by this same agent (to drive codegen) and by the user (in Step 3). MaxSDK presence appears as a discovered fact (`MaxSDK present: yes`), not as a question. Do **not** ask for confirmation here — that happens once, in the Step 3 plan preview.
+Assemble findings into a Markdown block with the anchors above. This block is **not** a JSON contract — it is read by this same agent (to drive codegen) and by the user (in Step 3). MaxSDK presence appears as a discovered fact (`MaxSDK present: yes`), not as a question. Do **not** ask for confirmation here — that happens once, in the Step 3 plan preview.
 
 ### Step 2.5 — Discovery (cont.): project patterns
 
@@ -287,7 +287,7 @@ Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NA
 
 This is the **only** gate before any file write. Present the discovery findings + the codegen plan, take one approval, and collect any value that would otherwise fail validation on the first run. Prefer Claude Code's plan mode (`EnterPlanMode`); if it is unavailable (tool absent or errors), present the same content under a `## Plan` heading and require an explicit `yes`/`y` before proceeding.
 
-Structure the preview in **two tiers** (OQ5) so the review-critical inferences can't be skimmed past:
+Structure the preview in **two tiers** so the review-critical inferences can't be skimmed past:
 
 **Tier 1 — one-line summary**, e.g.:
 
@@ -306,9 +306,9 @@ Confirm these inferences:
   - userId         = <ASK NOW — see below>
 ```
 
-If discovery found **more than one** wrapper candidate, list them here and require the user to pick one (OQ2) — never default silently.
+If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
 
-**Collect `USER_ID_EXPR` here (Review-OQ A).** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
+**Collect `USER_ID_EXPR` here.** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
 
 ```
 userId is currently unset (defaults to null, which the validator will reject).
@@ -474,15 +474,15 @@ Then generate:
 
 2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them).
 
-#### Post-template patch passes (conform codegen to the host — RFC v1.0 §6.2)
+#### Post-template patch passes (conform codegen to the host)
 
-After rendering the templates, apply a small, fixed set of **deterministic, named patch passes** parameterised by the Step 2 discovery findings. Each takes a file + a discovery field and produces one edit; they are **agent-applied** (the `Edit` tool) — not a template DSL, not a separate script. Per RFC Review-OQ C they are validated *indirectly*: the conformed output must still PASS the validator, so a botched patch surfaces as a validator FAIL. Apply only the passes whose trigger fired in discovery; skip the rest (a no-Max project fires none — there is no wrapper or observed placement to conform to). The templates' structural shape never changes — these only **add** host-conforming lines (per the directive "don't change the structure of the placeholder files, just add logic").
+After rendering the templates, apply a small, fixed set of **deterministic, named patch passes** parameterised by the Step 2 discovery findings. Each takes a file + a discovery field and produces one edit; they are **agent-applied** (the `Edit` tool) — not a template DSL, not a separate script. They are validated *indirectly*: the conformed output must still PASS the validator, so a botched patch surfaces as a validator FAIL. Apply only the passes whose trigger fired in discovery; skip the rest (a no-Max project fires none — there is no wrapper or observed placement to conform to). The templates' structural shape never changes — these only **add** host-conforming lines (per the directive "don't change the structure of the placeholder files, just add logic").
 
 | Pass | Trigger (from discovery) | Edit |
 |---|---|---|
 | **Mirror wrapper API** | a wrapper was detected | **Adjust** the orchestrator's `Show<Format>()` delegator to match the wrapper's public signature — keep **one** delegator per format, never a duplicate overload. The delegator already takes optional `placement`/`customData`; rename params or reorder to match the wrapper (e.g. wrapper `ShowInterstitial(string placement)` ↔ the existing `ShowInterstitial(string placement = null, …)`). A **delegate/`Action` param** (e.g. `onReward` on `ShowRewarded(string placement, Action onReward)`) cannot be threaded through the fire-and-forget `ShowRewarded` — wire it into the rewarded region's `OnRewardedReward` handler instead; if the mapping isn't a clean 1:1, **surface it in the Step 3 plan for the user to confirm, never silently drop it**. The game's existing call sites keep compiling against the same surface. |
 | **Default placement** | placement strings observed | Where the delegator would otherwise pass `null`, pass the **most-frequent observed placement** (from the Step 2 placement counts; ties broken by first-seen) instead — e.g. `_interstitial?.Show("level_complete")`. The per-format `Show(string placement = null, …)` already accepts it — no template change. |
-| **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness with §6.2.) |
+| **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness.) |
 | **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
@@ -576,7 +576,7 @@ Extract the JSON and read `.status`. The validator enforces credential hygiene (
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
-The **validator stays read-only** (Review-OQ B): it lints and emits `validator/2.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
+The **validator stays read-only**: it lints and emits `validator/2.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
 
 Run the loop on `status: FAIL`, **max 3 iterations**:
 
@@ -598,7 +598,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 
 `*_show_ready_guard` and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
-2. **Anchor re-check before every autofix edit (OQ3):** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
+2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
 3. **No autofix produces a net-new file** — autofixes only edit existing files. A missing file (e.g. `init_count` count 0) is always `surface`, never `autofix`.
 
