@@ -42,7 +42,7 @@ for cand in "${CLAUDE_PLUGIN_ROOT:-}" "${METICA_SDK_AGENTS_DIR:-}" \
     [ -n "$cand" ] && [ -f "$cand/scripts/resolve-plugin-dir.sh" ] || continue
     PLUGIN_DIR="$(bash "$cand/scripts/resolve-plugin-dir.sh" 2>/dev/null)" && [ -n "$PLUGIN_DIR" ] && break
 done
-[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Reinstall with the marketplace install (preferred) or set METICA_SDK_AGENTS_DIR." >&2; exit 1; }
+[ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Set METICA_SDK_AGENTS_DIR to the plugin path and retry." >&2; exit 1; }
 ```
 
 The loop searches known install locations for `resolve-plugin-dir.sh`, then runs it. The marketplace cache lives at `~/.claude/plugins/cache/*/metica-sdk-agents/<version>`, so the loop first tries the **version-sorted newest** cached copy (`ls … | sort -V | tail -1`) and keeps the raw cache glob as a fallback for hosts whose `sort` lacks `-V`. `$CLAUDE_PLUGIN_ROOT` is **not** reliably exported into an agent's bash environment, so it is only the first candidate, not the sole path. Once found, `resolve-plugin-dir.sh` self-verifies the root (it self-locates from its own script path, then falls back to `$METICA_SDK_AGENTS_DIR`, symlink targets, and known install paths). If the loop fails, abort — do not run scripts with relative paths.
@@ -257,57 +257,7 @@ The fallback chain for the generated files' namespace (applied in Step 5):
 
 Surface the chosen value in the detection report; the user can override via the `NAMESPACE` env var or in the Step 3 plan review.
 
-```bash
-detect_namespace() {
-    local project="$1"
-    local cs_files
-    cs_files=$(find "$project/Assets/Scripts" -type f -name '*.cs' 2>/dev/null)
-    [ -z "$cs_files" ] && return 0
-    local total
-    total=$(printf '%s\n' "$cs_files" | wc -l)
-    [ "$total" -eq 0 ] && return 0
-
-    # Per-file namespace (first declaration in each file, or empty).
-    local per_file
-    per_file=$(printf '%s\n' "$cs_files" | while IFS= read -r f; do
-        awk '/^[[:space:]]*namespace[[:space:]]+/ { sub(/^[[:space:]]*namespace[[:space:]]+/, ""); sub(/[[:space:]{;].*/, ""); print; exit }' "$f"
-    done | grep -v '^$' | sort)
-    [ -z "$per_file" ] && return 0
-
-    # Stage 1: an exact namespace that appears in >=50% of files wins.
-    local exact
-    exact=$(printf '%s\n' "$per_file" | uniq -c | sort -rn \
-        | awk -v total="$total" '{ if ($1*2 >= total) { sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); print; exit } }')
-    [ -n "$exact" ] && { printf '%s' "$exact"; return 0; }
-
-    # Stage 2: prefix fallback — derive every prefix of every per-file namespace,
-    # count how many files have each prefix, return the LONGEST prefix that
-    # covers >=50%. (Longest, not most-frequent: a 3-segment prefix shared by
-    # 50% beats a 1-segment prefix shared by 80%.)
-    printf '%s\n' "$per_file" | awk -v total="$total" '
-        {
-            ns = $0
-            # Emit each leading prefix: A, A.B, A.B.C, ...
-            split(ns, parts, ".")
-            acc = ""
-            for (i = 1; i <= length(parts); i++) {
-                acc = (i == 1) ? parts[i] : acc "." parts[i]
-                counts[acc]++
-            }
-        }
-        END {
-            best = ""; best_len = 0
-            for (p in counts) {
-                if (counts[p] * 2 < total) continue
-                if (length(p) > best_len) { best = p; best_len = length(p) }
-            }
-            if (best != "") print best
-        }'
-}
-detect_namespace "$PROJECT"
-```
-
-The snippet now implements both branches: an exact-namespace majority and a prefix-fallback. Manually verify the output against the user-visible project shape — perfect precision is not required since the user reviews the detected value in Step 3's plan before approval.
+To compute it, read the first `namespace` declaration from each `.cs` file under `Assets/Scripts/` (Grep for `^\s*namespace\s+` and Read the line). If one exact namespace covers ≥50% of the files, use it. Otherwise derive every leading prefix of each namespace (`A`, `A.B`, `A.B.C`, …), count how many files carry each, and pick the **longest** prefix that still covers ≥50% — longest, not most-frequent, so a 3-segment prefix shared by 50% beats a 1-segment prefix shared by 80%. Perfect precision isn't required: the user confirms the detected value in the Step 3 plan before anything is written.
 
 #### Secondary checks (inline at generation time)
 
@@ -423,37 +373,11 @@ Propose rewrites that target the game's single `MeticaAdService` instance direct
 
 Use the Bash tool with `grep` to locate candidates, then Read each hit's surrounding lines to drop matches inside comments and string literals. There is no awk stripper and no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
 
-`ADAPTER_FOLDER` is the adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). It must be project-relative and start with `Assets/`. If the user passed an absolute path that begins with `$PROJECT/`, strip the prefix; reject any other absolute path or any path containing `..` segments (do **not** silently use a path outside the project root).
+`ADAPTER_FOLDER` is the adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). Normalize it to a project-relative path (`ADAPTER_REL`): if the user passed an absolute path under `$PROJECT/`, strip that prefix; **reject** any other absolute path, any path containing a `..` segment, or an empty value (do **not** silently use a path outside the project root), and drop a trailing slash.
 
-```bash
-case "$ADAPTER_FOLDER" in
-    /*) ADAPTER_REL="${ADAPTER_FOLDER#$PROJECT/}"
-        case "$ADAPTER_REL" in
-            /*) echo "ADAPTER_FOLDER is outside the project root: $ADAPTER_FOLDER" >&2; exit 1 ;;
-        esac
-        ;;
-    *) ADAPTER_REL="$ADAPTER_FOLDER" ;;
-esac
-case "$ADAPTER_REL" in
-    *..*|"") echo "ADAPTER_FOLDER must be a project-relative path under Assets/" >&2; exit 1 ;;
-esac
-ADAPTER_REL="${ADAPTER_REL%/}"
+Scan the game's own `.cs` for direct Max usage: search every `.cs` under `Assets/` and `Packages/` — **excluding** `/MaxSdk/`, `/MeticaSdk/`, the adapter folder (`/$ADAPTER_REL/`), and `/PackageCache/`, `/Library/`, `/Temp/`, `/obj/` — for the regex `(MaxSdkBase|MaxSdkCallbacks|MaxSdk|MaxCmpService)\.`. Use the Grep tool, or a `grep -rnE` equivalent. (This is the same regex and exclusion set as the Step 2 discovery scan, so the two stay in lockstep; `MaxSdkUtils.*` is naturally excluded — no literal `.` follows `MaxSdk` there.)
 
-scan_max_callsites() {
-    local project="$1"
-    find "$project/Assets" "$project/Packages" -type f -name '*.cs' 2>/dev/null \
-        | grep -v -e "/MaxSdk/" -e "/MeticaSdk/" -e "/$ADAPTER_REL/" \
-                  -e "/PackageCache/" -e "/Library/" -e "/Temp/" -e "/obj/" \
-        | while IFS= read -r f; do
-            grep -nE '(MaxSdkBase|MaxSdkCallbacks|MaxSdk|MaxCmpService)\.' "$f" \
-              | sed "s|^|${f#$project/}:|"
-          done
-}
-
-scan_max_callsites "$PROJECT"
-```
-
-For each hit (lines emitted as `<relative_path>:<line>:<snippet>`), **Read enough surrounding context** to (a) confirm it is live code and not a comment/string match, and (b) assign a **category**:
+For each hit, **Read enough surrounding context** to (a) confirm it is live code and not a comment/string match, and (b) assign a **category**:
 
 - **`bootstrap`** — `MaxSdk.SetSdkKey(...)`, `MaxSdk.InitializeSdk()`, `MaxSdk.SetHasUserConsent(...)`, `MaxSdk.SetDoNotSell(...)`. **Propose the bootstrap rewrite below in the SAME file** where the user's Max init lives today (so privacy ordering is enforceable by the validator's `privacy_before_init` rule).
 - **`method_call`** — `MaxSdk.LoadInterstitial`, `ShowInterstitial`, `LoadBanner`, `ShowBanner`, `HideBanner`, `DestroyBanner`, `CreateBanner`, `LoadRewardedAd`, `IsRewardedAdReady`, `ShowRewardedAd`, `IsInterstitialReady`. Simple receiver swap (plus the rewarded name remap: `LoadRewardedAd → LoadRewarded`, etc.).
@@ -542,24 +466,11 @@ NAMESPACE="<resolved namespace>"              # dominant + .Metica, else (empty)
 FORMATS="<formats the game actually uses>"   # detected from the Max call sites (Step 5 scan); subset of {banner, interstitial, rewarded, mrec}
 ```
 
-**Input validation + escaping (inline)** — each key (API_KEY, APP_ID, MAX_SDK_KEY) is embedded as a C# string literal, so validate and escape it before substituting: **reject** an empty value or one containing a control char (newline / CR / tab), and **escape** `\` → `\\` then `"` → `\"`. If any key is invalid, stop and ask the user — do not write any file. `USER_ID_EXPR` is **not** escaped — it is a C# *expression* embedded verbatim (e.g. `SystemInfo.deviceUniqueIdentifier`), not a string literal.
-
-```bash
-esc_cs_literal() {  # reject empty/control chars, emit C#-escaped form
-    case "$1" in
-        "") echo "empty key value" >&2; return 1 ;;
-        *[$'\n\r\t']*) echo "key contains a control char" >&2; return 1 ;;
-    esac
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
-}
-API_KEY_ESC="$(esc_cs_literal "$API_KEY")"   || exit 1
-APP_ID_ESC="$(esc_cs_literal  "$APP_ID")"    || exit 1
-MAX_KEY_ESC="$(esc_cs_literal "$MAX_SDK_KEY")" || exit 1
-```
+**Input validation + escaping (inline)** — each key (API_KEY, APP_ID, MAX_SDK_KEY) is embedded as a C# string literal, so validate and escape it before substituting: **reject** an empty value or one containing a control char (newline / CR / tab), then **escape** `\` → `\\` first, then `"` → `\"` (backslash first so the quote-escaping backslashes aren't doubled). If any key is invalid, stop and ask the user — do not write any file. `USER_ID_EXPR` is **not** escaped — it is a C# *expression* embedded verbatim (e.g. `SystemInfo.deviceUniqueIdentifier`), not a string literal.
 
 Then generate:
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped via `esc_cs_literal`), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<MAX_KEY_ESC>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped as above), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<escaped MAX SDK key>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
 
 2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them).
 
@@ -595,12 +506,7 @@ NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" be
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
 ```
 
-**Input validation + escaping (inline)** — validate and escape every key the agent embeds, using the same `esc_cs_literal` helper as the Max-present path: reject an empty value or a control char (newline / CR / tab); escape `\` → `\\` then `"` → `\"`. Stop and ask the user on any failure; do not write any file.
-
-```bash
-API_KEY_ESC="$(esc_cs_literal "$API_KEY")" || exit 1
-APP_ID_ESC="$(esc_cs_literal  "$APP_ID")"  || exit 1
-```
+**Input validation + escaping (inline)** — validate and escape every key the agent embeds, exactly as in the Max-present path: reject an empty value or a control char (newline / CR / tab); escape `\` → `\\` first, then `"` → `\"`. Stop and ask the user on any failure; do not write any file.
 
 **Resolved namespace rule** (applies whether or not MaxSDK is present, per Step 2.5):
 
@@ -617,7 +523,7 @@ APP_ID_ESC="$(esc_cs_literal  "$APP_ID")"  || exit 1
 
 **File to generate** (under `$ADAPTER_FOLDER`):
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped via `esc_cs_literal`) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. The result is a single self-initializing `MonoBehaviour` (mirrors the docs.metica.com example): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, `OnAdShowFailed`-recovery, and docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`); banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag and no app-side retry. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. The result is a single self-initializing `MonoBehaviour` (mirrors the docs.metica.com example): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, `OnAdShowFailed`-recovery, and docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`); banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag and no app-side retry. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
