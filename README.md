@@ -53,6 +53,8 @@ The skill will pick the right phase from your prompt: a bare invocation starts a
 
 > "We'll run two captures so we can compare. First with the **holdout user** (control), then with the **trial user** (Metica active). On each run, play until you've seen roughly 5 interstitials and 5 rewarded ads. Don't change device, network, or app version between the two runs."
 
+**Optional baseline (recommended).** Holdout and trial are dev builds *you* provide; you can also capture a third `baseline` route on the **live App Store / Play Store build**. It's not a third A/B arm — it's a fidelity anchor that confirms your holdout dev-build reproduces production before anyone trusts the trial-vs-holdout numbers. The comparison treats it as context only, never as the pass/fail gate.
+
 **Minimal example.** In the main conversation, three turns end-to-end:
 
 ```

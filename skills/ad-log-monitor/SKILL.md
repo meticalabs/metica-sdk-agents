@@ -1,6 +1,6 @@
 ---
 name: ad-log-monitor
-description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle on a connected device (Android logcat / iOS idevicesyslog), and compare a holdout-user route against a trial-user route. Captures the log, then extracts ad unit IDs, network attribution, revenue per impression, lifecycle events, load strategy (timestamps), Metica→MAX floor handoff, and errors — and writes a per-route Markdown analysis. A trial-vs-holdout comparison produces a side-by-side verdict with the mandatory n=5 caveat. Use when the user wants to QA an ad integration, smoke-test trial vs holdout, capture logcat/syslog for ad events, analyse an existing ad log, or investigate Metica/AppLovin runtime errors. Trigger phrases include "start ad-log monitoring", "monitor logcat for ads", "capture ad events", "analyse this logcat", "stop and analyse the capture", "compare trial vs holdout", "ad lifecycle check".
+description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle on a connected device (Android logcat / iOS idevicesyslog), and compare a holdout-user route against a trial-user route. Captures the log, then extracts ad unit IDs, network attribution, revenue per impression, lifecycle events, load strategy (timestamps), Metica→MAX floor handoff, and errors — and writes a per-route Markdown analysis. A trial-vs-holdout comparison produces a side-by-side verdict with the mandatory n=5 caveat. Optionally also capture a **baseline** route — the live App Store / Play Store build — as a fidelity anchor that confirms the holdout dev-build reproduces production. Use when the user wants to QA an ad integration, smoke-test trial vs holdout, capture logcat/syslog for ad events, analyse an existing ad log, or investigate Metica/AppLovin runtime errors. Trigger phrases include "start ad-log monitoring", "monitor logcat for ads", "capture ad events", "capture the baseline", "analyse this logcat", "stop and analyse the capture", "compare trial vs holdout", "ad lifecycle check".
 ---
 
 # Metica Ad-Log Monitor
@@ -11,7 +11,7 @@ This skill verifies a Metica + AppLovin MAX integration from live device logs. T
 
 1. **Phase 1 — capture.** Kick off a background log capture on a connected device. *Scripted.*
 2. **Phase 2 — analyse one route.** Stop the capture, then read the log and produce a structured Markdown analysis for one route (trial or holdout). *Stop is scripted; the analysis itself is your job.*
-3. **Phase 3 — compare trial vs holdout.** Once both per-route analyses exist, write a comparison report. *Entirely prose.*
+3. **Phase 3 — compare trial vs holdout.** Once both per-route analyses exist, write a comparison report. If an optional `baseline` route (the live store build) was also captured, fold it in as a fidelity anchor. *Entirely prose.*
 
 ## Why Phase 2 is prose, not a deterministic script
 
@@ -74,7 +74,13 @@ Tell the user the **two-route protocol up front** so they understand what they'r
 
 > "We'll run two captures so we can compare. First with the **holdout user** (control), then with the **trial user** (Metica active). On each run, please play until you've seen roughly **5 interstitials and 5 rewarded ads**. Don't change device, network, or app version between the two runs."
 
-If the user hasn't yet picked which route they're starting with, ask. Convention: label = `holdout-user` or `trial-user` (kebab-case). If they want different labels (e.g. `cohort-a` / `cohort-b`), accept them — only the comparison phase cares about the names matching.
+**Optional but highly recommended — a third `baseline` capture.** Suggest (don't require) that the user also capture the **live store build** as a baseline:
+
+> "Optionally — and I'd recommend it — also run a third capture on the **production build installed from the App Store / Play Store**, labelled `baseline`. The holdout and trial are dev builds you provide; the baseline is what real users actually run. Capturing it lets me check that your holdout build faithfully reproduces production before we trust any trial-vs-holdout numbers. Same device, same network, ~5 of each format."
+
+Why it's worth it: holdout and trial share build provenance (both are dev builds), so they compare cleanly — but that says nothing about whether the *holdout itself* matches what ships. The baseline is the production anchor. It is **not** a third A/B arm: it's a different build (store signing, possibly a different app version, likely no Metica), so Phase 3 uses it only as a **fidelity/context check**, never as the pass/fail gate. If the user declines, proceed with the two-route flow unchanged.
+
+If the user hasn't yet picked which route they're starting with, ask. Convention: label = `holdout-user`, `trial-user`, or `baseline` (kebab-case). If they want different labels (e.g. `cohort-a` / `cohort-b`), accept them — only the comparison phase cares about the names matching.
 
 For iOS, ask whether they want to filter by app process name (`--app="App Name"`). Default to **no filter** — `idevicesyslog -p` is case-sensitive on the exact process name and losing logs to a name mismatch is worse than carrying extra lines and filtering at analysis time.
 
@@ -355,20 +361,28 @@ Once the file is written, summarise to the user: which formats appeared, headlin
 
 ### 1. Read both per-route analyses
 
-`./holdout-user-analysis.md` and `./trial-user-analysis.md` (or whatever labels the user picked). These contain the per-format stats, networks, revenue, floor handoff, load strategy, and errors that Phase 2b produced.
+`./holdout-user-analysis.md` and `./trial-user-analysis.md` (or whatever labels the user picked). These contain the per-format stats, networks, revenue, floor handoff, load strategy, and errors that Phase 2b produced. **If a `./baseline-analysis.md` (or the user's baseline label) also exists, read it too** — it feeds the fidelity check in Step 3a, not the trial-vs-holdout verdict.
 
 ### 2. Build the side-by-side delta table (per format observed in either run)
 
-| Metric | Holdout | Trial | Δ |
-|---|---|---|---|
-| Load requests | … | … | … |
-| Fill rate (Loaded / Loads) | …% | …% | … |
-| Show rate (Shows / Loaded) | …% | …% | … |
-| Avg revenue per impression | $… | $… | … |
-| Reload latency (median Hidden→next loadAd) | …ms | …ms | … |
-| Top winning network | … | … | … |
+| Metric | Holdout | Trial | Δ | Baseline* |
+|---|---|---|---|---|
+| Load requests | … | … | … | … |
+| Fill rate (Loaded / Loads) | …% | …% | … | …% |
+| Show rate (Shows / Loaded) | …% | …% | … | …% |
+| Avg revenue per impression | $… | $… | … | $… |
+| Reload latency (median Hidden→next loadAd) | …ms | …ms | … | …ms |
+| Top winning network | … | … | … | … |
 
-If a metric isn't available for one of the routes (e.g. revenue wasn't logged in this build), say so — don't fabricate.
+The `Δ` column is **trial vs holdout** — that is the comparison. *Include the `Baseline` column only when a baseline route was captured; otherwise drop it.* If a metric isn't available for one of the routes (e.g. revenue wasn't logged in this build), say so — don't fabricate.
+
+### 2a. Baseline fidelity check (only when a baseline route exists)
+
+The baseline is the **production store build** — a different build from the dev holdout/trial (store signing, possibly a different app version, likely no Metica). It is a context anchor, **not** a control arm. Use it to answer one question: *does the holdout dev-build reproduce production?*
+
+- If holdout's fill rate / top networks / revenue-per-impression **track** the baseline → the harness is faithful; trust the trial-vs-holdout verdict.
+- If holdout **diverges sharply** from baseline → **FLAG it as a build/harness concern, not a Metica effect**: the holdout dev-build isn't reproducing production, so the A/B comparison rests on a shaky control. Recommend reconciling the holdout build with production before believing the numbers.
+- Always caveat that baseline gaps can be **build/version differences** (different app version, store vs sideloaded, no Metica) rather than real behavioral deltas. Never let a baseline number flip the trial-vs-holdout verdict.
 
 ### 3. Apply verdict rules (prose)
 
@@ -398,8 +412,9 @@ Without this caveat, QA will quote the numbers as if they were a real A/B result
 
 Write a single Markdown file `./compare-<trial-label>-vs-<holdout-label>.md` (default: `./compare-trial-vs-holdout.md`) using the Write tool. Structure:
 
-- **Headline verdict** — one paragraph: PASS / FLAGGED + the n=5 caveat.
-- **Side-by-side delta table** (Step 2 above).
+- **Headline verdict** — one paragraph: PASS / FLAGGED + the n=5 caveat. The verdict is trial vs holdout; if a baseline was captured, state in one line whether the holdout looked faithful to production.
+- **Side-by-side delta table** (Step 2 above) — include the `Baseline` column only if that route was captured.
+- **Baseline fidelity** (only when baseline captured) — the Step 2a finding: does holdout track production, or is the control suspect? With the build-difference caveat.
 - **Section-by-section diff** — call out which Phase 2b sections differ between routes that matter (load strategy changes, reload latency regression, floor handoff misalignment, etc.).
 - **Cross-route errors** — trial-only / both / holdout-only with one-line interpretation per signature.
 - **Recommended follow-up** — concrete next steps (e.g. "rerun with a working API key", "extend the run to 30 impressions per format", "investigate Metica.OnAdShowFailed handler in trial build").
