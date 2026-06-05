@@ -185,13 +185,13 @@ through the first grep is caught there.
 
 #### Is MaxSDK present? (a discovered fact, not a mode)
 
-Compute `HAS_MAX` inline — any real `MaxSdk.` reference in game code. This is the same signal the validator's checks are agnostic to; it is **not** a "mode," just a fact about the project that the rest of discovery and codegen adapt to:
+Compute `HAS_MAX` inline — does the game code contain a **real** `MaxSdk.` reference? This is the same signal the validator's checks are agnostic to; it is **not** a "mode," just a fact about the project that the rest of discovery and codegen adapt to. Because it drives the whole Max-present path, do **not** flip it on a raw textual match — gather candidates with grep, then confirm with a Read:
 
 ```bash
-HAS_MAX=false
-while IFS= read -r f; do
-    grep -qF 'MaxSdk.' "$f" && { HAS_MAX=true; break; }
-done < <(game_cs)
+# Gather candidate MaxSdk. references (raw grep — may include comments/strings):
+MAX_CANDIDATES="$(while IFS= read -r f; do
+    grep -nF 'MaxSdk.' "$f" | sed "s|^|${f#$PROJECT/}:|"
+done < <(game_cs))"
 
 # Corroborating signals (report-only context):
 S_FOLDER=false;   [ -d "$PROJECT/Assets/MaxSdk" ] && S_FOLDER=true
@@ -199,6 +199,8 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
     && grep -qiF applovin "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml"; } && S_MANIFEST=true
 [ -f "$PROJECT/Assets/MaxSdk/AppLovin/Editor/Dependencies.xml" ] && S_MANIFEST=true
 ```
+
+Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read each candidate's surrounding lines and set `HAS_MAX=true` only when at least one is live code** — not a `//` comment, a `/* block */`, or a `"string literal"` (e.g. a diagnostics log). If every candidate is a comment/string, treat Max as absent. The corroborating signals (`S_FOLDER`/`S_MANIFEST`) are supporting context for the report, not a substitute for confirming a live call.
 
 `HAS_MAX` affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` when Max is absent, `MeticaMediationInfo(MAX, …)` when present) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override the detection by saying "treat Max as present/absent" — honor it.
 

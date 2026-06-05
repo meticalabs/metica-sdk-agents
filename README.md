@@ -93,7 +93,7 @@ The Phase 1 script clears the device's main `logcat` buffer for a clean capture 
 | ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `@metica-sdk-agents:unity-compat-checker`   | Agent | Detects Unity / Java / MaxSDK / Android API / MeticaSDK install. PASS or BLOCK with a precise remediation hint.                     |
 | `@metica-sdk-agents:unity-integrator`       | Agent | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
-| `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Reads the project's code and reasons about every rule (structural + behavioral), with line-cited evidence, plus a Unity batch compile. |
+| `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Reads the project's code and reasons about every rule (structural + behavioral); behavioral verdicts carry line-cited evidence. Plus a Unity batch compile. |
 | `@metica-sdk-agents:ad-log-monitor`         | Skill | Runtime QA on a connected device. Captures Android logcat / iOS idevicesyslog while QA plays, extracts ad unit IDs / network / revenue / lifecycle / Metica→MAX floor handoff, and compares holdout vs trial. |
 
 Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The `ad-log-monitor` skill is a separate runtime-QA workflow — invoke it directly when you have a build on a device.
