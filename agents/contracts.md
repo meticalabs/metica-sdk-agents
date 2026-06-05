@@ -79,7 +79,7 @@ gone, and the semantic verdicts now gate `status` like any other check).
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` is a non-blocking "could not verify" signal, used by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
-- `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component is **opaque** — pass it through to the user verbatim; do not parse or join against it. Splitting on the **last** `:` is safe since neither component contains an unescaped colon.
+- `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component is **opaque** — pass it through to the user verbatim; do not parse or join against it. To separate the line number, split on the **last** `:` (the path itself may contain a colon — e.g. a Windows drive letter `C:\...` — but the line number never does, so the last `:` is the right boundary).
 - `checks[].detail`: one-line message describing what was found.
 - `checks[].evidence` *(optional)*: array of `{ "file", "line", "snippet", "role" }` where `role` ∈ `entry` | `hop` | `terminal`. **Required on the behavioral rules; a PASS on one needs ≥2 entries forming an entry→terminal chain.** The validator confirms each citation by reading the file at the cited line before trusting it; a citation that does not resolve forces the rule off PASS.
 - `checks[].confidence` *(optional)*: `"high"` | `"low"`.
