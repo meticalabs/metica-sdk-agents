@@ -388,7 +388,11 @@ dirty, stop** and tell the user to commit or stash first — do **not** auto-com
 behalf, and do not tag over uncommitted work:
 
 ```bash
-if [ -n "$(git -C "$PROJECT" status --porcelain 2>/dev/null)" ]; then
+if ! git -C "$PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "$PROJECT is not a git repository. Run 'git init' (or work from inside your repo) so there is a rollback safety net, then re-run." >&2
+    exit 1
+fi
+if [ -n "$(git -C "$PROJECT" status --porcelain)" ]; then
     echo "Working tree is dirty. Commit or stash your changes first, then re-run." >&2
     exit 1
 fi
@@ -396,8 +400,8 @@ git -C "$PROJECT" tag -f pre-metica-integration
 echo "Tagged pre-metica-integration — roll back any time with: git reset --hard pre-metica-integration"
 ```
 
-If `$PROJECT` is not a git repo, tell the user to `git init` (or run from inside their repo)
-so the rollback safety net exists before any file is written.
+The repo check fires first so a non-git project gets a clear instruction instead of a
+confusing failure from `git tag` later.
 
 ### Step 5 — Apply code changes
 
@@ -441,7 +445,7 @@ scan_max_callsites() {
         | grep -v -e "/MaxSdk/" -e "/MeticaSdk/" -e "/$ADAPTER_REL/" \
                   -e "/PackageCache/" -e "/Library/" -e "/Temp/" -e "/obj/" \
         | while IFS= read -r f; do
-            grep -nE 'MaxSdk(\.|Callbacks\.)' "$f" \
+            grep -nE '(MaxSdkBase|MaxSdkCallbacks|MaxSdk|MaxCmpService)\.' "$f" \
               | sed "s|^|${f#$project/}:|"
           done
 }
@@ -517,7 +521,7 @@ Event-name table (Max → Metica):
 4. After every file edit, re-scan **only the file just edited** to confirm the callsite is gone (or recategorize remaining ones):
 
     ```bash
-    grep -nE 'MaxSdk(\.|Callbacks\.)' "<edited_file>" || echo "OK: no MaxSdk callsites remain in <edited_file>"
+    grep -nE '(MaxSdkBase|MaxSdkCallbacks|MaxSdk|MaxCmpService)\.' "<edited_file>" || echo "OK: no MaxSdk callsites remain in <edited_file>"
     ```
     If a match remains, Read it to confirm whether it's a live call still needing a rewrite or just a comment/string.
 5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
