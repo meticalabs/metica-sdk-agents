@@ -515,7 +515,11 @@ if [ -f "$API_MAP" ]; then
                 printf '%s' "$stripped" | grep -qF -- "$MAP_PAT" || continue
 
                 key="$f:$ln:$rule_name"
-                case "$SEEN_FILELINES" in *"|$key|"*) continue ;; esac
+                # Fixed-string membership check. The earlier `case` form did
+                # glob matching, so a file path containing *, ?, [, or ]
+                # could either spuriously match (skipping a real finding) or
+                # fail to dedup. `grep -qF` treats the key literally.
+                grep -qF -- "|$key|" <<< "$SEEN_FILELINES" && continue
                 SEEN_FILELINES="${SEEN_FILELINES}|$key|"
 
                 level="ADVISORY"

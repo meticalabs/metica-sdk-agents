@@ -69,7 +69,7 @@ The validator is a **two-phase** producer (see `agents/unity-validator.md`): a d
 - `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` is a non-blocking "could not verify" signal, used by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
-- `checks[].location`: `<relative_path>:<line>` or `""` when scope-wide.
+- `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component should be treated by consumers as **opaque** — its format depends on how the validator was invoked (`--project=` with an absolute path yields absolute file paths; a relative `--project=` yields relative paths). Do not parse or join against it; pass it through to the user verbatim. Splitting on the **last** `:` is safe since neither component contains an unescaped colon.
 - `checks[].detail`: one-line message describing what was found.
 - `checks[].engine` *(1.2.0, optional)*: `"grep"` (deterministic floor) or `"llm-adjudicator"` (semantic pass). Absent ⇒ treat as `"grep"`.
 - `checks[].evidence` *(1.2.0, optional)*: array of `{ "file", "line", "snippet", "role" }` where `role` ∈ `entry` | `hop` | `terminal`. **Required on `llm-adjudicator` checks; a PASS on a behavioral rule needs ≥2 entries forming an entry→terminal chain.** Every citation is verified by `scripts/check-citation.sh` (opens the file at the cited line, confirms the snippet); a citation that does not resolve forces the rule to `FAIL`.
