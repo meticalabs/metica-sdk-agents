@@ -1,6 +1,6 @@
 {
   "name": "metica-sdk-agents",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Claude Code agents + skill for integrating, validating, and runtime-monitoring MeticaSDK in Unity projects.",
   "author": {
     "name": "Metica",

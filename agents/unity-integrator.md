@@ -203,7 +203,7 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 
 | Signal | How | Goes in the block under |
 |---|---|---|
-| Direct `MaxSdk.*` call sites | `game_cs` → `clean_source` → `grep -nE 'MaxSdk(\.|Callbacks\.)'`, emit `<file>:<line>:<snippet>` | `Direct Max call sites` |
+| Direct `MaxSdk.*` call sites | `game_cs` → `clean_source` → `grep -nE 'MaxSdk(\.|Callbacks\.)'` (excluding `MaxSdkUtils\.` — stateless helpers, exempt). For each hit, classify against `references/max-metica-api-map.tsv`: `rename` / `signature-change` → rewrite; `drop` → remove (collect for the Step 7 "Dropped — no Metica equivalent" section). Emit `<file>:<line>:<snippet> [kind]` | `Direct Max call sites` |
 | **Wrapper class** | a class whose **public** API is non-Max but whose body calls `MaxSdk.*`. **Flow-based test (OQ1):** if the ad-unit id reaching `MaxSdk.*` comes from a *field/const* inside the class → wrapper (leave its file untouched, mirror its API in Step 3 codegen plan); if the public method's own `string` parameter is forwarded straight into Max's ad-unit slot → it's a routing layer → treat its calls as direct call sites. This is a prose judgment confirmed in plan mode — do not script it. | `Max wrapper detected` |
 | **Multiple wrapper candidates (OQ2)** | if more than one class matches, **list them all** and require an explicit pick in the Step 3 plan — never silently choose. A single candidate is auto-selected and shown for confirmation. | `Max wrapper detected` |
 | Formats in use | which of `LoadBanner` / `LoadInterstitial` / `LoadRewarded(Ad)` / `LoadMRec` appear | `Formats used` |
@@ -396,7 +396,13 @@ The Max-callsite inventory and the wrapper classification were already produced 
 
 Propose rewrites that target the game's single `MeticaAdService` instance directly (no router). Introduce a `MeticaAdService _ads;` field constructed and `Initialize()`-d once in the game's bootstrap; replace each call site with `_ads.ShowInterstitial(…)` etc. **Removing Max from the game's call sites is the whole point when MaxSDK is present**, and the "do not touch Max usage logic" rule is preserved by the wrapper-scoping rule below.
 
-**Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not edit a dedicated Max-wrapper file** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper untouched and instead rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave it untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
+**Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not replace a dedicated Max-wrapper file's structure** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper's *shape* intact and rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave its structure untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
+
+**Exception inside wrappers: per-call-site rewrites still apply.** Even when leaving a wrapper file's structure untouched, **individual `MaxSdk.Set*ExtraParameter` / `MaxSdk.Set*LocalExtraParameter` / `MaxSdk.IsInitialized` / etc. calls inside that wrapper still need rewriting** to their Metica equivalents (see `references/max-metica-api-map.tsv`). Those calls land on the publisher's `MaxSdk` static, which Metica never initialises — they silently no-op against the live AppLovinSdk that Metica owns. The wrapper's job (mediating ad units) is preserved by the structural carve-out; the bug-prone parameter knobs and init checks inside it get the same rewrite as anywhere else. Surfaced in real customer integrations (Merge Art Canvas, Kick & Break The Ragdoll).
+
+**`MaxSdkUtils.*` is exempt project-wide.** Stateless helper functions (`MaxSdkUtils.GetAdaptiveBannerHeight`, `MaxSdkUtils.IsTablet`, etc.) don't depend on `MaxSdk` being initialised and are mix-safe inside a Metica integration. Never rewritten, never dropped, never flagged.
+
+**Source of truth for rewrites and drops:** `references/max-metica-api-map.tsv`. Each row is `<MaxSdk-pattern>\t<MeticaSdk-replacement>\t<kind>\t<notes>` where `kind` is `rename` (direct swap), `signature-change` (Metica equivalent exists but caller needs adjustment — e.g. `SetBannerBackgroundColor` switches from `UnityEngine.Color` to a hex string), `drop` (no Metica equivalent — remove the call and surface it in Step 7), or `exempt` (`MaxSdkUtils.*`). The validator's `max_api_use_metica` and `max_api_unsupported` rules consume the same file — the integrator and validator stay in lockstep that way. When a `drop` row matches and the user approves, **remove the call** during the rewrite pass; collect the list and surface it in Step 7 under a "Dropped — no Metica equivalent" section so the user can decide whether to lose the feature or keep a Max-only code path. The narrative form of the TSV lives in `references/max-vs-metica-2.4.0-api.md`.
 
 Use the Bash tool with `grep`, piped through `clean-cs.awk` to ignore matches inside string literals and comments. There is no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
 
@@ -695,6 +701,24 @@ Autofixes applied this run (see .metica-integration.log):
 ```
 
 Then the standard summary (whether MaxSDK was present, SDK version, files changed, compat-checker one-liner, validator one-liner).
+
+#### Dropped MaxSDK calls (no Metica equivalent)
+
+When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.UpdateBannerPosition`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
+
+```
+Dropped (no MeticaSdk equivalent in 2.4.0):
+- <file>:<line>  MaxSdk.LoadAppOpenAd("appopen_main")
+    → App Open Ads not supported. Either remove the feature or keep
+      a separate Max-only init path for it.
+- <file>:<line>  MaxSdk.SetSegmentCollection(segs)
+    → MaxSegmentCollection has no Metica equivalent. Targeting via MAX
+      segments is no longer available; consider using MeticaSdk's
+      SmartConfig or Events for similar dynamic behaviour.
+- ...
+```
+
+The list is harvested as the rewrite pass runs — each `drop`-class match emits a removed line plus the row's `notes` column as the explanation.
 
 #### Credential hygiene (now validator-driven)
 

@@ -165,6 +165,33 @@ assert_case good-placeholder-named-constant "PASS" \
 assert_case bad-mrec-no-callbacks         "FAIL"        \
     "mrec_callbacks_subscribed:FAIL" "mrec_load_show_parity:FAIL"
 
+# v1.6.0: MaxSdk API surface checks driven by references/max-metica-api-map.tsv.
+
+# Replaceable call in a Metica-aware file → FAIL.
+# (Reproduces the Merge Art Canvas pattern: MaxSdk.SetInterstitialExtraParameter
+# survives a mechanical s/MaxSdk./MeticaSdk.Ads./ swap and silently no-ops.)
+assert_case bad-max-api-replaceable       "FAIL"        \
+    "max_api_use_metica:FAIL"
+
+# Drop-required call (no MeticaSdk equivalent) in a Metica-aware file → FAIL.
+assert_case bad-max-api-unsupported       "FAIL"        \
+    "max_api_unsupported:FAIL"
+
+# Side-by-side pure-Max wrapper (no MeticaSdk references in that file) →
+# ADVISORY only; overall status stays PASS because ADVISORY does not block.
+assert_case advisory-max-wrapper          "PASS"        \
+    "max_api_use_metica:ADVISORY"
+
+# MaxSdkUtils.* is exempt — stateless helpers, mix-safe under Metica. Both
+# MaxSdk rules must emit PASS.
+assert_case good-maxsdkutils-exempt       "PASS"        \
+    "max_api_use_metica:PASS" "max_api_unsupported:PASS"
+
+# Regression: a fixture with NO MaxSdk.* references at all (good-fresh) must
+# still emit PASS rows for both MaxSdk rules.
+assert_case good-fresh                    "PASS"        \
+    "max_api_use_metica:PASS" "max_api_unsupported:PASS"
+
 # A Max-present project (Max wrapper + Metica) gets the same uniform validation
 # — same-file privacy ordering, init count, reload-on-hidden.
 assert_case good-max-present            "PASS" \

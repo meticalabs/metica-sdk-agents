@@ -152,7 +152,8 @@ metica-sdk-agents/
 │   ├── lib/                           # shared helpers: clean-source.sh + awk (clean-cs, strip-comments, check-init-userid)
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/
-│   └── max-vs-metica-2.4.0-api.md     # MaxSdk ↔ MeticaSdk parity table
+│   ├── max-metica-api-map.tsv         # machine-readable MaxSdk → MeticaSdk map; consumed by both validator + integrator
+│   └── max-vs-metica-2.4.0-api.md     # narrative parity doc (keep in sync with the TSV)
 └── tests/                             # 12 suite scripts (+ run-all.sh) + fixtures + goldens
 ```
 
