@@ -192,6 +192,27 @@ assert_case good-maxsdkutils-exempt       "PASS"        \
 assert_case good-fresh                    "PASS"        \
     "max_api_use_metica:PASS" "max_api_unsupported:PASS"
 
+# WARN when the API map file is missing (packaging error / partial checkout).
+# Move it aside, run the validator, check the WARN rows, restore. Use a trap
+# so the file is restored even if the assertion path bails out.
+api_map="$SCRIPT_DIR/../references/max-metica-api-map.tsv"
+if [ -f "$api_map" ]; then
+    trap 'mv "${api_map}.testbak" "$api_map" 2>/dev/null || true' INT TERM EXIT
+    mv "$api_map" "${api_map}.testbak"
+    out=$(bash "$VALIDATE" --project="$FIX/good-fresh" 2>&1) || true
+    mv "${api_map}.testbak" "$api_map"
+    trap - INT TERM EXIT
+
+    if [ "$(level_of_rule "$out" max_api_use_metica)"  = "WARN" ] \
+    && [ "$(level_of_rule "$out" max_api_unsupported)" = "WARN" ]; then
+        printf "  ok    WARN when API map is missing\n"; pass=$((pass+1))
+    else
+        printf "  FAIL  expected WARN rows for both max_api_* rules when TSV is absent:\n"
+        printf '%s\n' "$out" | sed 's/^/    /'
+        fail=$((fail+1))
+    fi
+fi
+
 # A Max-present project (Max wrapper + Metica) gets the same uniform validation
 # — same-file privacy ordering, init count, reload-on-hidden.
 assert_case good-max-present            "PASS" \

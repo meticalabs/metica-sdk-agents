@@ -91,7 +91,7 @@ MaxSdk.GetMRecLayout(	-	drop	No MeticaSdk equivalent.
 MaxSdk.LoadInterstitial(	MeticaSdk.Ads.LoadInterstitial	rename	MeticaSdk also offers LoadInterstitial(adUnitId, MeticaAdConfig?) with bid-floor override.
 MaxSdk.IsInterstitialReady(	MeticaSdk.Ads.IsInterstitialReady	rename
 MaxSdk.ShowInterstitial(	MeticaSdk.Ads.ShowInterstitial	rename
-MaxSdk.SetInterstitialExtraParameter(	MeticaSdk.Ads.SetInterstitialExtraParameter	rename	Re-apply after each load — pre-creation calls are silently dropped (MeticaAdsImpl.kt:319–321).
+MaxSdk.SetInterstitialExtraParameter(	MeticaSdk.Ads.SetInterstitialExtraParameter	rename	Re-apply after each ad creation — pre-creation calls land on a not-yet-created instance and are silently dropped.
 MaxSdk.SetInterstitialLocalExtraParameter(	MeticaSdk.Ads.SetInterstitialLocalExtraParameter	rename	APS bid signals land here. Re-apply after each load.
 
 # ============================================================================
@@ -181,14 +181,26 @@ MaxSdkCallbacks.Interstitial.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equiva
 MaxSdkCallbacks.Rewarded.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equivalent.
 MaxSdkCallbacks.AppOpen.OnExpiredAdReloadedEvent	-	drop	App Open Ads not supported at all.
 MaxSdkCallbacks.OnApplicationStateChangedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Banner.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent (ad review creative ID surfacing).
+MaxSdkCallbacks.MRec.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Interstitial.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.Rewarded.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
+MaxSdkCallbacks.AppOpen.OnAdReviewCreativeIdGeneratedEvent	-	drop	App Open Ads not supported at all.
 
 # All App Open callbacks are unsupported (App Open Ads not in MeticaSdk).
 MaxSdkCallbacks.AppOpen.	-	drop	App Open Ads not supported in MeticaSdk 2.4.0.
 
 # ============================================================================
+# Misc — not in MeticaSdk
+# ============================================================================
+MaxSdkBase.InvokeEventsOnUnityMainThread	-	drop	No MeticaSdk equivalent for main-thread event control.
+MaxCmpService.HasSupportedCmp	-	drop	No MeticaSdk equivalent for CMP capability check.
+
+# ============================================================================
 # Exempt — never flagged
 # ============================================================================
 # MaxSdkUtils.* are stateless helper functions that don't depend on MaxSdk being
-# initialised. They mix-safe inside a Metica integration. Listed last so the
-# loader sees this row and any earlier rule never overrides it.
+# initialised. They mix-safe inside a Metica integration. The loader filters
+# exempt rows by `kind=exempt` before matching, so this row's position in the
+# file doesn't affect correctness — it's grouped here for readability.
 MaxSdkUtils.	-	exempt	Stateless helpers, mix-safe under Metica.
