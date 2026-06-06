@@ -147,7 +147,7 @@ The integrator does not emit JSON — it is the orchestrator. Its final message 
 3. Files created / edited (list).
 4. Compat-checker summary (one line).
 5. Validator summary (one line + `PASS`/`FAIL`).
-6. Rollback command (`git reset --hard pre-metica-integration`) when validator returned `FAIL`.
+6. Rollback command (`git reset --hard pre-metica-integration`) **only when the autofix loop cannot clear all FAILs** (a `surface`-class FAIL remains, or 3 iterations are exhausted) — never on a FAIL the loop fixes. See the reaction section below.
 7. (MaxSDK present + remote-config provider detected) Cohort-gating recipe — see `agents/unity-integrator.md` Step 7.
 
 The `pre-metica-integration` git tag is created by the integrator before any file change (see integrator.md, workflow step 4).

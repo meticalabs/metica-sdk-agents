@@ -52,7 +52,7 @@ the context. Scope your reading to the integration files (`Assets/Scripts/...`, 
 folder) and the callees reachable from a candidate site — do not read the whole project.
 
 **Scan only the project's own integration code.** Exclude the vendored SDKs (`Assets/MaxSdk/`,
-`Assets/MeticaSdk/`), package caches (`Packages/.../PackageCache/`), and Unity-managed dirs
+`Assets/MeticaSdk/`), the package cache (`Library/PackageCache/`), and Unity-managed dirs
 (`Library/`, `Temp/`, `obj/`). A `MeticaSdk.Initialize` (or a test/placeholder credential)
 inside the imported SDK's own samples or tests is **not** the game's integration — counting it
 would false-FAIL `init_count` and the credential checks on an otherwise-correct project.
