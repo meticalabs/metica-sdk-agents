@@ -1,5 +1,5 @@
 # max-metica-api-map.tsv — machine-readable source of truth for the MaxSdk ↔
-# MeticaSdk API surface. Drives unity-validator (scripts/validate-integration.sh)
+# MeticaSdk API surface. Read by unity-validator (max_api_* rules, in prose)
 # and unity-integrator (codegen rewrite + drop pass) so the two stay in lockstep.
 # The narrative form of this map lives in references/max-vs-metica-2.4.0-api.md;
 # keep them in sync when the SDK bumps.
