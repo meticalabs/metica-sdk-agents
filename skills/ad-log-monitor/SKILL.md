@@ -41,7 +41,7 @@ done
 
 **The user's prompt is the routing signal — read what they actually wrote and pick the phase to match.** Do not let directory state override an explicit instruction.
 
-- **Phase 1 (new capture)** — the default. Triggers: a bare `@metica-sdk-agents:ad-log-monitor` invocation, "begin / start / start monitoring / new capture / about to play / connect device", or any prompt that doesn't clearly point at an existing artifact.
+- **Phase 1 (new capture)** — the default. Triggers: a bare `/metica-sdk-agents:ad-log-monitor` invocation, "begin / start / start monitoring / new capture / about to play / connect device", or any prompt that doesn't clearly point at an existing artifact.
 - **Phase 2 (analyse one route)** — when the user has finished playing and wants the per-route report. Triggers: "done / stop / analyse / finished playing". Also when the user explicitly points you at an existing captured log (e.g. *"analyse `./trial-user-android-20260604T123045Z.log`"*) — in that case **skip Phase 2a** (the stop script) and go directly to Phase 2b against the file the user named.
 - **Phase 3 (compare trial vs holdout)** — triggers: "compare / verdict / trial vs holdout / which is better". Also when the user hands you two existing logs to compare (e.g. *"analyse the 2 existing logs for holdout and trial"*) — run Phase 2b for each first if no per-route `<label>-analysis.md` exists yet, then Phase 3.
 
