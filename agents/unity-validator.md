@@ -14,7 +14,7 @@ compile** (only the real compiler sees Unity's assemblies); everything else is y
 
 You run in a **fresh context** — that is the clean room that makes your review
 trustworthy: you judge the code as written, not the integrator's intent. Your **final
-message is exactly one fenced ` ```json ` block** (`validator/2.0.0`) and nothing else.
+message is exactly one fenced ` ```json ` block** (`validator/2.1.0`) and nothing else.
 
 ## Inputs
 
@@ -92,6 +92,7 @@ ones grep gets wrong):
 |---|---|
 | `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` | From the `OnAdHidden` subscriber, is a `Load<Format>(<same placement>)` reachable — directly or through a named helper, a flag-driven `Update`/coroutine, an event, or an async continuation? |
 | `interstitial_show_ready_guard` / `rewarded_show_ready_guard` | Does **every** path that reaches `Show<Format>(id)` first observe `IsReady(id) == true` for that same id? (ADVISORY if not.) |
+| `interstitial_show_after_init` / `rewarded_show_after_init` | Is **every** path that reaches `Show<Format>` only reachable **after MeticaSDK init has *completed***? Init completes when the `OnInitialized(MeticaInitResponse)` callback fires — **not** when `MeticaSdk.Initialize` is *called*. Accepted proof of an init-completion gate: the show is invoked only from code downstream of `OnInitialized`; **or** guarded by an init-complete flag that is set **inside** `OnInitialized` (not the idempotency flag set at the *start* of `Initialize()`, which only means "init was called"); **or** guarded by `IsReady(id)` (readiness implies a successful load, which can only happen after init completed). (ADVISORY if a show can run before init completes, or no such gate can be proven.) |
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
 
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
@@ -150,7 +151,7 @@ docs-transcription bugs and report them under a `compiles_cleanly` finding: an u
 - Judge only what the cited code proves, identically on every run, so the integrator's
   autofix loop sees a stable verdict.
 
-## Output contract — one JSON block (`validator/2.0.0`)
+## Output contract — one JSON block (`validator/2.1.0`)
 
 Print one fenced ```` ```json ```` object as your **entire** final message. See
 `agents/contracts.md` for the schema. Each check is

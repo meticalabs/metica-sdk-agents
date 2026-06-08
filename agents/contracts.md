@@ -64,15 +64,18 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to 
 
 ---
 
-## `validator/2.0.0`
+## `validator/2.1.0`
 
 The producer is **agent prose** (`agents/unity-validator.md`): a single pass in which the
 validator reads the project's code, reasons about every rule, and cites the lines that prove
 each verdict. The one thing it shells out for is the Unity batch compile
 (`scripts/compile-check.sh`) behind `compiles_cleanly`. There is no two-phase split, no grep
-floor, and no `engine` field — `2.0.0` is the breaking simplification of the old
+floor, and no `engine` field — `2.0.0` was the breaking simplification of the old
 `validator/1.x` (the grep floor and the `engine: "grep"` / `"llm-adjudicator"` distinction are
-gone, and the semantic verdicts now gate `status` like any other check).
+gone, and the semantic verdicts now gate `status` like any other check). `2.1.0` is a
+backward-compatible minor: it adds the behavioral `<format>_show_after_init` rule (ADVISORY,
+does not affect `status`); the JSON shape is unchanged, so the orchestrator — which accepts
+any minor within `validator/2.x` — is unaffected.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
@@ -95,6 +98,7 @@ gone, and the semantic verdicts now gate `status` like any other check).
 - `<format>_load_show_parity` — every Load has a matching Show (banner, interstitial, rewarded, mrec).
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — **behavioral**: reload reachable from the `OnAdHidden` subscriber, *following indirection* (named helpers, flag-driven `Update`/coroutine, events, async continuations) — not just textual presence of `OnAdHidden`.
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — **behavioral**: every call path reaching `Show<Format>` first observes `IsReady` for the same id (ADVISORY if not).
+- `interstitial_show_after_init` / `rewarded_show_after_init` — **behavioral**: every call path reaching `Show<Format>` is only reachable **after** MeticaSDK init has *completed* (the `OnInitialized` callback fired — not when `MeticaSdk.Initialize` was merely *called*). Accepted gates: the show is downstream of `OnInitialized`, guarded by an init-complete flag set inside it, or guarded by `IsReady` (readiness implies a post-init successful load). ADVISORY when a show can run before init completes or no gate is provable; never affects `status`.
 - `placement_ids_match` — **behavioral**: per format, the placement/ad-unit id passed to `Load*` is provably the same value as the one passed to `Show*` across all call paths.
 - `revenue_callback_subscribed` — ADVISORY.
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appears as a **string-literal value** in source. A constant merely *named* `YOUR_METICA_API_KEY` holding a real value does not false-positive.
@@ -111,7 +115,7 @@ gone, and the semantic verdicts now gate `status` like any other check).
 
 ```json
 {
-  "schema": "validator/2.0.0",
+  "schema": "validator/2.1.0",
   "status": "FAIL",
   "error": null,
   "warnings": [],
@@ -158,7 +162,7 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 - `compat-checker.status == PASS` with any `WARN` → continue, surface warnings.
 - `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). A `compiles_cleanly` FAIL is `surface`-class (a real `CS####` compile error — printed verbatim with `file:line`, not auto-edited). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
 - A `compiles_cleanly` **WARN** (compile skipped — no Unity located / `METICA_SKIP_COMPILE=1` — or could not complete) is non-blocking: surface it in the final report so the user knows the build was not verified, but it does not trigger the autofix loop or affect status.
-- **Behavioral checks (`*_reload_on_hidden`, `*_show_ready_guard`, `placement_ids_match`):** these now gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. Surface each verdict's `evidence`/`reasoning` in the report. A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is **`surface`-class** — never fed to the autofix loop; a human decides.
+- **Behavioral checks (`*_reload_on_hidden`, `*_show_ready_guard`, `*_show_after_init`, `placement_ids_match`):** these gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. (`*_show_ready_guard` and `*_show_after_init` are ADVISORY-only, so they surface but never gate `status`.) Surface each verdict's `evidence`/`reasoning` in the report. A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is **`surface`-class** — never fed to the autofix loop; a human decides.
 
 ---
 

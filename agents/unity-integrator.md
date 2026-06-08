@@ -572,7 +572,7 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
 share your reasoning with it). Validation is uniform — it does not take or depend on any
 mode. There is no validation script to call directly; the validator reasons over the code
-and returns one `validator/2.0.0` JSON block.
+and returns one `validator/2.1.0` JSON block.
 
 Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
@@ -598,7 +598,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
 | `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
 
-`*_show_ready_guard` and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
