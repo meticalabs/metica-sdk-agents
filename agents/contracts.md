@@ -164,7 +164,11 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 - `compat-checker.status == PASS` with any `WARN` → continue, surface warnings.
 - `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). A `compiles_cleanly` FAIL is `surface`-class (a real `CS####` compile error — printed verbatim with `file:line`, not auto-edited). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
 - A `compiles_cleanly` **WARN** (compile skipped — no Unity located / `METICA_SKIP_COMPILE=1` — or could not complete) is non-blocking: surface it in the final report so the user knows the build was not verified, but it does not trigger the autofix loop or affect status.
-- **Behavioral checks (`*_reload_on_hidden`, `*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `placement_ids_match`):** these gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. (`*_show_ready_guard`, `*_show_after_init`, and `*_load_after_init` are ADVISORY-only, so they surface but never gate `status`.) Surface each verdict's `evidence`/`reasoning` in the report. A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is **`surface`-class** — never fed to the autofix loop; a human decides.
+- **Behavioral checks** split into two groups by the level they emit:
+  - **Gating** (`*_reload_on_hidden`, `placement_ids_match`): emit `PASS`/`FAIL`, so they gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is **`surface`-class** — never fed to the autofix loop; a human decides.
+  - **ADVISORY-only** (`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`): always emit `level: ADVISORY`, so per the Status rule above they surface in the report but never affect `status` and never trigger the autofix loop.
+
+  Surface each verdict's `evidence`/`reasoning` in the report regardless of group.
 
 ---
 
