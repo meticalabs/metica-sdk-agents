@@ -598,7 +598,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
 | `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
 
-`*_show_ready_guard`, `*_show_after_init`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
