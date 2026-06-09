@@ -216,6 +216,19 @@ Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read eac
 | Custom-data strings | 3rd arg to `Show<Format>(…)` | `Custom data observed` |
 | Trigger pattern | who calls the wrapper's / game's `Show*` (e.g. `LevelEndController.OnLevelEnd`) | `Trigger pattern` |
 
+#### Per-format behaviour (characterise the existing implementation before replacing it)
+
+Before you rewrite anything, understand **how the game currently drives each format in use** — the generated `MeticaAdService` must preserve that behaviour, not merely swap the API. For **every format in use**, answer the questions below by reading the call sites and their surrounding code (cite where each answer lives):
+
+1. **When does the ad load?** Where/when is `Load<Format>` called — once at app start / preload, after each dismissal, on-demand right before show, or on a timer? MeticaAdService already auto-loads inside `OnInitialized` and reloads on hidden, so a game that relies on that needs no game-side `Load*`; but if the game preloads at a deliberate point (e.g. between levels), keep that `Load*` wired to the orchestrator rather than dropping it.
+2. **When does the ad show?** Which game event calls `Show<Format>`? (this is the `Trigger pattern` row above — e.g. `LevelEndController.OnLevelEnd`). The rewrite points that same trigger at the orchestrator.
+3. **Is there a gate between shows?** A frequency cap / cooldown / counter guarding the show — min seconds between interstitials, "every N levels", a `_lastShownAt` check, a remote-config'd cap, a no-ads-for-payers flag. **MeticaAdService does NOT implement frequency capping**; this guard lives in the game's own code and **must survive the rewrite** — swap only the `MaxSdk.Show*` call, never the surrounding `if (cooldown…)` (see the preserve-surrounding-logic rule in the refactor workflow).
+4. **Single ad call or multi?** Does the format use **one** ad-unit id (one instance) or **several** (multiple banners on screen at once, per-placement ad units, an A/B pair)? The template carries **one** `_<fmt>AdUnitId` per format. If the game uses more than one id for a format, **surface it in the Step 3 plan** — the region then needs per-id state (or one orchestrator instance per id); do not silently collapse several ids into one.
+
+Also worth capturing when present: a game-side **load-failure retry** (MeticaAdService adds docs-verbatim exponential backoff for interstitial/rewarded — drop a redundant game-side retry rather than stacking two); an **`IsReady`/availability guard** before show (preserve it — the orchestrator's interstitial/rewarded `Show*` is already `IsReady`-guarded); for **rewarded**, exactly **where the reward is granted** (which callback, what game state changes) so it is wired into `OnRewardedReward`; for **banner/MRec**, the **position/anchor and show/hide timing** so the orchestrator's `CreateBanner`/`ShowBanner`/`HideBanner` reproduce it.
+
+These answers go in the structured block under `Per-format behaviour`, are shown in the Step 3 plan, and shape which post-template patch passes fire and which game-side guards the rewrite must keep.
+
 Remote-config provider + the gate around ad calls, and the dominant namespace, are discovered in **Step 2.5** (they run whether or not MaxSDK is present). All of these feed the same structured block.
 
 #### The structured discovery block
@@ -453,6 +466,8 @@ Event-name table (Max → Metica):
 5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
 
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
+
+**Hard rule (preserve surrounding logic):** rewrite **only** the `MaxSdk.*` / `MaxSdkCallbacks.*` call itself — keep the game logic around it verbatim. In particular, never strip a **frequency gate / cooldown / availability guard** wrapping a `Show*` (the "Is there a gate between shows?" finding from Step 2): the orchestrator does not cap frequency, so dropping the guard would change ad cadence. Swap the call, keep the `if`.
 
 
 **Codegen when MaxSDK is present (agent-driven):** Generate the **standalone** adapter set — the `MeticaAdService` orchestrator + per-format files — and rewrite the game's direct Max call sites to use it. Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key) if not provided. Resolve inputs:
