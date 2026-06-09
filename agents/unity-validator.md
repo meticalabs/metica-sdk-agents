@@ -96,6 +96,28 @@ ones grep gets wrong):
 | `<format>_load_after_init` (every used format) | Is **every** path that reaches `Load<Format>` (and `Create<Format>` for banner/MRec) only reachable **after init has *completed***? In the canonical pattern the initial load is kicked off from `Init<Format>`, which is called **inside** `OnInitialized`; reloads (auto-reload-on-hidden, exponential-backoff retry) are downstream of that first post-init load. Accepted proof: the load originates from the `OnInitialized` path — directly, or via a reload/retry chain rooted in a post-init load. (ADVISORY if a load can run before init completes — e.g. issued from `Awake()` / `Start()` ahead of the init callback — or no such gate can be proven.) |
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
 
+**Smart Floors must stay analytics-only** (project-wide, not per-format — these encode a real
+production regression: group-aware ad logic dropped the trial group's impressions/DAU in two
+shipped games):
+
+- `smartfloors_analytics_only` — **behavioral, FAIL-capable.** The Smart Floors **user group**
+  / **`IsForcedHoldout`** flag is for analytics only; **trial and holdout must drive identical
+  ad behaviour**. FAIL when a read of `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or
+  a stored copy) flows into an ad-control decision — selecting or branching an ad-unit id,
+  gating a `Load*`/`Show*`, or switching ad-lifecycle state. **Also FAIL** a guard that branches
+  on whether a returned `ad.adUnitId` `==` / `!=` a configured id: the SDK owns Smart-Floors
+  ad-unit routing, so app code must pass the configured id through unchanged and never
+  second-guess what comes back. PASS when the group is only logged or synced to an analytics
+  user-property (e.g. a Firebase `SetUserProperty`), or never read. Cite the source read →
+  the branch it gates (≥2 evidence). If the flow can't be resolved (indirection), emit
+  `ADVISORY` with `unresolved` — never a blind FAIL.
+- `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a wrapper-managed "load in
+  progress" / "is loading" boolean that gates `Load<Format>`. It is redundant (the SDK
+  deduplicates concurrent loads) and **wedge-prone**: if a load callback never fires, the flag
+  stays set and silently blocks every later reload-on-hide, retry, and prepare. Recommend
+  removing it. Cite the flag's set site + the gated `Load`. Never FAIL — this is a
+  recommendation, not a correctness gate.
+
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
 `<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
 **all non-exempt namespaces** — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`
