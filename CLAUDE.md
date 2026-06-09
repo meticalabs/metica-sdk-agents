@@ -8,7 +8,8 @@ This is **not application code** — it is a Claude Code *plugin* that ships thr
 
 - **Agent definitions** — markdown-with-frontmatter directly under `agents/` (`unity-integrator.md`, `unity-validator.md`, `unity-compat-checker.md`). The frontmatter (`name`, `description`, `tools`, `model`) is the agent's contract; the body is its prompt. They live in `agents/` itself, **not** a subfolder, on purpose: a plugin subfolder becomes a scope segment in the mention token, so `agents/unity/unity-integrator.md` would register as `@agent-metica-sdk-agents:unity:unity-integrator`. Keeping them flat preserves the documented `@agent-metica-sdk-agents:unity-integrator`.
 - **Skill definitions** — `skills/<name>/SKILL.md` (auto-discovered by Claude Code from the `skills/` directory; no entry in `plugin.json` needed). The frontmatter is just `name:` + `description:` (skills inherit the conversation's model and tool set, so `tools:` and `model:` aren't applicable). Invoked via the `/` slash form (`/metica-sdk-agents:<skill-name>`) or a description-matched trigger phrase — **not** the `@`-mention syntax used for agents (that's agents-only).
-- **Scripts** — `scripts/*.sh` hold only the few things an agent **can't** do in prose: locating the plugin root (`resolve-plugin-dir.sh`), downloading + importing the SDK (`download-metica-sdk.sh`), capturing device logs (`log-monitor-start.sh` / `log-monitor-stop.sh`), and launching the Unity compiler (`compile-check.sh`). The verification/checking logic (compat detection, integration validation, report formatting) is **not** scripted anymore — it lives in the agent prose, which reads the project and reasons about it. Editing behavior almost always means editing an agent's `.md`, not a script.
+- **Scripts** — `scripts/*.sh` hold only the few things an agent **can't** do in prose: locating the plugin root (`resolve-plugin-dir.sh`), downloading + importing the SDK (`download-metica-sdk.sh`), capturing device logs (`log-monitor-start.sh` / `log-monitor-stop.sh`), launching the Unity compiler (`compile-check.sh`), and the SessionStart update-notify check (`check-for-update.sh`). The verification/checking logic (compat detection, integration validation, report formatting) is **not** scripted anymore — it lives in the agent prose, which reads the project and reasons about it. Editing behavior almost always means editing an agent's `.md`, not a script.
+- **Hooks** — `hooks/hooks.json` (auto-discovered by Claude Code from the `hooks/` directory; no entry in `plugin.json` needed). It wires one `SessionStart` command hook → `scripts/check-for-update.sh`, which compares the installed version to the latest published `.claude-plugin/plugin.json` on the repo's default branch and, only when the remote is strictly newer, prints a `SessionStart` `additionalContext` notice with the `/plugin marketplace update metica-sdk-agents` command. It is **fail-open**: any uncertainty (no `curl`, no network, a 404, an unparseable version) exits 0 with no output, so it can never block or nag a session start. Opt out with `METICA_SKIP_UPDATE_CHECK=1`; `METICA_UPDATE_URL` / `METICA_UPDATE_TIMEOUT` override the source/timeout (used by the tests).
 - **Data + templates** — `metica-versions.yaml` (compat matrix), `references/max-metica-api-map.tsv` (+ its narrative twin) and `scripts/templates/standalone/MeticaAdService.cs.tmpl` are read directly by the agents.
 - **Reference docs** — `agents/contracts.md` (the inter-agent JSON contracts) and `references/` (MaxSdk↔MeticaSdk API parity).
 
@@ -19,16 +20,17 @@ There is no build step and no compiled artifact. Changing an agent or skill = ed
 ```bash
 bash tests/run-all.sh                      # full suite; prints "ALL GREEN" or "FAILURES"
 bash tests/run-<suite>-tests.sh            # a single suite: resolver, download,
-                                           # compile, log-monitor
+                                           # compile, update-check, log-monitor
 ```
 
-Tests now cover only the **surviving scripts** (the system-tooling plumbing) — there are four
+Tests now cover only the **surviving scripts** (the system-tooling plumbing) — there are five
 suites. The verification logic moved into agent prose, which is reviewed by the user at run
 time rather than golden-tested, so the old `compat` / `format` / `validator` / `citation` /
 `semantic` / `codegen` / `autofix` / `input-validation` suites and their fixtures/goldens were
 removed. Tests are plain bash assertions against `tests/fixtures/` (now just `log-monitor/`).
 No framework, no install. The `download` suite skips silently when its local SDK build
-(`../Metica SDK builds/MeticaSdk-2.4.0.unitypackage`) is absent; the other three always run.
+(`../Metica SDK builds/MeticaSdk-2.4.0.unitypackage`) is absent; the other four always run.
+The `update-check` suite drives `check-for-update.sh` through a fake `curl` (no network).
 
 ## Architecture
 
