@@ -216,6 +216,19 @@ Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read eac
 | Custom-data strings | 3rd arg to `Show<Format>(…)` | `Custom data observed` |
 | Trigger pattern | who calls the wrapper's / game's `Show*` (e.g. `LevelEndController.OnLevelEnd`) | `Trigger pattern` |
 
+#### Per-format behaviour (characterise the existing implementation before replacing it)
+
+Before you rewrite anything, understand **how the game currently drives each format in use** — the generated `MeticaAdService` must preserve that behaviour, not merely swap the API. For **every format in use**, answer the questions below by reading the call sites and their surrounding code (cite where each answer lives):
+
+1. **When does the ad load?** Where/when is `Load<Format>` called — once at app start / preload, after each dismissal, on-demand right before show, or on a timer? MeticaAdService already auto-loads inside `OnInitialized` and reloads on hidden, so a game that relies on that needs no game-side `Load*`; but if the game preloads at a deliberate point (e.g. between levels), keep that `Load*` wired to the orchestrator rather than dropping it. This finding drives the Step 5 rewrite's drop-vs-preserve decision for `MaxSdk.Load*` calls (see the Step 5 "Critical — Load" note) — redundant loads are dropped, a deliberate preload is mapped to `_ads.Load<Format>()`.
+2. **When does the ad show?** Which game event calls `Show<Format>`? (this is the `Trigger pattern` row above — e.g. `LevelEndController.OnLevelEnd`). The rewrite points that same trigger at the orchestrator.
+3. **Is there a gate between shows?** A frequency cap / cooldown / counter guarding the show — min seconds between interstitials, "every N levels", a `_lastShownAt` check, a remote-config'd cap, a no-ads-for-payers flag. **MeticaAdService does NOT implement frequency capping**; this guard lives in the game's own code and **must survive the rewrite** — swap only the `MaxSdk.Show*` call, never the surrounding `if (cooldown…)` (see the preserve-surrounding-logic rule in the refactor workflow).
+4. **Single ad call or multi?** Does the format use **one** ad-unit id (one instance) or **several** (multiple banners on screen at once, per-placement ad units, an A/B pair)? The template carries **one** `_<fmt>AdUnitId` per format. If the game uses more than one id for a format, **surface it in the Step 3 plan** — the region then needs per-id state (or one orchestrator instance per id); do not silently collapse several ids into one.
+
+Also worth capturing when present: a game-side **load-failure retry** (MeticaAdService adds docs-verbatim exponential backoff for interstitial/rewarded — drop a redundant game-side retry rather than stacking two); an **`IsReady`/availability guard** before show (preserve it — the orchestrator's interstitial/rewarded `Show*` is already `IsReady`-guarded); for **rewarded**, exactly **where the reward is granted** (which callback, what game state changes) so it is wired into `OnRewardedReward`; for **banner/MRec**, the **position/anchor and show/hide timing** so the orchestrator's `CreateBanner`/`ShowBanner`/`HideBanner` reproduce it.
+
+These answers go in the structured block under `Per-format behaviour`, are shown in the Step 3 plan, and shape which post-template patch passes fire and which game-side guards the rewrite must keep.
+
 Remote-config provider + the gate around ad calls, and the dominant namespace, are discovered in **Step 2.5** (they run whether or not MaxSDK is present). All of these feed the same structured block.
 
 #### The structured discovery block
@@ -408,17 +421,22 @@ gameObject.AddComponent<MeticaAdService>();  // MeticaAdService is a MonoBehavio
 **Method calls (receiver swap + casing/name remap per references/max-vs-metica-2.4.0-api.md):**
 
 ```csharp
-MaxSdk.LoadInterstitial(adUnitId)        →  drop — load is automatic (init + reload-on-hidden own it)
+MaxSdk.LoadInterstitial(adUnitId)        →  drop if redundant, else _ads.LoadInterstitial()  (see Critical note)
 MaxSdk.IsInterstitialReady(adUnitId)     →  drop — Show() guards internally
 MaxSdk.ShowInterstitial(adUnitId, p, c)  →  _ads.ShowInterstitial(p, c)
-MaxSdk.LoadRewardedAd(adUnitId)          →  drop — load is automatic
+MaxSdk.LoadRewardedAd(adUnitId)          →  drop if redundant, else _ads.LoadRewarded()  (see Critical note)
 MaxSdk.IsRewardedAdReady(adUnitId)       →  drop — Show() guards internally
 MaxSdk.ShowRewardedAd(adUnitId, p, c)    →  _ads.ShowRewarded(p, c)
 MaxSdk.CreateBanner / LoadBanner / ShowBanner / HideBanner / DestroyBanner → _ads.*Banner
 MaxSdk.CreateMRec / LoadMRec / ShowMRec / HideMRec / DestroyMRec           → _ads.*Mrec  // note casing: MRec → Mrec
 ```
 
-**Critical**: do NOT rewrite `MaxSdk.LoadInterstitial(id)` to `_ads.ShowInterstitial(...)` — that changes behavior. `LoadInterstitial` is a preload (no display); `_ads.ShowInterstitial(...)` displays an ad. Games typically call `LoadInterstitial` at level-start to preload and `ShowInterstitial` at level-end to display — rewriting Load → Show would display the ad at level-start. The correct mapping is to **drop** the explicit Load call entirely: the per-format adapter auto-loads in the init callback and again on every `OnAdHidden` / `OnAdShowFailed`, so explicit Load calls are redundant.
+**Critical** (Load — drop vs. preserve, never display): never rewrite `MaxSdk.LoadInterstitial(id)` to `_ads.ShowInterstitial(...)` — that changes behavior (`LoadInterstitial` is a preload with no display; `ShowInterstitial` displays). Beyond that, decide per the Step 2 **per-format behaviour** finding ("when does the ad load?"):
+
+- **Drop** the explicit Load when it is **redundant** with the adapter's own loading — the per-format region auto-loads in the init callback and again on every `OnAdHidden` / `OnAdShowFailed`, so a load that merely keeps an ad warm is dead weight.
+- **Preserve** it as `_ads.Load<Format>()` when discovery shows a **deliberate preload point** the game controls (e.g. a load fired at level-start for a known level-end show) — map it to the orchestrator's `Load*` delegator rather than dropping it, so the game's load timing survives the migration.
+
+When in doubt, surface the drop-vs-preserve choice for that call site in the Step 3 plan rather than silently dropping it.
 
 Reuse the game's existing Max ad unit IDs for MeticaAdService's per-format `adUnitId`s (per the migration guide; they pass through unchanged).
 
@@ -453,6 +471,8 @@ Event-name table (Max → Metica):
 5. If the user declines the refactor, do **not** apply edits — leave the inventory in the final report as a checklist.
 
 **Hard rule:** never edit files under `Assets/MaxSdk/`. The scan excludes them; the rewrite must too.
+
+**Hard rule (preserve surrounding logic):** rewrite **only** the `MaxSdk.*` / `MaxSdkCallbacks.*` call itself — keep the game logic around it verbatim. In particular, never strip a **frequency gate / cooldown / availability guard** wrapping a `Show*` (the "Is there a gate between shows?" finding from Step 2): the orchestrator does not cap frequency, so dropping the guard would change ad cadence. Swap the call, keep the `if`.
 
 
 **Codegen when MaxSDK is present (agent-driven):** Generate the **standalone** adapter set — the `MeticaAdService` orchestrator + per-format files — and rewrite the game's direct Max call sites to use it. Ask the user for `MAX_SDK_KEY` (their existing AppLovin MAX SDK key) if not provided. Resolve inputs:
@@ -572,7 +592,7 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
 share your reasoning with it). Validation is uniform — it does not take or depend on any
 mode. There is no validation script to call directly; the validator reasons over the code
-and returns one `validator/2.0.0` JSON block.
+and returns one `validator/2.1.0` JSON block.
 
 Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
@@ -597,8 +617,9 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
 | `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
+| `smartfloors_analytics_only` | surface | Group-aware ad logic (branching ad load/show/ad-unit selection on the Smart Floors user group / `IsForcedHoldout`, or on a returned-`adUnitId` equality check) is a **redesign**, not a line edit — and a real revenue regression. Surface the cited branch (`file:line`) and stop; the integrator's own codegen never emits this (it only logs the group), so a FAIL means hand-rolled code that must be simplified to the docs pattern (pass the configured id through, treat trial/holdout identically). |
 
-`*_show_ready_guard` and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 

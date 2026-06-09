@@ -64,15 +64,20 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to 
 
 ---
 
-## `validator/2.0.0`
+## `validator/2.1.0`
 
 The producer is **agent prose** (`agents/unity-validator.md`): a single pass in which the
 validator reads the project's code, reasons about every rule, and cites the lines that prove
 each verdict. The one thing it shells out for is the Unity batch compile
 (`scripts/compile-check.sh`) behind `compiles_cleanly`. There is no two-phase split, no grep
-floor, and no `engine` field — `2.0.0` is the breaking simplification of the old
+floor, and no `engine` field — `2.0.0` was the breaking simplification of the old
 `validator/1.x` (the grep floor and the `engine: "grep"` / `"llm-adjudicator"` distinction are
-gone, and the semantic verdicts now gate `status` like any other check).
+gone, and the semantic verdicts now gate `status` like any other check). `2.1.0` is a
+backward-compatible minor: it adds the behavioral `<format>_show_after_init` and
+`<format>_load_after_init` rules (ADVISORY), the `smartfloors_analytics_only` rule
+(FAIL-capable — group-aware ad logic is a real revenue regression), and the
+`load_dedup_flag_wedge` rule (ADVISORY); the JSON shape is unchanged, so the orchestrator —
+which accepts any minor within `validator/2.x` — is unaffected.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
@@ -95,7 +100,11 @@ gone, and the semantic verdicts now gate `status` like any other check).
 - `<format>_load_show_parity` — every Load has a matching Show (banner, interstitial, rewarded, mrec).
 - `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` — **behavioral**: reload reachable from the `OnAdHidden` subscriber, *following indirection* (named helpers, flag-driven `Update`/coroutine, events, async continuations) — not just textual presence of `OnAdHidden`.
 - `interstitial_show_ready_guard` / `rewarded_show_ready_guard` — **behavioral**: every call path reaching `Show<Format>` first observes `IsReady` for the same id (ADVISORY if not).
+- `<format>_show_after_init` (banner, interstitial, rewarded, mrec) — **behavioral**: every call path reaching `Show<Format>` (incl. `ShowBanner`/`ShowMrec`) is only reachable **after** MeticaSDK init has *completed* (the `OnInitialized` callback fired — not when `MeticaSdk.Initialize` was merely *called*). Accepted gates: the show is downstream of `OnInitialized`, guarded by an init-complete flag set inside it, or — interstitial/rewarded only — guarded by `IsReady` (banner/MRec have no `IsReady`). ADVISORY when a show can run before init completes or no gate is provable; never affects `status`.
+- `<format>_load_after_init` (banner, interstitial, rewarded, mrec) — **behavioral**: every call path reaching `Load<Format>` (and `Create<Format>` for banner/mrec) is only reachable **after** init has *completed*. Accepted proof: the load originates from the `OnInitialized` path — directly (the canonical `Init<Format>` is called inside `OnInitialized`) or via a reload/backoff-retry chain rooted in a post-init load. ADVISORY when a load can run before init completes (e.g. issued from `Awake()` / `Start()`) or no gate is provable; never affects `status`.
 - `placement_ids_match` — **behavioral**: per format, the placement/ad-unit id passed to `Load*` is provably the same value as the one passed to `Show*` across all call paths.
+- `smartfloors_analytics_only` — **behavioral, FAIL-capable** (project-wide). The Smart Floors user group / `IsForcedHoldout` is analytics-only; trial and holdout must behave identically. **FAIL** when a read of `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or a stored copy) gates an ad-control decision (ad-unit selection/branch, a `Load*`/`Show*` gate, or an ad-lifecycle state switch), and when a guard branches on a returned `ad.adUnitId == / != <configured>`. PASS when the group is only logged/synced to an analytics property or never read; `ADVISORY` (with `unresolved`) when the flow can't be traced — never a blind FAIL. Encodes a real production regression (group-aware ad logic dropped trial-group impressions in two shipped games).
+- `load_dedup_flag_wedge` — **behavioral, ADVISORY** (project-wide). Flags a wrapper-managed "load in progress" boolean gating `Load<Format>`: redundant (the SDK dedups concurrent loads) and wedge-prone (a missed load callback leaves it stuck, blocking all later reload/retry). Recommendation only; never FAIL, never gates `status`.
 - `revenue_callback_subscribed` — ADVISORY.
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appears as a **string-literal value** in source. A constant merely *named* `YOUR_METICA_API_KEY` holding a real value does not false-positive.
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder word (matched at delimiter boundaries so legitimate ids like `"contest-user-42"` do not false-positive), or a digits-only string. Handles multi-line constructor calls.
@@ -111,7 +120,7 @@ gone, and the semantic verdicts now gate `status` like any other check).
 
 ```json
 {
-  "schema": "validator/2.0.0",
+  "schema": "validator/2.1.0",
   "status": "FAIL",
   "error": null,
   "warnings": [],
@@ -158,7 +167,11 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 - `compat-checker.status == PASS` with any `WARN` → continue, surface warnings.
 - `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). A `compiles_cleanly` FAIL is `surface`-class (a real `CS####` compile error — printed verbatim with `file:line`, not auto-edited). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
 - A `compiles_cleanly` **WARN** (compile skipped — no Unity located / `METICA_SKIP_COMPILE=1` — or could not complete) is non-blocking: surface it in the final report so the user knows the build was not verified, but it does not trigger the autofix loop or affect status.
-- **Behavioral checks (`*_reload_on_hidden`, `*_show_ready_guard`, `placement_ids_match`):** these now gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. Surface each verdict's `evidence`/`reasoning` in the report. A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is **`surface`-class** — never fed to the autofix loop; a human decides.
+- **Behavioral checks** split into two groups by the level they emit:
+  - **Gating** (`*_reload_on_hidden`, `placement_ids_match`, `smartfloors_analytics_only`): emit `PASS`/`FAIL`, so they gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. **Exception:** `smartfloors_analytics_only` FAILs are **`surface`-class** (removing group-aware ad logic is a redesign, not a line edit — surfaced for a human, never auto-fixed). A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is also **`surface`-class** — never fed to the autofix loop; a human decides.
+  - **ADVISORY-only** (`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`): always emit `level: ADVISORY`, so per the Status rule above they surface in the report but never affect `status` and never trigger the autofix loop.
+
+  Surface each verdict's `evidence`/`reasoning` in the report regardless of group.
 
 ---
 

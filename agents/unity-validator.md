@@ -14,7 +14,7 @@ compile** (only the real compiler sees Unity's assemblies); everything else is y
 
 You run in a **fresh context** — that is the clean room that makes your review
 trustworthy: you judge the code as written, not the integrator's intent. Your **final
-message is exactly one fenced ` ```json ` block** (`validator/2.0.0`) and nothing else.
+message is exactly one fenced ` ```json ` block** (`validator/2.1.0`) and nothing else.
 
 ## Inputs
 
@@ -92,7 +92,31 @@ ones grep gets wrong):
 |---|---|
 | `interstitial_reload_on_hidden` / `rewarded_reload_on_hidden` | From the `OnAdHidden` subscriber, is a `Load<Format>(<same placement>)` reachable — directly or through a named helper, a flag-driven `Update`/coroutine, an event, or an async continuation? |
 | `interstitial_show_ready_guard` / `rewarded_show_ready_guard` | Does **every** path that reaches `Show<Format>(id)` first observe `IsReady(id) == true` for that same id? (ADVISORY if not.) |
+| `<format>_show_after_init` (every used format) | Is **every** path that reaches `Show<Format>` (incl. `ShowBanner` / `ShowMrec`) only reachable **after MeticaSDK init has *completed***? Init completes when the `OnInitialized(MeticaInitResponse)` callback fires — **not** when `MeticaSdk.Initialize` is *called*. Accepted proof of an init-completion gate: the show is invoked only from code downstream of `OnInitialized`; **or** guarded by an init-complete flag set **inside** `OnInitialized` (not the idempotency flag set at the *start* of `Initialize()`, which only means "init was called"); **or** (interstitial/rewarded only) guarded by `IsReady(id)` (readiness implies a post-init successful load — banner/MRec have no `IsReady`, so they rely on one of the first two). (ADVISORY if a show can run before init completes, or no such gate can be proven.) |
+| `<format>_load_after_init` (every used format) | Is **every** path that reaches `Load<Format>` (and `Create<Format>` for banner/MRec) only reachable **after init has *completed***? In the canonical pattern the initial load is kicked off from `Init<Format>`, which is called **inside** `OnInitialized`; reloads (auto-reload-on-hidden, exponential-backoff retry) are downstream of that first post-init load. Accepted proof: the load originates from the `OnInitialized` path — directly, or via a reload/retry chain rooted in a post-init load. (ADVISORY if a load can run before init completes — e.g. issued from `Awake()` / `Start()` ahead of the init callback — or no such gate can be proven.) |
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
+
+**Smart Floors must stay analytics-only** (project-wide, not per-format — these encode a real
+production regression: group-aware ad logic dropped the trial group's impressions/DAU in two
+shipped games):
+
+- `smartfloors_analytics_only` — **behavioral, FAIL-capable.** The Smart Floors **user group**
+  / **`IsForcedHoldout`** flag is for analytics only; **trial and holdout must drive identical
+  ad behaviour**. FAIL when a read of `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or
+  a stored copy) flows into an ad-control decision — selecting or branching an ad-unit id,
+  gating a `Load*`/`Show*`, or switching ad-lifecycle state. **Also FAIL** a guard that branches
+  on whether a returned `ad.adUnitId` `==` / `!=` a configured id: the SDK owns Smart-Floors
+  ad-unit routing, so app code must pass the configured id through unchanged and never
+  second-guess what comes back. PASS when the group is only logged or synced to an analytics
+  user-property (e.g. a Firebase `SetUserProperty`), or never read. Cite the source read →
+  the branch it gates (≥2 evidence). If the flow can't be resolved (indirection), emit
+  `ADVISORY` with `unresolved` — never a blind FAIL.
+- `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a wrapper-managed "load in
+  progress" / "is loading" boolean that gates `Load<Format>`. It is redundant (the SDK
+  deduplicates concurrent loads) and **wedge-prone**: if a load callback never fires, the flag
+  stays set and silently blocks every later reload-on-hide, retry, and prepare. Recommend
+  removing it. Cite the flag's set site + the gated `Load`. Never FAIL — this is a
+  recommendation, not a correctness gate.
 
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
 `<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
@@ -150,7 +174,7 @@ docs-transcription bugs and report them under a `compiles_cleanly` finding: an u
 - Judge only what the cited code proves, identically on every run, so the integrator's
   autofix loop sees a stable verdict.
 
-## Output contract — one JSON block (`validator/2.0.0`)
+## Output contract — one JSON block (`validator/2.1.0`)
 
 Print one fenced ```` ```json ```` object as your **entire** final message. See
 `agents/contracts.md` for the schema. Each check is
