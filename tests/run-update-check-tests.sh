@@ -132,6 +132,17 @@ out="$(PATH="$NOSORT" CLAUDE_PLUGIN_ROOT="$r" \
     || bad "no-sort regression (rc=$rc, out=$out)"
 rm -rf "$r" "$NOSORT"
 
+# 10. Leading-zero version segment → numeric compare, no stderr leak. Remote
+#     2.08.0 equals local 2.8.0 numerically, so the output must be EMPTY (any
+#     "integer expression expected" leak would make it non-empty).
+r="$(make_root 2.8.0)"
+out="$(PATH="$BIN" CLAUDE_PLUGIN_ROOT="$r" \
+       FAKE_REMOTE_JSON='{"version":"2.08.0"}' bash "$CU" </dev/null 2>&1)"; rc=$?
+{ [ "$rc" = "0" ] && [ -z "$out" ]; } \
+    && ok "leading-zero segment (2.08.0 == 2.8.0) → numeric, silent (no stderr leak)" \
+    || bad "leading-zero compare (rc=$rc, out=$out)"
+rm -rf "$r"
+
 rm -rf "$BIN" "$NOCURL"
 
 echo

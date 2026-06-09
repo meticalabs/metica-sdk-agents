@@ -61,11 +61,14 @@ ver_gt() {
     local a1 a2 a3 b1 b2 b3
     IFS=. read -r a1 a2 a3 <<<"$1"
     IFS=. read -r b1 b2 b3 <<<"$2"
-    a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
-    b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
-    [ "$a1" -ne "$b1" ] && { [ "$a1" -gt "$b1" ]; return; }
-    [ "$a2" -ne "$b2" ] && { [ "$a2" -gt "$b2" ]; return; }
-    [ "$a3" -gt "$b3" ]
+    # Coerce each segment to a base-10 int (strips leading zeros, defaults a
+    # missing field to 0) so a segment like "08" can't trip arithmetic and leak
+    # "integer expression expected" to stderr — preserving silent fail-open.
+    a1=$((10#${a1:-0})); a2=$((10#${a2:-0})); a3=$((10#${a3:-0}))
+    b1=$((10#${b1:-0})); b2=$((10#${b2:-0})); b3=$((10#${b3:-0}))
+    (( a1 != b1 )) && { (( a1 > b1 )); return; }
+    (( a2 != b2 )) && { (( a2 > b2 )); return; }
+    (( a3 > b3 ))
 }
 
 LOCAL_VER="$(extract_version < "$ROOT/.claude-plugin/plugin.json" 2>/dev/null || true)"
