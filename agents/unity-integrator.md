@@ -220,7 +220,7 @@ Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read eac
 
 Before you rewrite anything, understand **how the game currently drives each format in use** — the generated `MeticaAdService` must preserve that behaviour, not merely swap the API. For **every format in use**, answer the questions below by reading the call sites and their surrounding code (cite where each answer lives):
 
-1. **When does the ad load?** Where/when is `Load<Format>` called — once at app start / preload, after each dismissal, on-demand right before show, or on a timer? MeticaAdService already auto-loads inside `OnInitialized` and reloads on hidden, so a game that relies on that needs no game-side `Load*`; but if the game preloads at a deliberate point (e.g. between levels), keep that `Load*` wired to the orchestrator rather than dropping it.
+1. **When does the ad load?** Where/when is `Load<Format>` called — once at app start / preload, after each dismissal, on-demand right before show, or on a timer? MeticaAdService already auto-loads inside `OnInitialized` and reloads on hidden, so a game that relies on that needs no game-side `Load*`; but if the game preloads at a deliberate point (e.g. between levels), keep that `Load*` wired to the orchestrator rather than dropping it. This finding drives the Step 5 rewrite's drop-vs-preserve decision for `MaxSdk.Load*` calls (see the Step 5 "Critical — Load" note) — redundant loads are dropped, a deliberate preload is mapped to `_ads.Load<Format>()`.
 2. **When does the ad show?** Which game event calls `Show<Format>`? (this is the `Trigger pattern` row above — e.g. `LevelEndController.OnLevelEnd`). The rewrite points that same trigger at the orchestrator.
 3. **Is there a gate between shows?** A frequency cap / cooldown / counter guarding the show — min seconds between interstitials, "every N levels", a `_lastShownAt` check, a remote-config'd cap, a no-ads-for-payers flag. **MeticaAdService does NOT implement frequency capping**; this guard lives in the game's own code and **must survive the rewrite** — swap only the `MaxSdk.Show*` call, never the surrounding `if (cooldown…)` (see the preserve-surrounding-logic rule in the refactor workflow).
 4. **Single ad call or multi?** Does the format use **one** ad-unit id (one instance) or **several** (multiple banners on screen at once, per-placement ad units, an A/B pair)? The template carries **one** `_<fmt>AdUnitId` per format. If the game uses more than one id for a format, **surface it in the Step 3 plan** — the region then needs per-id state (or one orchestrator instance per id); do not silently collapse several ids into one.
@@ -421,17 +421,22 @@ gameObject.AddComponent<MeticaAdService>();  // MeticaAdService is a MonoBehavio
 **Method calls (receiver swap + casing/name remap per references/max-vs-metica-2.4.0-api.md):**
 
 ```csharp
-MaxSdk.LoadInterstitial(adUnitId)        →  drop — load is automatic (init + reload-on-hidden own it)
+MaxSdk.LoadInterstitial(adUnitId)        →  drop if redundant, else _ads.LoadInterstitial()  (see Critical note)
 MaxSdk.IsInterstitialReady(adUnitId)     →  drop — Show() guards internally
 MaxSdk.ShowInterstitial(adUnitId, p, c)  →  _ads.ShowInterstitial(p, c)
-MaxSdk.LoadRewardedAd(adUnitId)          →  drop — load is automatic
+MaxSdk.LoadRewardedAd(adUnitId)          →  drop if redundant, else _ads.LoadRewarded()  (see Critical note)
 MaxSdk.IsRewardedAdReady(adUnitId)       →  drop — Show() guards internally
 MaxSdk.ShowRewardedAd(adUnitId, p, c)    →  _ads.ShowRewarded(p, c)
 MaxSdk.CreateBanner / LoadBanner / ShowBanner / HideBanner / DestroyBanner → _ads.*Banner
 MaxSdk.CreateMRec / LoadMRec / ShowMRec / HideMRec / DestroyMRec           → _ads.*Mrec  // note casing: MRec → Mrec
 ```
 
-**Critical**: do NOT rewrite `MaxSdk.LoadInterstitial(id)` to `_ads.ShowInterstitial(...)` — that changes behavior. `LoadInterstitial` is a preload (no display); `_ads.ShowInterstitial(...)` displays an ad. Games typically call `LoadInterstitial` at level-start to preload and `ShowInterstitial` at level-end to display — rewriting Load → Show would display the ad at level-start. The correct mapping is to **drop** the explicit Load call entirely: the per-format adapter auto-loads in the init callback and again on every `OnAdHidden` / `OnAdShowFailed`, so explicit Load calls are redundant.
+**Critical** (Load — drop vs. preserve, never display): never rewrite `MaxSdk.LoadInterstitial(id)` to `_ads.ShowInterstitial(...)` — that changes behavior (`LoadInterstitial` is a preload with no display; `ShowInterstitial` displays). Beyond that, decide per the Step 2 **per-format behaviour** finding ("when does the ad load?"):
+
+- **Drop** the explicit Load when it is **redundant** with the adapter's own loading — the per-format region auto-loads in the init callback and again on every `OnAdHidden` / `OnAdShowFailed`, so a load that merely keeps an ad warm is dead weight.
+- **Preserve** it as `_ads.Load<Format>()` when discovery shows a **deliberate preload point** the game controls (e.g. a load fired at level-start for a known level-end show) — map it to the orchestrator's `Load*` delegator rather than dropping it, so the game's load timing survives the migration.
+
+When in doubt, surface the drop-vs-preserve choice for that call site in the Step 3 plan rather than silently dropping it.
 
 Reuse the game's existing Max ad unit IDs for MeticaAdService's per-format `adUnitId`s (per the migration guide; they pass through unchanged).
 

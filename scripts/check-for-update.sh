@@ -4,8 +4,9 @@
 #
 # Wired from hooks/hooks.json as the plugin's SessionStart command hook. It
 # compares the locally-installed plugin version (.claude-plugin/plugin.json)
-# against the latest published one (the same file on the repo's default branch)
-# and, only when the remote is strictly newer, prints a SessionStart
+# against the latest published one (the same file on the repo's `main` branch,
+# overridable via METICA_UPDATE_URL) and, only when the remote is strictly newer,
+# prints a SessionStart
 # `additionalContext` notice that Claude Code surfaces to the user.
 #
 # This is one of the few things that genuinely needs a script, not agent prose:
