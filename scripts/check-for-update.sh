@@ -46,10 +46,26 @@ else
 fi
 [ -n "$ROOT" ] || exit 0
 
-# Extract the first "version": "x.y.z" string value from a plugin.json on stdin.
+# Extract the first strict "version": "x.y.z" string value from a plugin.json on
+# stdin. Only a clean three-part numeric version is captured; anything else
+# (pre-release suffixes, missing field) yields empty and fails the check open.
 extract_version() {
-    sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)".*/\1/p' \
+    sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
         | head -n1
+}
+
+# ver_gt A B → true (exit 0) when A is a strictly-newer x.y.z than B. Pure bash
+# numeric compare — no `sort -V`, which is GNU-only and absent on BSD/macOS
+# (where it would error out and silently suppress the notice).
+ver_gt() {
+    local a1 a2 a3 b1 b2 b3
+    IFS=. read -r a1 a2 a3 <<<"$1"
+    IFS=. read -r b1 b2 b3 <<<"$2"
+    a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
+    b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+    [ "$a1" -ne "$b1" ] && { [ "$a1" -gt "$b1" ]; return; }
+    [ "$a2" -ne "$b2" ] && { [ "$a2" -gt "$b2" ]; return; }
+    [ "$a3" -gt "$b3" ]
 }
 
 LOCAL_VER="$(extract_version < "$ROOT/.claude-plugin/plugin.json" 2>/dev/null || true)"
@@ -63,10 +79,8 @@ REMOTE_JSON="$(curl -fsS --max-time "$TIMEOUT" "$URL" 2>/dev/null || true)"
 REMOTE_VER="$(printf '%s' "$REMOTE_JSON" | extract_version)"
 [ -n "$REMOTE_VER" ] || exit 0
 
-# Strictly-newer test via version sort. Equal or older → nothing to say.
-[ "$REMOTE_VER" = "$LOCAL_VER" ] && exit 0
-higher="$(printf '%s\n%s\n' "$LOCAL_VER" "$REMOTE_VER" | sort -V 2>/dev/null | tail -n1)"
-[ "$higher" = "$REMOTE_VER" ] || exit 0
+# Equal or older → nothing to say. Only a strictly-newer remote notifies.
+ver_gt "$REMOTE_VER" "$LOCAL_VER" || exit 0
 
 # Remote is newer — surface the notice. additionalContext is a single-line,
 # double-quote-free string, so it is safe to splice into the JSON directly.

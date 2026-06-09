@@ -118,6 +118,20 @@ out="$( unset CLAUDE_PLUGIN_ROOT; PATH="$BIN" \
     && ok "self-location resolves root without CLAUDE_PLUGIN_ROOT" || bad "self-location (rc=$rc, out=$out)"
 rm -rf "$r"
 
+# 9. No `sort`/`tail` on PATH → must still detect a newer version. Guards the
+#    BSD/macOS regression where GNU-only `sort -V` would silently suppress the
+#    notice; the compare is now pure bash.
+NOSORT="$(mktemp -d -t metica-cu-nosort-XXXXXX)"
+for t in bash sed head dirname; do ln -s "$(command -v "$t")" "$NOSORT/$t" 2>/dev/null; done
+cp "$BIN/curl" "$NOSORT/curl"
+r="$(make_root 2.1.0)"
+out="$(PATH="$NOSORT" CLAUDE_PLUGIN_ROOT="$r" \
+       FAKE_REMOTE_JSON='{"version":"2.2.0"}' bash "$CU" </dev/null 2>&1)"; rc=$?
+{ [ "$rc" = "0" ] && printf '%s' "$out" | grep -q 'v2.2.0'; } \
+    && ok "no sort/tail on PATH → still detects update (no GNU-sort dep)" \
+    || bad "no-sort regression (rc=$rc, out=$out)"
+rm -rf "$r" "$NOSORT"
+
 rm -rf "$BIN" "$NOCURL"
 
 echo
