@@ -143,6 +143,32 @@ out="$(PATH="$BIN" CLAUDE_PLUGIN_ROOT="$r" \
     || bad "leading-zero compare (rc=$rc, out=$out)"
 rm -rf "$r"
 
+# 11. sed missing → extract_version must not leak stderr. With no sed, the local
+#     version can't be parsed (silent exit 0); a "sed: command not found" leak
+#     would make the output non-empty.
+NOSED="$(mktemp -d -t metica-cu-nosed-XXXXXX)"
+for t in bash head dirname; do ln -s "$(command -v "$t")" "$NOSED/$t" 2>/dev/null; done
+r="$(make_root 2.1.0)"
+out="$(PATH="$NOSED" CLAUDE_PLUGIN_ROOT="$r" \
+       FAKE_REMOTE_JSON='{"version":"9.9.9"}' bash "$CU" </dev/null 2>&1)"; rc=$?
+{ [ "$rc" = "0" ] && [ -z "$out" ]; } \
+    && ok "sed missing → silent (no stderr leak from extract_version)" \
+    || bad "no-sed stderr leak (rc=$rc, out=$out)"
+rm -rf "$r" "$NOSED"
+
+# 12. dirname missing during self-location → must not leak stderr. No
+#     CLAUDE_PLUGIN_ROOT forces the self-location branch; with no dirname the
+#     root can't be resolved (silent exit 0), and no error must surface.
+NODIRNAME="$(mktemp -d -t metica-cu-nodirname-XXXXXX)"
+for t in bash sed head; do ln -s "$(command -v "$t")" "$NODIRNAME/$t" 2>/dev/null; done
+r="$(make_root 2.1.0)"; mkdir -p "$r/scripts"; cp "$CU" "$r/scripts/check-for-update.sh"
+out="$( unset CLAUDE_PLUGIN_ROOT; PATH="$NODIRNAME" \
+        FAKE_REMOTE_JSON='{"version":"9.9.9"}' bash "$r/scripts/check-for-update.sh" </dev/null 2>&1)"; rc=$?
+{ [ "$rc" = "0" ] && [ -z "$out" ]; } \
+    && ok "dirname missing in self-location → silent (no stderr leak)" \
+    || bad "no-dirname stderr leak (rc=$rc, out=$out)"
+rm -rf "$r" "$NODIRNAME"
+
 rm -rf "$BIN" "$NOCURL"
 
 echo

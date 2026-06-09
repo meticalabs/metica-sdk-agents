@@ -41,7 +41,8 @@ if [ "${CLAUDE_PLUGIN_ROOT:-}" != "" ] && is_root "$CLAUDE_PLUGIN_ROOT"; then
     ROOT="$CLAUDE_PLUGIN_ROOT"
 else
     self_src="${BASH_SOURCE[0]:-$0}"
-    cand="$(cd "$(dirname "$self_src")/.." 2>/dev/null && pwd || true)"
+    # stderr-silenced throughout (incl. dirname) so toolchain gaps stay silent.
+    cand="$(cd "$(dirname "$self_src" 2>/dev/null)/.." 2>/dev/null && pwd 2>/dev/null || true)"
     [ -n "$cand" ] && is_root "$cand" && ROOT="$cand"
 fi
 [ -n "$ROOT" ] || exit 0
@@ -50,8 +51,10 @@ fi
 # stdin. Only a clean three-part numeric version is captured; anything else
 # (pre-release suffixes, missing field) yields empty and fails the check open.
 extract_version() {
-    sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
-        | head -n1
+    # stderr-silenced so a missing/erroring sed or head can't break silent fail-open
+    # (covers the REMOTE_VER caller too, which doesn't redirect at the call site).
+    sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' 2>/dev/null \
+        | head -n1 2>/dev/null
 }
 
 # ver_gt A B → true (exit 0) when A is a strictly-newer x.y.z than B. Pure bash
