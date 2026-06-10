@@ -274,6 +274,17 @@ Surface the chosen value in the detection report; the user can override via the 
 
 To compute it, read the first `namespace` declaration from each `.cs` file under `Assets/Scripts/` (Grep for `^\s*namespace\s+` and Read the line). If one exact namespace covers ≥50% of the files, use it. Otherwise derive every leading prefix of each namespace (`A`, `A.B`, `A.B.C`, …), count how many files carry each, and pick the **longest** prefix that still covers ≥50% — longest, not most-frequent, so a 3-segment prefix shared by 50% beats a 1-segment prefix shared by 80%. Perfect precision isn't required: the user confirms the detected value in the Step 3 plan before anything is written.
 
+#### Signal 3 — `threepa_providers`
+
+Runs whether or not MaxSDK is present. Detect which third-party analytics (3PA) SDKs the project ships, so Step 5 can populate the generated `OnAdRevenuePaid` handlers (and the report can carry the main-thread-dispatch caveat). Check each provider's signals — package dir, `manifest.json` entry, or a `using` import under `Assets/Scripts/`:
+
+- **`adjust`** — `[ -d "$PROJECT/Assets/Adjust" ]`, `"com.adjust.sdk"` in `Packages/manifest.json`, or a `.cs` matching `^using (com\.)?adjust` / `AdjustSdk`.
+- **`firebase-analytics`** — `[ -d "$PROJECT/Assets/Firebase" ]` with an Analytics dll/asmdef, `"com.google.firebase.analytics"` in `manifest.json`, or a `.cs` matching `^using Firebase\.Analytics`.
+- **`appsflyer`** — `[ -d "$PROJECT/Assets/AppsFlyer" ]`, `"com.appsflyer"` in `manifest.json`, or a `.cs` matching `^using AppsFlyerSDK`.
+- **`appmetrica`** — `[ -d "$PROJECT/Assets/AppMetrica" ]`, an `appmetrica` entry in `manifest.json`, or a `.cs` matching `^using Io\.AppMetrica` / `AppMetricaSdk`.
+
+Record **all** providers found (a game may forward to several at once — Ragdoll forwarded to four). The result drives Step 5's "3PA revenue forwarders" patch pass and one ADVISORY line in the Step 7 report; it does **not** change which artifacts are generated. Surface the detected set in the detection report.
+
 #### Secondary checks (inline at generation time)
 
 These do not need a detection-report row; they are applied during codegen:
@@ -506,8 +517,12 @@ After rendering the templates, apply a small, fixed set of **deterministic, name
 | **Default placement** | placement strings observed | Where the delegator would otherwise pass `null`, pass the **most-frequent observed placement** (from the Step 2 placement counts; ties broken by first-seen) instead — e.g. `_interstitial?.Show("level_complete")`. The per-format `Show(string placement = null, …)` already accepts it — no template change. |
 | **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness.) |
 | **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
+| **3PA revenue forwarders** | a 3PA provider detected (Step 2.5 Signal 3) | Populate each used format's named `On<Format>RevenuePaid` handler with the matching forwarder call, **one per detected provider**. **Prefer relocating the game's own existing forwarder calls** (found during the Max-callsite scan / callback-subscription rewrite) — they are already version-correct for the game's installed 3PA SDK versions — into the handler; only fall back to a fresh call (canonical shapes in `references/3pa-forwarders.md`) when the game had none. Forward from `OnAdRevenuePaid` **only** — never `OnAdHidden` or a dismissal hook (that loses click-through revenue; the validator FAILs it). No App-Open handler (App Open is `drop` per the TSV). |
+| **Banner/MRec setter ordering** | `SetBanner*` / `SetMrec*` calls migrated from the game (or generated) | Emit setters **after** the matching `Create*` call, never before — a setter on a not-yet-created `adUnitId` silently no-ops. Order is: subscribe callbacks → `CreateBanner`/`CreateMrec` → `SetBanner*`/`SetMrec*`. For interstitial/rewarded `SetInterstitial*` / `SetRewardedAd*`, re-apply after each load (pre-creation calls are dropped per the TSV). Keeps the validator's `*_setter_after_create` rules green. |
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
+
+When any 3PA forwarder is generated, also emit one ADVISORY line in the Step 7 report: *"3PA forwarders (Adjust / Firebase / AppMetrica / AppsFlyer) generated inside `OnAdRevenuePaid` dispatch through Unity's main thread (`MeticaSdk` binding uses `SynchronizationContext.Post`). Production click-through-no-return scenarios may lose events until Metica provides a Java-side forward path."*
 
 ```bash
 mkdir -p "$PROJECT/$ADAPTER_FOLDER"
@@ -592,7 +607,7 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
 share your reasoning with it). Validation is uniform — it does not take or depend on any
 mode. There is no validation script to call directly; the validator reasons over the code
-and returns one `validator/2.1.0` JSON block.
+and returns one `validator/2.2.0` JSON block.
 
 Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
@@ -618,8 +633,10 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
 | `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
 | `smartfloors_analytics_only` | surface | Group-aware ad logic (branching ad load/show/ad-unit selection on the Smart Floors user group / `IsForcedHoldout`, or on a returned-`adUnitId` equality check) is a **redesign**, not a line edit — and a real revenue regression. Surface the cited branch (`file:line`) and stop; the integrator's own codegen never emits this (it only logs the group), so a FAIL means hand-rolled code that must be simplified to the docs pattern (pass the configured id through, treat trial/holdout identically). |
+| `banner_setter_after_create` / `mrec_setter_after_create` | autofix \| surface | If the setter and its `Create*` sit in the **same method**, reorder so `Create*` precedes the setter (autofix). If they're in different methods / call paths, surface the setter `file:line` + the `Create*` it must follow and stop — cross-method reordering isn't a safe line edit. The integrator's own setter-ordering patch pass keeps generated code green, so a FAIL is hand-rolled. |
+| `threepa_forwarder_in_revenue_paid` | surface | A 3PA revenue forwarder wired outside `OnAdRevenuePaid` (e.g. in `OnAdHidden`) loses click-through revenue. Relocating an analytics call is game logic, not a line edit — surface the forwarder `file:line` + its enclosing handler and the target (`OnAdRevenuePaid`), and stop. |
 
-`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `interstitial_setter_after_create` / `rewarded_setter_after_create`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 

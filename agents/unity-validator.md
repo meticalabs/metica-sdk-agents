@@ -14,7 +14,7 @@ compile** (only the real compiler sees Unity's assemblies); everything else is y
 
 You run in a **fresh context** — that is the clean room that makes your review
 trustworthy: you judge the code as written, not the integrator's intent. Your **final
-message is exactly one fenced ` ```json ` block** (`validator/2.1.0`) and nothing else.
+message is exactly one fenced ` ```json ` block** (`validator/2.2.0`) and nothing else.
 
 ## Inputs
 
@@ -118,6 +118,38 @@ shipped games):
   removing it. Cite the flag's set site + the gated `Load`. Never FAIL — this is a
   recommendation, not a correctness gate.
 
+**Setter ordering & 3PA analytics forwarders** (from the Ragdoll Adjust investigation):
+
+- `banner_setter_after_create` / `mrec_setter_after_create` — **behavioral, FAIL-capable.**
+  Every `MeticaSdk.Ads.SetBanner*` / `SetMrec*` call for an `adUnitId` (`SetBannerExtraParameter`,
+  `SetBannerLocalExtraParameter`, `SetBannerCustomData`, `SetBannerBackgroundColor`,
+  `SetBannerWidth`, `SetBannerPlacement`, and the `SetMrec*` equivalents) must be **preceded on
+  every path** by `CreateBanner` / `CreateMrec` for the **same** `adUnitId`. A setter called
+  before `Create` silently no-ops (the wrapper warns `UnityBannersMetica: setExtraParameterForKey
+  called but BANNER not found for adUnitId: …` and drops it) — this is the bug that silently
+  disabled `adaptive_banner=true` in a shipped game, costing fill/eCPM. Cite the setter site →
+  the (missing or later) `Create` (≥2 evidence). `ADVISORY` with `unresolved` if the ordering
+  can't be traced (e.g. setter and create in different methods with no resolvable call order).
+- `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral, ADVISORY.**
+  Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters: per
+  `references/max-metica-api-map.tsv`, pre-creation calls land on a not-yet-created instance and
+  are silently dropped, so these should be **re-applied after each load**. Kept ADVISORY (not
+  FAIL) pending confirmation against the SDK source (`MeticaAdsImpl.kt` / `UnityBridge.kt`) of
+  whether interstitial/rewarded params are cached and applied to the next load or dropped
+  outright — flag the ordering, recommend re-applying after load.
+- `threepa_forwarder_in_revenue_paid` — **behavioral, FAIL-capable.** When a 3PA analytics SDK
+  (Adjust, Firebase Analytics, AppsFlyer, AppMetrica) is present, its **ad-revenue forwarding
+  call** (e.g. `Adjust.trackAdRevenue` / `AdjustCustomEvent.SendMaxRevEvent`,
+  `FirebaseAnalytics.LogEvent("ad_impression", …)`, `AppsFlyer.sendEvent("af_ad_revenue", …)`,
+  `Appmetrica.ReportRevenue*`) must live inside a `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid`
+  handler. **FAIL** when such a call is found inside `OnAdHidden` / a dismissal handler / any
+  other lifecycle hook — that wiring reports revenue only on user-dismissal, so click-through
+  users (who never dismiss) lose every revenue event. **ADVISORY** when the call *is* inside
+  `OnAdRevenuePaid` — correct placement, but dispatch still rides Unity's main thread
+  (`SynchronizationContext.Post`), so production click-through-no-return scenarios may still lose
+  events until Metica provides a Java-side forward path. Cite the forwarder call + its enclosing
+  handler.
+
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
 `<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
 **all non-exempt namespaces** — `MaxSdk.`, `MaxSdkBase.`, `MaxSdkCallbacks.`, `MaxCmpService.`
@@ -174,7 +206,7 @@ docs-transcription bugs and report them under a `compiles_cleanly` finding: an u
 - Judge only what the cited code proves, identically on every run, so the integrator's
   autofix loop sees a stable verdict.
 
-## Output contract — one JSON block (`validator/2.1.0`)
+## Output contract — one JSON block (`validator/2.2.0`)
 
 Print one fenced ```` ```json ```` object as your **entire** final message. See
 `agents/contracts.md` for the schema. Each check is

@@ -209,9 +209,42 @@ For each format, find the **first** Metica floor-param call and the **first** `l
 
 Also sanity-check the values: `dynamicBidFloor` should be a positive eCPM (typically `> 0` and `≤ ~100`). An out-of-range value (negative, zero, multi-thousand) means a unit-conversion bug somewhere.
 
-#### Step 6. Load strategy (timestamps)
+#### Step 5.5. MAX → 3PA analytics forward rate (per provider)
 
-Use the lifecycle lines from Step 3.2 (across all formats). Read the **timestamps** (Android threadtime: `MM-DD HH:MM:SS.sss`; iOS syslog: `Mon DD HH:MM:SS`). Answer three questions:
+Games forward each MAX ad-revenue event to one or more third-party analytics (3PA) providers. They all dispatch from the same Unity main-thread `OnAdRevenuePaid` handler, so they share one loss profile — measure each provider that appears in the log.
+
+Detect which providers are present, then grep each one's forwarded-event signal:
+
+| Provider | Forwarded-event signal to grep |
+|---|---|
+| Adjust | `Adjust  : Path:      /ad_revenue` (POST), then `Response message: Ad revenue tracked` |
+| Firebase Analytics | `FirebaseAnalytics .* Logging event .* ad_impression` (game-fired `LogEvent`) |
+| AppsFlyer | `AppsFlyer .* af_ad_revenue` or `af_inapp_ad_view` (depends on the game's chosen event name) |
+| AppMetrica | `AppMetrica .* reportAdRevenue` or `Reporting ad revenue` (depends on integration) |
+
+The MAX-side denominator is unchanged: `Invoking event: On(Interstitial|Banner|Rewarded|AppOpen)AdRevenuePaidEvent` (pure MAX), or `MaxAdRevenueListener.onAdRevenuePaid` on the Metica path.
+
+For each detected provider, report **by format**:
+
+- **MAX revenue events observed** (the denominator).
+- **Forwarded events** that reached the provider's outbound SDK call.
+- **Forward rate** = forwarded / MAX events (give the ratio **and** the lost count).
+- **Dispatch latency** — median and max ms between the MAX event firing and the provider's forward call (same timestamp-diff technique as Step 6).
+- **Lost / stalled at end of window** — MAX events with no matching forward by the end of the capture; pair by network + revenue value where possible.
+
+A forward rate below 100% — especially clustered at the end of the window or around a click-through-no-return — points at the Unity main-thread dispatch dependency (`SynchronizationContext.Post`); quote the unmatched MAX events as evidence. If no 3PA provider appears, say so and skip this section.
+
+#### Step 6. Load timing & strategy (timestamps)
+
+Use the lifecycle lines from Step 3.2 (across all formats). Read the **timestamps** (Android threadtime: `MM-DD HH:MM:SS.sss`; iOS syslog: `Mon DD HH:MM:SS`).
+
+**Timing metrics (per format, and per ad-unit when a format has two):**
+
+- **Load count** — number of `loadAd()` requests; carry the Step 3.2 tallies into the Load Timing table.
+- **Load response time** — for each `loadAd()`, find the next terminal transition for the same format/unit and diff the timestamps: `LOADING → READY` is a **fill** latency, `LOADING → IDLE` a **no-fill** latency. Report median + max ms for fills, and the no-fill latencies separately. Quote the slowest fill as evidence.
+- **Time to first ad ready** — per format, the first `READY` timestamp minus a baseline: the Metica `OnInitialized` / config callback (Step 2) if present, else that format's first `loadAd()`. This is cold-start readiness; quote both timestamps.
+
+**Strategy questions:**
 
 - **Inter-format parallelism.** Do interstitial and rewarded `loadAd()` fire within a few hundred ms of each other at startup, or sequentially? Quote the two `loadAd()` lines as evidence.
 - **Intra-format parallelism (dual unit).** If a format has two ad unit IDs, do both enter LOADING before either reaches READY? Quote the two LOADING transitions.
@@ -274,6 +307,15 @@ Use the Write tool to create `./<label>-analysis.md` with the structure below. S
 | Shows (impressions) | N |
 | Show failures | N |
 | Hidden | N |
+| Fill rate (Loaded / Loads) | …% |
+| Errors (this format) | N → see Errors & Warnings |
+
+### Load Timing
+| Metric | Value |
+|---|---|
+| Load response time — fill (median / max) | … ms / … ms |
+| Load response time — no-fill (median / max) | … ms / … ms |
+| Time to first ad ready (from init) | … ms |
 
 ### Load & Show Timeline
 A short prose paragraph or bullet list with timestamped key events (first loadAd, first READY, first SHOWING, etc.) — your evidence trail for the strategy section below.
@@ -315,6 +357,18 @@ Confirm that every Displayed → Hidden pair carries a `ReceivedReward` between 
 | Rewarded | ... | ... | ... |
 
 **Floor values observed:** range $X.XX – $Y.YY eCPM (or "out of range: …", or "no floors set this session").
+
+---
+
+## 3PA Analytics Forwarding
+(only if a 3PA provider appears in the log)
+
+| Provider | Format | MAX events | Forwarded | Forward rate | Lost | Dispatch latency (med / max) |
+|---|---|---|---|---|---|---|
+| Adjust | Interstitial | N | N | …% | N | … / … ms |
+| … | … | … | … | … | … | … |
+
+Note any events lost or stalled at the end of the capture window, and whether the loss pattern points at the Unity main-thread dispatch dependency.
 
 ---
 
@@ -372,6 +426,11 @@ Once the file is written, summarise to the user: which formats appeared, headlin
 | Show rate (Shows / Loaded) | …% | …% | … | …% |
 | Avg revenue per impression | $… | $… | … | $… |
 | Reload latency (median Hidden→next loadAd) | …ms | …ms | … | …ms |
+| Load response time (median fill) | …ms | …ms | … | …ms |
+| Time to first ad ready | …ms | …ms | … | …ms |
+| Errors (count) | … | … | … | … |
+| 3PA forward rate — `<provider>` | …% | …% | … | …% |
+| 3PA dispatch latency — `<provider>` (median) | …ms | …ms | … | …ms |
 | Top winning network | … | … | … | … |
 
 The `Δ` column is **trial vs holdout** — that is the comparison. *Include the `Baseline` column only when a baseline route was captured; otherwise drop it.* If a metric isn't available for one of the routes (e.g. revenue wasn't logged in this build), say so — don't fabricate.
@@ -390,6 +449,8 @@ The baseline is the **production store build** — a different build from the de
 - `trial fill rate < holdout fill rate` materially → **FLAG**. Floor priced too high.
 - `trial fill rate < holdout` AND `trial revenue/impression > holdout` → *expected Metica tradeoff* (fewer fills, higher prices). **Note, don't flag.**
 - Trial-only lifecycle anomalies (show without ready, reload latency >5s, missing reward callback) → **FLAG**. A regression in the runtime ad logic itself, independent of bid economics.
+- `trial load response time` or `time to first ad ready` materially worse than holdout, or `trial fill rate < holdout` → **FLAG**. A loading regression, not bid economics.
+- `trial 3PA forward rate < holdout` for any provider → **FLAG**. All forwarders share the Unity main-thread dispatch surface, so a trial-only drop signals the wrapper-architecture asymmetry — analytics under-reporting independent of revenue.
 - Trial-only errors (next section) → **FLAG**.
 
 ### 4. Error diff (cross-route)
