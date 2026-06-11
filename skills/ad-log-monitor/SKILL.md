@@ -449,7 +449,7 @@ The baseline is the **production store build** — a different build from the de
 - `trial fill rate < holdout fill rate` materially → **FLAG**. Floor priced too high.
 - `trial fill rate < holdout` AND `trial revenue/impression > holdout` → *expected Metica tradeoff* (fewer fills, higher prices). **Note, don't flag.**
 - Trial-only lifecycle anomalies (show without ready, reload latency >5s, missing reward callback) → **FLAG**. A regression in the runtime ad logic itself, independent of bid economics.
-- `trial load response time` or `time to first ad ready` materially worse than holdout, or `trial fill rate < holdout` → **FLAG**. A loading regression, not bid economics.
+- `trial load response time` or `time to first ad ready` materially worse than holdout → **FLAG**. A loading regression, not bid economics. (Scope this to the timing metrics only — fill-rate deltas are covered by the rules above.)
 - `trial 3PA forward rate < holdout` for any provider → **FLAG**. All forwarders share the Unity main-thread dispatch surface, so a trial-only drop signals the wrapper-architecture asymmetry — analytics under-reporting independent of revenue.
 - Trial-only errors (next section) → **FLAG**.
 
