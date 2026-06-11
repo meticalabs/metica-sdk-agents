@@ -222,7 +222,7 @@ Detect which providers are present, then grep each one's forwarded-event signal:
 | AppsFlyer | `AppsFlyer .* af_ad_revenue` or `af_inapp_ad_view` (depends on the game's chosen event name) |
 | AppMetrica | `AppMetrica .* reportAdRevenue` or `Reporting ad revenue` (depends on integration) |
 
-The MAX-side denominator is unchanged: `Invoking event: On(Interstitial|Banner|Rewarded|AppOpen)AdRevenuePaidEvent` (pure MAX), or `MaxAdRevenueListener.onAdRevenuePaid` on the Metica path.
+The MAX-side denominator is unchanged: `Invoking event: On(Interstitial|Banner|MRec|Rewarded|AppOpen)AdRevenuePaidEvent` (pure MAX — note `OnMRecAdRevenuePaidEvent` for MRec), or `MaxAdRevenueListener.onAdRevenuePaid` on the Metica path.
 
 For each detected provider, report **by format**:
 
@@ -241,7 +241,7 @@ Use the lifecycle lines from Step 3.2 (across all formats). Read the **timestamp
 **Timing metrics (per format, and per ad-unit when a format has two):**
 
 - **Load count** — number of `loadAd()` requests; carry the Step 3.2 tallies into the Load Timing table.
-- **Load response time** — for each `loadAd()`, find the next terminal transition for the same format/unit and diff the timestamps: `LOADING → READY` is a **fill** latency, `LOADING → IDLE` a **no-fill** latency. Report median + max ms for fills, and the no-fill latencies separately. Quote the slowest fill as evidence.
+- **Load response time** — for each `loadAd()`, find the next terminal transition for the same format/unit and diff the timestamps: `LOADING → READY` is a **fill** latency, `LOADING → IDLE` a **no-fill** latency. Report median + max ms for fills and, as a separate pair, median + max ms for no-fills (the two `Load Timing` rows). Quote the slowest fill as evidence.
 - **Time to first ad ready** — per format, the first `READY` timestamp minus a baseline: the Metica `OnInitialized` / config callback (Step 2) if present, else that format's first `loadAd()`. This is cold-start readiness; quote both timestamps.
 
 **Strategy questions:**

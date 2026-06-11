@@ -139,9 +139,11 @@ shipped games):
   outright — flag the ordering, recommend re-applying after load.
 - `threepa_forwarder_in_revenue_paid` — **behavioral, FAIL-capable.** When a 3PA analytics SDK
   (Adjust, Firebase Analytics, AppsFlyer, AppMetrica) is present, its **ad-revenue forwarding
-  call** (e.g. `Adjust.trackAdRevenue` / `AdjustCustomEvent.SendMaxRevEvent`,
+  call** (e.g. `Adjust.TrackAdRevenue` / `AdjustCustomEvent.SendMaxRevEvent`,
   `FirebaseAnalytics.LogEvent("ad_impression", …)`, `AppsFlyer.sendEvent("af_ad_revenue", …)`,
-  `Appmetrica.ReportRevenue*`) must live inside a `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid`
+  `AppMetrica.*.ReportAdRevenue`) — match these case-insensitively, since identifier casing
+  drifts across SDK versions (`TrackAdRevenue` vs `trackAdRevenue`) — must live inside a
+  `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid`
   handler. **FAIL** when such a call is found inside `OnAdHidden` / a dismissal handler / any
   other lifecycle hook — that wiring reports revenue only on user-dismissal, so click-through
   users (who never dismiss) lose every revenue event. **ADVISORY** when the call *is* inside
