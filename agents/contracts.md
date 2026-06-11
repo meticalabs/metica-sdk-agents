@@ -6,7 +6,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 - Wrap the JSON in a fenced ```` ```json ```` block.
 - The block must be the **last** ```` ```json ```` block in the message. The orchestrator extracts via regex: `(?s)```json\s*(.*?)\s*```(?![\s\S]*```json)`.
-- Each object carries a `"schema"` field with a plain stable name (`compat-checker`, `validator`) — a self-describing tag, **not** a version. The contracts are **not** independently versioned: the orchestrator and the sub-agents ship in one plugin and update atomically, so there is no version skew to guard against. When a contract's JSON changes, update this doc in the same commit; that is the whole discipline.
+- Each object carries a `"schema"` field with a plain stable name (`compat-checker`, `validator`). When a contract's JSON changes, update this doc in the same commit.
 - Unknown fields are ignored. Missing required fields fail parsing.
 - All string fields may be empty (`""`); use `null` only where explicitly allowed.
 
@@ -60,7 +60,7 @@ shape below is unchanged, so the orchestrator's parsing is unaffected.
 
 ## Max-callsite inventory (no JSON contract)
 
-The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to locate, then `Read` each hit's context to drop comment/string matches) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5) for the canonical scan snippet.
+The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to locate, then `Read` each hit's context to drop comment/string matches) and reasons over each hit inline; the inventory lives in the agent's reasoning. See `agents/unity-integrator.md` (Step 5) for the canonical scan snippet.
 
 ---
 
@@ -69,13 +69,12 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to 
 The producer is **agent prose** (`agents/unity-validator.md`): a single pass in which the
 validator reads the project's code, reasons about every rule, and cites the lines that prove
 each verdict. The one thing it shells out for is the Unity batch compile
-(`scripts/compile-check.sh`) behind `compiles_cleanly`. There is no two-phase split, no grep
-floor, and no `engine` field — the validator reads the project and reasons in prose, and its
-semantic verdicts gate `status` like any other check.
+(`scripts/compile-check.sh`) behind `compiles_cleanly`. Its semantic verdicts gate `status`
+like any other check.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
-- `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
+- `warnings`: array of human-readable warning strings. Currently always emitted as `[]`.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` is a non-blocking "could not verify" signal, used by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component is **opaque** — pass it through to the user verbatim; do not parse or join against it. To separate the line number, split on the **last** `:` (the path itself may contain a colon — e.g. a Windows drive letter `C:\...` — but the line number never does, so the last `:` is the right boundary).
@@ -172,10 +171,6 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 ---
 
-## Retired contracts
-
-- **`mode-detect`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted along with its `run-mode-tests.sh` / `mode-fixtures/`. There is no "mode" concept anymore: the integrator discovers MaxSDK presence inline (discovery Step 2) and adapts codegen to it; the validator runs uniform checks and emits no mode field.
-
 ## Changing a contract
 
-Contracts are **not** independently versioned. The orchestrator (integrator) and the sub-agents ship together in one plugin and update atomically, so there is no producer/consumer version skew to guard against — the "accept this major, reject that one" gate a separate schema version would buy you can never fire here. To change a contract: edit the producing sub-agent's prose and this doc **in the same commit**, keeping the two in lockstep. The only semver in the repo is the **plugin release version** (`.claude-plugin/plugin.json` + `marketplace.json`), which tracks the whole bundle for users — see the version-bump convention in `CLAUDE.md`.
+To change a contract, edit the producing sub-agent's prose and this doc **in the same commit**, keeping the two in lockstep. The plugin release version (`.claude-plugin/plugin.json` + `marketplace.json`) is the only semver in the repo — see the version-bump convention in `CLAUDE.md`.

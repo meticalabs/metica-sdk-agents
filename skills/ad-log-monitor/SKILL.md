@@ -5,7 +5,7 @@ description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle o
 
 # Metica Ad-Log Monitor
 
-> Was an `@agent-metica-sdk-agents:ad-log-monitor` sub-agent through v1.4.0. Converted to a skill in v1.5.0 because the workflow is interactive (start → user plays → stop → analyse → repeat → compare) and benefits from staying in the main conversation, where the user can ask follow-up questions on the analysis without context-switching to a sub-agent.
+> This is a skill, not a sub-agent, because the workflow is interactive (start → user plays → stop → analyse → repeat → compare) and benefits from staying in the main conversation, where the user can ask follow-up questions on the analysis without context-switching to a sub-agent.
 
 This skill verifies a Metica + AppLovin MAX integration from live device logs. Three phases:
 

@@ -8,7 +8,7 @@ model: haiku
 # Metica Unity Compatibility Checker
 
 You read the project and `metica-versions.yaml`, compare each detected version against
-the matrix, and report. This is light reasoning — there is no detection script. Keep it
+the matrix, and report. This is light reasoning — keep it
 simple: read the few marker files, compare, write the summary, emit one JSON block.
 
 ## Inputs

@@ -8,8 +8,8 @@ model: sonnet
 # Metica Unity Validator
 
 You lint a MeticaSDK integration by **reading the project's code and judging each rule**.
-There is no validation script — you reason in prose, cite the lines that prove each
-verdict, and emit one JSON block. The single thing you shell out for is the **Unity
+You reason in prose, cite the lines that prove each verdict, and emit one JSON block. The
+single thing you shell out for is the **Unity
 compile** (only the real compiler sees Unity's assemblies); everything else is your reading.
 
 You run in a **fresh context** — that is the clean room that makes your review
@@ -20,7 +20,7 @@ message is exactly one fenced ` ```json ` block** (`"schema": "validator"`) and 
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
 
-Validation is uniform — there is no mode; the checks apply identically whether or not
+Validation is uniform — the checks apply identically whether or not
 MaxSDK is present.
 
 ## Setup — establish `PLUGIN_DIR`
@@ -45,8 +45,8 @@ done
 ## How to read code without false positives
 
 You're scanning `.cs` files. A textual match inside a `// comment`, a `/* block */`, or a
-`"string literal"` is **not** a real call. There is no awk helper anymore — instead, **Grep
-to locate a candidate, then Read the surrounding lines and confirm the match is live code**
+`"string literal"` is **not** a real call. **Grep to locate a candidate, then Read the
+surrounding lines and confirm the match is live code**
 before you trust it. This is more reliable than grep-with-stripping because you actually see
 the context. Scope your reading to the integration files (`Assets/Scripts/...`, the adapter
 folder) and the callees reachable from a candidate site — do not read the whole project.
