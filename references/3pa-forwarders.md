@@ -58,6 +58,6 @@ AppsFlyer.sendEvent("af_ad_revenue", new Dictionary<string, string> {
 Mirror the same handler shape for `OnBannerRevenuePaid`, `OnRewardedRevenuePaid`, and
 `OnMrecRevenuePaid` — every used format that the project forwards.
 
-> These signatures track the providers' SDKs as of the Ragdoll investigation (2026-06); when a
+> These signatures track the providers' SDKs as of 2026-06; when a
 > game ships a different major version, relocate **its** calls rather than forcing these. Keep
 > this file in sync if the integrator's generated fallback changes.

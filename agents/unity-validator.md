@@ -14,7 +14,7 @@ compile** (only the real compiler sees Unity's assemblies); everything else is y
 
 You run in a **fresh context** — that is the clean room that makes your review
 trustworthy: you judge the code as written, not the integrator's intent. Your **final
-message is exactly one fenced ` ```json ` block** (`validator/2.2.0`) and nothing else.
+message is exactly one fenced ` ```json ` block** (`"schema": "validator"`) and nothing else.
 
 ## Inputs
 
@@ -118,7 +118,7 @@ shipped games):
   removing it. Cite the flag's set site + the gated `Load`. Never FAIL — this is a
   recommendation, not a correctness gate.
 
-**Setter ordering & 3PA analytics forwarders** (from the Ragdoll Adjust investigation):
+**Setter ordering & 3PA analytics forwarders:**
 
 - `banner_setter_after_create` / `mrec_setter_after_create` — **behavioral, FAIL-capable.**
   Every `MeticaSdk.Ads.SetBanner*` / `SetMrec*` call for an `adUnitId` (`SetBannerExtraParameter`,
@@ -208,7 +208,7 @@ docs-transcription bugs and report them under a `compiles_cleanly` finding: an u
 - Judge only what the cited code proves, identically on every run, so the integrator's
   autofix loop sees a stable verdict.
 
-## Output contract — one JSON block (`validator/2.2.0`)
+## Output contract — one JSON block (`"schema": "validator"`)
 
 Print one fenced ```` ```json ```` object as your **entire** final message. See
 `agents/contracts.md` for the schema. Each check is

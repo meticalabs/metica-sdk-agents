@@ -6,7 +6,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 - Wrap the JSON in a fenced ```` ```json ```` block.
 - The block must be the **last** ```` ```json ```` block in the message. The orchestrator extracts via regex: `(?s)```json\s*(.*?)\s*```(?![\s\S]*```json)`.
-- Schemas carry a version string `<name>/<major>.<minor>.<patch>`. The orchestrator accepts any minor/patch within an accepted major. Reject unknown majors.
+- Each object carries a `"schema"` field with a plain stable name (`compat-checker`, `validator`) — a self-describing tag, **not** a version. The contracts are **not** independently versioned: the orchestrator and the sub-agents ship in one plugin and update atomically, so there is no version skew to guard against. When a contract's JSON changes, update this doc in the same commit; that is the whole discipline.
 - Unknown fields are ignored. Missing required fields fail parsing.
 - All string fields may be empty (`""`); use `null` only where explicitly allowed.
 
@@ -18,7 +18,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 ---
 
-## `compat-checker/1.0.0`
+## `compat-checker`
 
 The producer is now **agent prose** (`agents/unity-compat-checker.md`) — the agent reads the
 project's marker files and `metica-versions.yaml` and reasons about each check. The JSON
@@ -39,7 +39,7 @@ shape below is unchanged, so the orchestrator's parsing is unaffected.
 
 ```json
 {
-  "schema": "compat-checker/1.0.0",
+  "schema": "compat-checker",
   "status": "BLOCK",
   "target_sdk": "2.4.0",
   "error": null,
@@ -64,25 +64,14 @@ The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to 
 
 ---
 
-## `validator/2.2.0`
+## `validator`
 
 The producer is **agent prose** (`agents/unity-validator.md`): a single pass in which the
 validator reads the project's code, reasons about every rule, and cites the lines that prove
 each verdict. The one thing it shells out for is the Unity batch compile
 (`scripts/compile-check.sh`) behind `compiles_cleanly`. There is no two-phase split, no grep
-floor, and no `engine` field — `2.0.0` was the breaking simplification of the old
-`validator/1.x` (the grep floor and the `engine: "grep"` / `"llm-adjudicator"` distinction are
-gone, and the semantic verdicts now gate `status` like any other check). `2.1.0` is a
-backward-compatible minor: it adds the behavioral `<format>_show_after_init` and
-`<format>_load_after_init` rules (ADVISORY), the `smartfloors_analytics_only` rule
-(FAIL-capable — group-aware ad logic is a real revenue regression), and the
-`load_dedup_flag_wedge` rule (ADVISORY); the JSON shape is unchanged, so the orchestrator —
-which accepts any minor within `validator/2.x` — is unaffected. `2.2.0` (from the Ragdoll Adjust
-investigation) is another backward-compatible minor: it adds `banner_setter_after_create` /
-`mrec_setter_after_create` (FAIL-capable), `interstitial_setter_after_create` /
-`rewarded_setter_after_create` (ADVISORY pending SDK-source confirmation), and
-`threepa_forwarder_in_revenue_paid` (FAIL when a 3PA revenue forwarder sits outside
-`OnAdRevenuePaid`, ADVISORY when correctly inside it). JSON shape unchanged.
+floor, and no `engine` field — the validator reads the project and reasons in prose, and its
+semantic verdicts gate `status` like any other check.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
@@ -128,7 +117,7 @@ investigation) is another backward-compatible minor: it adds `banner_setter_afte
 
 ```json
 {
-  "schema": "validator/2.2.0",
+  "schema": "validator",
   "status": "FAIL",
   "error": null,
   "warnings": [],
@@ -185,10 +174,8 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 
 ## Retired contracts
 
-- **`mode-detect/2.x`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted along with its `run-mode-tests.sh` / `mode-fixtures/`. There is no "mode" concept anymore: the integrator discovers MaxSDK presence inline (discovery Step 2) and adapts codegen to it; the validator runs uniform checks and emits no mode field.
+- **`mode-detect`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted along with its `run-mode-tests.sh` / `mode-fixtures/`. There is no "mode" concept anymore: the integrator discovers MaxSDK presence inline (discovery Step 2) and adapts codegen to it; the validator runs uniform checks and emits no mode field.
 
-## Versioning policy
+## Changing a contract
 
-- Bump minor (`1.0.0` → `1.1.0`) when adding optional fields. Orchestrator must remain backward-compatible.
-- Bump major (`1.0.0` → `2.0.0`) when removing or renaming required fields. Orchestrator and producers update in lockstep.
-- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `validator/2.x`).
+Contracts are **not** independently versioned. The orchestrator (integrator) and the sub-agents ship together in one plugin and update atomically, so there is no producer/consumer version skew to guard against — the "accept this major, reject that one" gate a separate schema version would buy you can never fire here. To change a contract: edit the producing sub-agent's prose and this doc **in the same commit**, keeping the two in lockstep. The only semver in the repo is the **plugin release version** (`.claude-plugin/plugin.json` + `marketplace.json`), which tracks the whole bundle for users — see the version-bump convention in `CLAUDE.md`.

@@ -9,7 +9,7 @@ model: sonnet
 
 Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
 
-Accepted sub-agent contract versions: `compat-checker/1.x`, `validator/2.x`. See `agents/contracts.md` for schemas and JSON extraction regex. (MaxSDK presence is derived inline during Step 2 discovery — there is no mode-detection sub-agent.)
+See `agents/contracts.md` for the sub-agent JSON schemas and extraction regex (the schemas are plain `compat-checker` / `validator` tags — not independently versioned, since everything ships in one plugin). (MaxSDK presence is derived inline during Step 2 discovery — there is no mode-detection sub-agent.)
 
 ## Inputs from user
 
@@ -283,7 +283,7 @@ Runs whether or not MaxSDK is present. Detect which third-party analytics (3PA) 
 - **`appsflyer`** — `[ -d "$PROJECT/Assets/AppsFlyer" ]`, `"com.appsflyer"` in `manifest.json`, or a `.cs` matching `^using AppsFlyerSDK`.
 - **`appmetrica`** — `[ -d "$PROJECT/Assets/AppMetrica" ]`, an `appmetrica` entry in `manifest.json`, or a `.cs` matching `^using Io\.AppMetrica` / `AppMetricaSdk`.
 
-Record **all** providers found (a game may forward to several at once — Ragdoll forwarded to four). The result drives Step 5's "3PA revenue forwarders" patch pass and one ADVISORY line in the Step 7 report; it does **not** change which artifacts are generated. Surface the detected set in the detection report.
+Record **all** providers found (a game may forward to several providers at once). The result drives Step 5's "3PA revenue forwarders" patch pass and one ADVISORY line in the Step 7 report; it does **not** change which artifacts are generated. Surface the detected set in the detection report.
 
 #### Secondary checks (inline at generation time)
 
@@ -391,7 +391,7 @@ Propose rewrites that target the game's single `MeticaAdService` instance direct
 
 **Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not replace a dedicated Max-wrapper file's structure** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper's *shape* intact and rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave its structure untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
 
-**Exception inside wrappers: per-call-site rewrites still apply.** Even when leaving a wrapper file's structure untouched, **individual `MaxSdk.Set*ExtraParameter` / `MaxSdk.Set*LocalExtraParameter` / `MaxSdk.IsInitialized` / etc. calls inside that wrapper still need rewriting** to their Metica equivalents (see `references/max-metica-api-map.tsv`). Those calls land on the publisher's `MaxSdk` static, which Metica never initialises — they silently no-op against the live AppLovinSdk that Metica owns. The wrapper's job (mediating ad units) is preserved by the structural carve-out; the bug-prone parameter knobs and init checks inside it get the same rewrite as anywhere else. Surfaced in real customer integrations (Merge Art Canvas, Kick & Break The Ragdoll).
+**Exception inside wrappers: per-call-site rewrites still apply.** Even when leaving a wrapper file's structure untouched, **individual `MaxSdk.Set*ExtraParameter` / `MaxSdk.Set*LocalExtraParameter` / `MaxSdk.IsInitialized` / etc. calls inside that wrapper still need rewriting** to their Metica equivalents (see `references/max-metica-api-map.tsv`). Those calls land on the publisher's `MaxSdk` static, which Metica never initialises — they silently no-op against the live AppLovinSdk that Metica owns. The wrapper's job (mediating ad units) is preserved by the structural carve-out; the bug-prone parameter knobs and init checks inside it get the same rewrite as anywhere else. Surfaced in real customer integrations.
 
 **`MaxSdkUtils.*` is exempt project-wide.** Stateless helper functions (`MaxSdkUtils.GetAdaptiveBannerHeight`, `MaxSdkUtils.IsTablet`, etc.) don't depend on `MaxSdk` being initialised and are mix-safe inside a Metica integration. Never rewritten, never dropped, never flagged.
 
@@ -607,13 +607,13 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
 share your reasoning with it). Validation is uniform — it does not take or depend on any
 mode. There is no validation script to call directly; the validator reasons over the code
-and returns one `validator/2.2.0` JSON block.
+and returns one `validator` JSON block.
 
 Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
-The **validator stays read-only**: it lints and emits `validator/2.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
+The **validator stays read-only**: it lints and emits its `validator` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
 
 Run the loop on `status: FAIL`, **max 3 iterations**:
 

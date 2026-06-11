@@ -63,13 +63,13 @@ The `metica_sdk` FAIL is the integrator's only auto-resolvable failure: its `hin
 the exact download URL from the matched YAML row, e.g. *"Install MeticaSDK 2.4.0: download
 <download_url> and double-click in Unity to import."*
 
-## Output contract — `compat-checker/1.0.0`
+## Output contract — `compat-checker`
 
 Your response is exactly two parts (see `agents/contracts.md` for the schema):
 
 1. A short human-readable summary: one aligned row per check (`id`, detected value,
    `[LEVEL]`, hint), then a final `Overall: PASS` / `Overall: BLOCK` line.
-2. One fenced ```` ```json ```` block with the `compat-checker/1.0.0` object.
+2. One fenced ```` ```json ```` block with the `compat-checker` object.
 
 `status = "BLOCK"` if any check is `FAIL` (or you hit a top-level `error`); otherwise
 `PASS`. `WARN`/`UNKNOWN` surface to the user but do not block.
