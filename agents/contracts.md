@@ -6,7 +6,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 - Wrap the JSON in a fenced ```` ```json ```` block.
 - The block must be the **last** ```` ```json ```` block in the message. The orchestrator extracts via regex: `(?s)```json\s*(.*?)\s*```(?![\s\S]*```json)`.
-- Schemas carry a version string `<name>/<major>.<minor>.<patch>`. The orchestrator accepts any minor/patch within an accepted major. Reject unknown majors.
+- Each object carries a `"schema"` field with a plain stable name (`compat-checker`, `validator`). When a contract's JSON changes, update this doc in the same commit.
 - Unknown fields are ignored. Missing required fields fail parsing.
 - All string fields may be empty (`""`); use `null` only where explicitly allowed.
 
@@ -18,7 +18,7 @@ Every sub-agent in this plugin emits a final fenced JSON block. The orchestrator
 
 ---
 
-## `compat-checker/1.0.0`
+## `compat-checker`
 
 The producer is now **agent prose** (`agents/unity-compat-checker.md`) — the agent reads the
 project's marker files and `metica-versions.yaml` and reasons about each check. The JSON
@@ -39,7 +39,7 @@ shape below is unchanged, so the orchestrator's parsing is unaffected.
 
 ```json
 {
-  "schema": "compat-checker/1.0.0",
+  "schema": "compat-checker",
   "status": "BLOCK",
   "target_sdk": "2.4.0",
   "error": null,
@@ -60,28 +60,21 @@ shape below is unchanged, so the orchestrator's parsing is unaffected.
 
 ## Max-callsite inventory (no JSON contract)
 
-The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to locate, then `Read` each hit's context to drop comment/string matches) and reasons over each hit inline. There is no JSON contract for this step — the inventory lives in the agent's reasoning, not in a structured artifact. See `agents/unity-integrator.md` (Step 5) for the canonical scan snippet.
+The integrator scans for MaxSdk callsites directly via the Bash tool (`grep` to locate, then `Read` each hit's context to drop comment/string matches) and reasons over each hit inline; the inventory lives in the agent's reasoning. See `agents/unity-integrator.md` (Step 5) for the canonical scan snippet.
 
 ---
 
-## `validator/2.1.0`
+## `validator`
 
 The producer is **agent prose** (`agents/unity-validator.md`): a single pass in which the
 validator reads the project's code, reasons about every rule, and cites the lines that prove
 each verdict. The one thing it shells out for is the Unity batch compile
-(`scripts/compile-check.sh`) behind `compiles_cleanly`. There is no two-phase split, no grep
-floor, and no `engine` field — `2.0.0` was the breaking simplification of the old
-`validator/1.x` (the grep floor and the `engine: "grep"` / `"llm-adjudicator"` distinction are
-gone, and the semantic verdicts now gate `status` like any other check). `2.1.0` is a
-backward-compatible minor: it adds the behavioral `<format>_show_after_init` and
-`<format>_load_after_init` rules (ADVISORY), the `smartfloors_analytics_only` rule
-(FAIL-capable — group-aware ad logic is a real revenue regression), and the
-`load_dedup_flag_wedge` rule (ADVISORY); the JSON shape is unchanged, so the orchestrator —
-which accepts any minor within `validator/2.x` — is unaffected.
+(`scripts/compile-check.sh`) behind `compiles_cleanly`. Its semantic verdicts gate `status`
+like any other check.
 
 **Allowed values:**
 - `status`: `PASS`, `FAIL`
-- `warnings`: array of human-readable warning strings. Currently always emitted as `[]`; reserved for future non-blocking advisories.
+- `warnings`: array of human-readable warning strings. Currently always emitted as `[]`.
 - `checks[].level`: `PASS`, `FAIL`, `ADVISORY`, `WARN` (`WARN` is a non-blocking "could not verify" signal, used by `compiles_cleanly` when the compile is skipped; like `ADVISORY` it does not affect `status`).
 - `checks[].rule`: short snake_case identifier (e.g. `privacy_before_init`, `init_count`, `rewarded_callbacks_subscribed`).
 - `checks[].location`: `<path>:<line>` (or `""` when scope-wide). The path component is **opaque** — pass it through to the user verbatim; do not parse or join against it. To separate the line number, split on the **last** `:` (the path itself may contain a colon — e.g. a Windows drive letter `C:\...` — but the line number never does, so the last `:` is the right boundary).
@@ -105,6 +98,9 @@ which accepts any minor within `validator/2.x` — is unaffected.
 - `placement_ids_match` — **behavioral**: per format, the placement/ad-unit id passed to `Load*` is provably the same value as the one passed to `Show*` across all call paths.
 - `smartfloors_analytics_only` — **behavioral, FAIL-capable** (project-wide). The Smart Floors user group / `IsForcedHoldout` is analytics-only; trial and holdout must behave identically. **FAIL** when a read of `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or a stored copy) gates an ad-control decision (ad-unit selection/branch, a `Load*`/`Show*` gate, or an ad-lifecycle state switch), and when a guard branches on a returned `ad.adUnitId == / != <configured>`. PASS when the group is only logged/synced to an analytics property or never read; `ADVISORY` (with `unresolved`) when the flow can't be traced — never a blind FAIL. Encodes a real production regression (group-aware ad logic dropped trial-group impressions in two shipped games).
 - `load_dedup_flag_wedge` — **behavioral, ADVISORY** (project-wide). Flags a wrapper-managed "load in progress" boolean gating `Load<Format>`: redundant (the SDK dedups concurrent loads) and wedge-prone (a missed load callback leaves it stuck, blocking all later reload/retry). Recommendation only; never FAIL, never gates `status`.
+- `banner_setter_after_create` / `mrec_setter_after_create` — **behavioral, FAIL-capable**. Every `MeticaSdk.Ads.SetBanner*` / `SetMrec*` for an `adUnitId` must be preceded on every path by `CreateBanner`/`CreateMrec` for the same id; a pre-create setter silently no-ops (wrapper warns `BANNER not found for adUnitId`), the bug that disabled `adaptive_banner=true` in a shipped game. FAIL when a setter precedes its create; ADVISORY (with `unresolved`) when ordering can't be traced.
+- `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral, ADVISORY**. Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters (per the TSV, pre-creation calls are dropped — re-apply after each load). ADVISORY pending SDK-source confirmation of cache-vs-drop semantics; never gates `status`.
+- `threepa_forwarder_in_revenue_paid` — **behavioral, FAIL-capable**. When a 3PA SDK (Adjust, Firebase Analytics, AppsFlyer, AppMetrica) is present, its ad-revenue forwarding call must live inside a `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid` handler. **FAIL** when found inside `OnAdHidden` / a dismissal hook / any other lifecycle hook (revenue then reports only on dismissal — click-through users lose every event). **ADVISORY** when correctly inside `OnAdRevenuePaid` (dispatch still rides Unity's main thread via `SynchronizationContext.Post`, so click-through-no-return may still lose events).
 - `revenue_callback_subscribed` — ADVISORY.
 - `placeholder_ids_replaced` — FAIL when `"YOUR_METICA_API_KEY"` / `"YOUR_METICA_APP_ID"` / `"YOUR_MAX_SDK_KEY"` / `"REPLACE_ME"` appears as a **string-literal value** in source. A constant merely *named* `YOUR_METICA_API_KEY` holding a real value does not false-positive.
 - `user_id_not_test_value` — FAIL when the 3rd positional arg of `MeticaInitConfig(api, app, userId)` is `null`, empty string, a test/debug/dummy/placeholder word (matched at delimiter boundaries so legitimate ids like `"contest-user-42"` do not false-positive), or a digits-only string. Handles multi-line constructor calls.
@@ -120,7 +116,7 @@ which accepts any minor within `validator/2.x` — is unaffected.
 
 ```json
 {
-  "schema": "validator/2.1.0",
+  "schema": "validator",
   "status": "FAIL",
   "error": null,
   "warnings": [],
@@ -168,19 +164,13 @@ The `pre-metica-integration` git tag is created by the integrator before any fil
 - `validator.status == FAIL` → run the **integrator-owned autofix loop** (classify each FAIL as `autofix` / `prompt` / `surface`, apply edits with an anchor re-check, log to `.metica-integration.log`, re-validate; **max 3 iterations**). A `compiles_cleanly` FAIL is `surface`-class (a real `CS####` compile error — printed verbatim with `file:line`, not auto-edited). Only when the loop cannot clear all FAILs (a `surface`-class FAIL remains, or 3 iterations are exhausted) print the rollback command and exit non-zero. Never auto-rollback — rollback stays a *hint*. The validator itself remains **read-only**; the integrator owns all edits and prompts. See `agents/unity-integrator.md` Step 6.5.
 - A `compiles_cleanly` **WARN** (compile skipped — no Unity located / `METICA_SKIP_COMPILE=1` — or could not complete) is non-blocking: surface it in the final report so the user knows the build was not verified, but it does not trigger the autofix loop or affect status.
 - **Behavioral checks** split into two groups by the level they emit:
-  - **Gating** (`*_reload_on_hidden`, `placement_ids_match`, `smartfloors_analytics_only`): emit `PASS`/`FAIL`, so they gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. **Exception:** `smartfloors_analytics_only` FAILs are **`surface`-class** (removing group-aware ad logic is a redesign, not a line edit — surfaced for a human, never auto-fixed). A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is also **`surface`-class** — never fed to the autofix loop; a human decides.
-  - **ADVISORY-only** (`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`): always emit `level: ADVISORY`, so per the Status rule above they surface in the report but never affect `status` and never trigger the autofix loop.
+  - **Gating** (`*_reload_on_hidden`, `placement_ids_match`, `smartfloors_analytics_only`, `banner_setter_after_create` / `mrec_setter_after_create`, `threepa_forwarder_in_revenue_paid`): emit `PASS`/`FAIL`, so they gate `status` like any other check — a `FAIL` triggers the autofix loop, a `PASS` is trusted. **Exception:** `smartfloors_analytics_only` and `threepa_forwarder_in_revenue_paid` FAILs are **`surface`-class** (removing group-aware ad logic / relocating a 3PA forwarder is game-logic redesign, not a line edit — surfaced for a human, never auto-fixed); the setter-ordering FAILs are autofix-eligible only when create and setter sit in the same method (else `surface`). A behavioral FAIL with non-empty `unresolved` (the validator was unsure) is also **`surface`-class** — never fed to the autofix loop; a human decides.
+  - **ADVISORY-only** (`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `interstitial_setter_after_create` / `rewarded_setter_after_create`): always emit `level: ADVISORY`, so per the Status rule above they surface in the report but never affect `status` and never trigger the autofix loop.
 
   Surface each verdict's `evidence`/`reasoning` in the report regardless of group.
 
 ---
 
-## Retired contracts
+## Changing a contract
 
-- **`mode-detect/2.x`** — retired in plugin v1.0. `scripts/detect-mode.sh` was deleted along with its `run-mode-tests.sh` / `mode-fixtures/`. There is no "mode" concept anymore: the integrator discovers MaxSDK presence inline (discovery Step 2) and adapts codegen to it; the validator runs uniform checks and emits no mode field.
-
-## Versioning policy
-
-- Bump minor (`1.0.0` → `1.1.0`) when adding optional fields. Orchestrator must remain backward-compatible.
-- Bump major (`1.0.0` → `2.0.0`) when removing or renaming required fields. Orchestrator and producers update in lockstep.
-- The orchestrator declares accepted majors in its agent spec (currently `compat-checker/1.x`, `validator/2.x`).
+To change a contract, edit the producing sub-agent's prose and this doc **in the same commit**, keeping the two in lockstep. The plugin release version (`.claude-plugin/plugin.json` + `marketplace.json`) is the only semver in the repo — see the version-bump convention in `CLAUDE.md`.

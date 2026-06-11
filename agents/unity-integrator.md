@@ -9,7 +9,7 @@ model: sonnet
 
 Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
 
-Accepted sub-agent contract versions: `compat-checker/1.x`, `validator/2.x`. See `agents/contracts.md` for schemas and JSON extraction regex. (MaxSDK presence is derived inline during Step 2 discovery — there is no mode-detection sub-agent.)
+See `agents/contracts.md` for the sub-agent JSON schemas and extraction regex. MaxSDK presence is derived inline during Step 2 discovery.
 
 ## Inputs from user
 
@@ -164,7 +164,7 @@ Rules for the rendering:
 
 ### Step 2 — Discovery
 
-Discovery produces everything later steps need — MaxSDK presence, the game's direct call sites, any Max wrapper, the ad formats, placements, and triggers (plus, in Step 2.5, the namespace + remote-config provider). It also replaces the old Step 5 call-site inventory. It is **one inline step** run via the Bash / Grep / Read tools — there is **no script and no JSON contract**. The findings accumulate into a **structured Markdown block** that is shown to the user in Step 3 and reused as input to codegen in Step 5. Some signals are inherently fuzzy (wrapper detection, trigger pattern); keeping them in prose is deliberate — the user confirms them in the Step 3 plan, so perfect precision is not required (and forcing them into JSON would make the fuzziness *look* precise, which is worse).
+Discovery produces everything later steps need — MaxSDK presence, the game's direct call sites, any Max wrapper, the ad formats, placements, and triggers (plus, in Step 2.5, the namespace + remote-config provider). It is **one inline step** run via the Bash / Grep / Read tools. The findings accumulate into a **structured Markdown block** that is shown to the user in Step 3 and reused as input to codegen in Step 5. Some signals are inherently fuzzy (wrapper detection, trigger pattern); keeping them in prose is deliberate — the user confirms them in the Step 3 plan, so perfect precision is not required (and forcing them into JSON would make the fuzziness *look* precise, which is worse).
 
 Scan only the game's own C# — exclude the vendored SDKs and Unity-managed dirs:
 
@@ -177,9 +177,9 @@ game_cs() {
 }
 ```
 
-A raw `grep` for a `MaxSdk.` token also matches commented-out code and string literals. There
-is no awk stripper anymore: when a hit matters (the wrapper classification, a call site you'll
-rewrite), **Read the surrounding lines and confirm it's live code** before acting on it. The
+A raw `grep` for a `MaxSdk.` token also matches commented-out code and string literals. When a
+hit matters (the wrapper classification, a call site you'll rewrite), **Read the surrounding
+lines and confirm it's live code** before acting on it. The
 discovery findings are reviewed by the user in Step 3, so a stray comment match that slips
 through the first grep is caught there.
 
@@ -273,6 +273,17 @@ The fallback chain for the generated files' namespace (applied in Step 5):
 Surface the chosen value in the detection report; the user can override via the `NAMESPACE` env var or in the Step 3 plan review.
 
 To compute it, read the first `namespace` declaration from each `.cs` file under `Assets/Scripts/` (Grep for `^\s*namespace\s+` and Read the line). If one exact namespace covers ≥50% of the files, use it. Otherwise derive every leading prefix of each namespace (`A`, `A.B`, `A.B.C`, …), count how many files carry each, and pick the **longest** prefix that still covers ≥50% — longest, not most-frequent, so a 3-segment prefix shared by 50% beats a 1-segment prefix shared by 80%. Perfect precision isn't required: the user confirms the detected value in the Step 3 plan before anything is written.
+
+#### Signal 3 — `threepa_providers`
+
+Runs whether or not MaxSDK is present. Detect which third-party analytics (3PA) SDKs the project ships, so Step 5 can populate the generated `OnAdRevenuePaid` handlers (and the report can carry the main-thread-dispatch caveat). Check each provider's signals — package dir, `manifest.json` entry, or a `using` import under `Assets/Scripts/`:
+
+- **`adjust`** — `[ -d "$PROJECT/Assets/Adjust" ]`, `"com.adjust.sdk"` in `Packages/manifest.json`, or a `.cs` matching `^using (com\.)?adjust` / `AdjustSdk`.
+- **`firebase-analytics`** — `[ -d "$PROJECT/Assets/Firebase" ]` with an Analytics dll/asmdef, `"com.google.firebase.analytics"` in `manifest.json`, or a `.cs` matching `^using Firebase\.Analytics`.
+- **`appsflyer`** — `[ -d "$PROJECT/Assets/AppsFlyer" ]`, `"com.appsflyer"` in `manifest.json`, or a `.cs` matching `^using AppsFlyerSDK`.
+- **`appmetrica`** — `[ -d "$PROJECT/Assets/AppMetrica" ]`, an `appmetrica` entry in `manifest.json`, or a `.cs` matching `^using Io\.AppMetrica` / `AppMetricaSdk`.
+
+Record **all** providers found (a game may forward to several providers at once). The result drives Step 5's "3PA revenue forwarders" patch pass and one ADVISORY line in the Step 7 report; it does **not** change which artifacts are generated. Surface the detected set in the detection report.
 
 #### Secondary checks (inline at generation time)
 
@@ -370,7 +381,7 @@ confusing failure from `git tag` later.
 
 ### Step 5 — Apply code changes
 
-(Note: there is no separate "download SDK" step. MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project and its types are available to generated code.)
+(Note: MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project and its types are available to generated code.)
 
 #### When MaxSDK is present: scan + propose Max-callsite refactor
 
@@ -380,13 +391,13 @@ Propose rewrites that target the game's single `MeticaAdService` instance direct
 
 **Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not replace a dedicated Max-wrapper file's structure** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, leave the wrapper's *shape* intact and rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave its structure untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
 
-**Exception inside wrappers: per-call-site rewrites still apply.** Even when leaving a wrapper file's structure untouched, **individual `MaxSdk.Set*ExtraParameter` / `MaxSdk.Set*LocalExtraParameter` / `MaxSdk.IsInitialized` / etc. calls inside that wrapper still need rewriting** to their Metica equivalents (see `references/max-metica-api-map.tsv`). Those calls land on the publisher's `MaxSdk` static, which Metica never initialises — they silently no-op against the live AppLovinSdk that Metica owns. The wrapper's job (mediating ad units) is preserved by the structural carve-out; the bug-prone parameter knobs and init checks inside it get the same rewrite as anywhere else. Surfaced in real customer integrations (Merge Art Canvas, Kick & Break The Ragdoll).
+**Exception inside wrappers: per-call-site rewrites still apply.** Even when leaving a wrapper file's structure untouched, **individual `MaxSdk.Set*ExtraParameter` / `MaxSdk.Set*LocalExtraParameter` / `MaxSdk.IsInitialized` / etc. calls inside that wrapper still need rewriting** to their Metica equivalents (see `references/max-metica-api-map.tsv`). Those calls land on the publisher's `MaxSdk` static, which Metica never initialises — they silently no-op against the live AppLovinSdk that Metica owns. The wrapper's job (mediating ad units) is preserved by the structural carve-out; the bug-prone parameter knobs and init checks inside it get the same rewrite as anywhere else. Surfaced in real customer integrations.
 
 **`MaxSdkUtils.*` is exempt project-wide.** Stateless helper functions (`MaxSdkUtils.GetAdaptiveBannerHeight`, `MaxSdkUtils.IsTablet`, etc.) don't depend on `MaxSdk` being initialised and are mix-safe inside a Metica integration. Never rewritten, never dropped, never flagged.
 
 **Source of truth for rewrites and drops:** `references/max-metica-api-map.tsv`. Each row is `<MaxSdk-pattern>\t<MeticaSdk-replacement>\t<kind>\t<notes>` where `kind` is `rename` (direct swap), `signature-change` (Metica equivalent exists but caller needs adjustment — e.g. `SetBannerBackgroundColor` switches from `UnityEngine.Color` to a hex string), `drop` (no Metica equivalent — remove the call and surface it in Step 7), or `exempt` (`MaxSdkUtils.*`). The validator's `max_api_use_metica` and `max_api_unsupported` rules consume the same file — the integrator and validator stay in lockstep that way. When a `drop` row matches and the user approves, **remove the call** during the rewrite pass; collect the list and surface it in Step 7 under a "Dropped — no Metica equivalent" section so the user can decide whether to lose the feature or keep a Max-only code path. The narrative form of the TSV lives in `references/max-vs-metica-2.4.0-api.md`.
 
-Use the Bash tool with `grep` to locate candidates, then Read each hit's surrounding lines to drop matches inside comments and string literals. There is no awk stripper and no separate script — the inventory lives in the agent's reasoning, not in a JSON contract.
+Use the Bash tool with `grep` to locate candidates, then Read each hit's surrounding lines to drop matches inside comments and string literals. The inventory lives in the agent's reasoning.
 
 `ADAPTER_FOLDER` is the adapter folder resolved in Step 2.5 (default `Assets/Scripts/Metica`). Normalize it to a project-relative path (`ADAPTER_REL`): if the user passed an absolute path under `$PROJECT/`, strip that prefix; **reject** any other absolute path, any path containing a `..` segment, or an empty value (do **not** silently use a path outside the project root), and drop a trailing slash.
 
@@ -498,7 +509,7 @@ Then generate:
 
 #### Post-template patch passes (conform codegen to the host)
 
-After rendering the templates, apply a small, fixed set of **deterministic, named patch passes** parameterised by the Step 2 discovery findings. Each takes a file + a discovery field and produces one edit; they are **agent-applied** (the `Edit` tool) — not a template DSL, not a separate script. They are validated *indirectly*: the conformed output must still PASS the validator, so a botched patch surfaces as a validator FAIL. Apply only the passes whose trigger fired in discovery; skip the rest (a no-Max project fires none — there is no wrapper or observed placement to conform to). The templates' structural shape never changes — these only **add** host-conforming lines (per the directive "don't change the structure of the placeholder files, just add logic").
+After rendering the templates, apply a small, fixed set of **deterministic, named patch passes** parameterised by the Step 2 discovery findings. Each takes a file + a discovery field and produces one edit; they are **agent-applied** (the `Edit` tool). They are validated *indirectly*: the conformed output must still PASS the validator, so a botched patch surfaces as a validator FAIL. Apply only the passes whose trigger fired in discovery; skip the rest (a no-Max project fires none — there is no wrapper or observed placement to conform to). The templates' structural shape never changes — these only **add** host-conforming lines (per the directive "don't change the structure of the placeholder files, just add logic").
 
 | Pass | Trigger (from discovery) | Edit |
 |---|---|---|
@@ -506,8 +517,12 @@ After rendering the templates, apply a small, fixed set of **deterministic, name
 | **Default placement** | placement strings observed | Where the delegator would otherwise pass `null`, pass the **most-frequent observed placement** (from the Step 2 placement counts; ties broken by first-seen) instead — e.g. `_interstitial?.Show("level_complete")`. The per-format `Show(string placement = null, …)` already accepts it — no template change. |
 | **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness.) |
 | **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
+| **3PA revenue forwarders** | a 3PA provider detected (Step 2.5 Signal 3) | Populate each used format's named `On<Format>RevenuePaid` handler with the matching forwarder call, **one per detected provider**. **Prefer relocating the game's own existing forwarder calls** (found during the Max-callsite scan / callback-subscription rewrite) — they are already version-correct for the game's installed 3PA SDK versions — into the handler; only fall back to a fresh call (canonical shapes in `references/3pa-forwarders.md`) when the game had none. Forward from `OnAdRevenuePaid` **only** — never `OnAdHidden` or a dismissal hook (that loses click-through revenue; the validator FAILs it). No App-Open handler (App Open is `drop` per the TSV). |
+| **Banner/MRec setter ordering** | `SetBanner*` / `SetMrec*` calls migrated from the game (or generated) | Emit setters **after** the matching `Create*` call, never before — a setter on a not-yet-created `adUnitId` silently no-ops. Order is: subscribe callbacks → `CreateBanner`/`CreateMrec` → `SetBanner*`/`SetMrec*`. For interstitial/rewarded `SetInterstitial*` / `SetRewardedAd*`, re-apply after each load (pre-creation calls are dropped per the TSV). Keeps the validator's `*_setter_after_create` rules green. |
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
+
+When any 3PA forwarder is generated, also emit one ADVISORY line in the Step 7 report: *"3PA forwarders (Adjust / Firebase / AppMetrica / AppsFlyer) generated inside `OnAdRevenuePaid` dispatch through Unity's main thread (`MeticaSdk` binding uses `SynchronizationContext.Post`). Production click-through-no-return scenarios may lose events until Metica provides a Java-side forward path."*
 
 ```bash
 mkdir -p "$PROJECT/$ADAPTER_FOLDER"
@@ -517,7 +532,7 @@ echo "Generated MeticaAdService.cs in $ADAPTER_FOLDER (formats: $FORMATS)"
   echo "Remote-config provider detected: $REMOTE_CONFIG_PROVIDER — cohort-gating recipe included in Step 7 report"
 ```
 
-**Codegen when MaxSDK is absent (agent-driven):** Ask the user which ad formats they need (banner / interstitial / rewarded / mrec; default `interstitial` if they don't specify). This uses the **same standalone per-format split** as the Max-present path — only the bootstrap differs (a no-Max project adds a thin entry-point MonoBehaviour; there is no existing game code to rewrite) and there is no MAX mediation. Resolve inputs:
+**Codegen when MaxSDK is absent (agent-driven):** Ask the user which ad formats they need (banner / interstitial / rewarded / mrec; default `interstitial` if they don't specify). This uses the **same standalone per-format split** as the Max-present path — only the bootstrap differs (a no-Max project adds a thin entry-point MonoBehaviour, with no game code to rewrite) and the mediation argument is `null`. Resolve inputs:
 
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
@@ -591,14 +606,13 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
 share your reasoning with it). Validation is uniform — it does not take or depend on any
-mode. There is no validation script to call directly; the validator reasons over the code
-and returns one `validator/2.1.0` JSON block.
+mode. The validator reasons over the code and returns one `validator` JSON block.
 
 Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
-The **validator stays read-only**: it lints and emits `validator/2.x` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. This replaces the old "FAIL → rollback" default. Every `FAIL` check gates `status` now (there is no shadow phase) — classify and act on all of them.
+The **validator stays read-only**: it lints and emits its `validator` JSON, nothing else — it never edits and never prompts. The **integrator owns the entire loop**: read the validator's `FAIL` rows, classify each, fix it, re-validate, and fall back to the rollback hint only when it cannot make progress. Every `FAIL` check gates `status` — classify and act on all of them.
 
 Run the loop on `status: FAIL`, **max 3 iterations**:
 
@@ -618,8 +632,10 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
 | `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
 | `smartfloors_analytics_only` | surface | Group-aware ad logic (branching ad load/show/ad-unit selection on the Smart Floors user group / `IsForcedHoldout`, or on a returned-`adUnitId` equality check) is a **redesign**, not a line edit — and a real revenue regression. Surface the cited branch (`file:line`) and stop; the integrator's own codegen never emits this (it only logs the group), so a FAIL means hand-rolled code that must be simplified to the docs pattern (pass the configured id through, treat trial/holdout identically). |
+| `banner_setter_after_create` / `mrec_setter_after_create` | autofix \| surface | If the setter and its `Create*` sit in the **same method**, reorder so `Create*` precedes the setter (autofix). If they're in different methods / call paths, surface the setter `file:line` + the `Create*` it must follow and stop — cross-method reordering isn't a safe line edit. The integrator's own setter-ordering patch pass keeps generated code green, so a FAIL is hand-rolled. |
+| `threepa_forwarder_in_revenue_paid` | surface | A 3PA revenue forwarder wired outside `OnAdRevenuePaid` (e.g. in `OnAdHidden`) loses click-through revenue. Relocating an analytics call is game logic, not a line edit — surface the forwarder `file:line` + its enclosing handler and the target (`OnAdRevenuePaid`), and stop. |
 
-`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `interstitial_setter_after_create` / `rewarded_setter_after_create`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
@@ -662,7 +678,7 @@ Dropped (no MeticaSdk equivalent in 2.4.0):
       a separate Max-only init path for it.
 - <file>:<line>  MaxSdk.SetSegmentCollection(segs)
     → MaxSegmentCollection has no Metica equivalent. Targeting via MAX
-      segments is no longer available; consider using MeticaSdk's
+      segments has no MeticaSdk equivalent; consider using MeticaSdk's
       SmartConfig or Events for similar dynamic behaviour.
 - ...
 ```
