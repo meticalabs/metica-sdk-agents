@@ -49,7 +49,7 @@ AppMetrica.Instance.ReportAdRevenue(new Io.AppMetrica.AdRevenue(ad.revenue, "USD
 
 // AppsFlyer
 AppsFlyer.sendEvent("af_ad_revenue", new Dictionary<string, string> {
-    { "af_revenue",  ad.revenue.ToString() },
+    { "af_revenue",  ad.revenue.ToString(System.Globalization.CultureInfo.InvariantCulture) },
     { "af_currency", "USD" },
     { "af_ad_network", ad.networkName },
 });
