@@ -7,7 +7,7 @@ description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle o
 
 > This is a skill, not a sub-agent, because the workflow is interactive (start → user plays → stop → analyse → repeat → compare) and benefits from staying in the main conversation, where the user can ask follow-up questions on the analysis without context-switching to a sub-agent.
 
-This skill verifies a Metica + AppLovin MAX integration from live device logs. Three phases:
+This skill verifies a Metica + AppLovin MAX integration from live device logs. Throughout, **distinguish what the log *proves* from what you *infer*** — quote the lines as evidence, and label an inference as an inference. Three phases:
 
 1. **Phase 1 — capture.** Kick off a background log capture on a connected device. *Scripted.*
 2. **Phase 2 — analyse one route.** Stop the capture, then read the log and produce a structured Markdown analysis for one route (trial or holdout). *Stop is scripted; the analysis itself is your job.*
@@ -442,6 +442,7 @@ The baseline is the **production store build** — a different build from the de
 - If holdout's fill rate / top networks / revenue-per-impression **track** the baseline → the harness is faithful; trust the trial-vs-holdout verdict.
 - If holdout **diverges sharply** from baseline → **FLAG it as a build/harness concern, not a Metica effect**: the holdout dev-build isn't reproducing production, so the A/B comparison rests on a shaky control. Recommend reconciling the holdout build with production before believing the numbers.
 - Always caveat that baseline gaps can be **build/version differences** (different app version, store vs sideloaded, no Metica) rather than real behavioral deltas. Never let a baseline number flip the trial-vs-holdout verdict.
+- **Extra-parameter parity.** Grep each route's load lines for the auction-affecting extra parameters (`setLocalExtraParameter` / `setExtraParameter`, e.g. `disable_auto_retries`, `adaptive_banner`, APS `amazon_ad_response`, floor params). If a route sets parameters the others don't, the comparison isn't apples-to-apples — call it out: a holdout/baseline that omits a parameter the trial sets (or vice-versa) can explain a fill/eCPM delta on its own, independent of Metica. Quote the differing parameter lines.
 
 ### 3. Apply verdict rules (prose)
 
