@@ -255,7 +255,7 @@ Cite actual timestamps in the report — don't just write "parallel". The number
 #### Step 7. Errors & warnings
 
 ```bash
-ERR='metica.*(error|exception|fail)|applovin.*error|MAX.*error|MaxSdk.*error|loadAd.*fail|sdk.*not initialized|invalid.*(api.?key|app.?id)|HTTP [45][0-9][0-9]|FATAL EXCEPTION'
+ERR='metica.*(error|exception|fail)|applovin.*error|MAX.*error|MaxSdk.*error|loadAd.*fail|sdk.*not initialized|invalid.*(api.?key|app.?id)|HTTP [45][0-9][0-9]|FATAL EXCEPTION|CallbackProxy|NullReferenceException|_unitySyncContext'
 grep -iE "$ERR" "$LOG" \
   | sed -E 's/^[A-Za-z]{3}[[:space:]]+[0-9]+[[:space:]]+[0-9:]+[[:space:]]+[^[:space:]]+[[:space:]]+//' \
   | sed -E 's/^[0-9-]+[[:space:]]+[0-9:.]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[A-Z][[:space:]]+//' \
@@ -267,6 +267,7 @@ Group by unique signature. For each, give the count, one example line, and your 
 - `E/Metica: api_key invalid (401)` — bad/expired Metica key; all Metica behaviour downstream is meaningless
 - `MAX: no fill` — environmental, usually fine
 - `FATAL EXCEPTION` — crash; quote the stack and flag
+- `NullReferenceException` in `Metica.Ads.LoadCallbackProxy` / `ShowCallbackProxy` (or a null `_unitySyncContext`) — an ad **`Load`/`Show` was issued off the Unity main thread**, so the SDK captured no valid `SynchronizationContext` to marshal the callback back on. Common trigger: the first load fires from a CMP/consent callback (`OnConsentInfoUpdated` / UMP `OnComplete`) or another background thread. Flag it; the fix is to marshal the ad call to the main thread.
 
 #### Step 8. Write the report
 
@@ -450,6 +451,7 @@ The baseline is the **production store build** — a different build from the de
 - `trial fill rate < holdout fill rate` materially → **FLAG**. Floor priced too high.
 - `trial fill rate < holdout` AND `trial revenue/impression > holdout` → *expected Metica tradeoff* (fewer fills, higher prices). **Note, don't flag.**
 - Trial-only lifecycle anomalies (show without ready, reload latency >5s, missing reward callback) → **FLAG**. A regression in the runtime ad logic itself, independent of bid economics.
+- **Fewer ready ad units / a collapsed multi-unit waterfall in the trial group → do NOT flag.** For users Metica actively optimizes, the SDK manages ad loading internally, so the game's multi-unit waterfall behaves as a single managed pipeline — "only one ad ready at a time" is **expected** for the trial group, not a regression. The holdout (control) group runs the game's exact baseline waterfall unchanged, so this asymmetry between routes is by design. Only flag it if the *holdout* also collapses (then it's a real loading bug, not the optimization).
 - `trial load response time` or `time to first ad ready` materially worse than holdout → **FLAG**. A loading regression, not bid economics. (Scope this to the timing metrics only — fill-rate deltas are covered by the rules above.)
 - `trial 3PA forward rate < holdout` for any provider → **FLAG**. All forwarders share the Unity main-thread dispatch surface, so a trial-only drop signals the wrapper-architecture asymmetry — analytics under-reporting independent of revenue.
 - Trial-only errors (next section) → **FLAG**.

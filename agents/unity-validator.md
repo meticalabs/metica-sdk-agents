@@ -78,8 +78,13 @@ reference exists). SDK casing note: MRec is `LoadMrec` / `MeticaAdsCallbacks.Mre
 **Structural rules** (a clean textual reading answers them):
 
 - `init_count` — exactly one `MeticaSdk.Initialize(` call. Zero or two+ is FAIL.
-- `privacy_before_init` — both `SetHasUserConsent` and `SetDoNotSell` appear **before**
-  `MeticaSdk.Initialize` in source order, in the same file.
+- `privacy_before_init` — `SetHasUserConsent` and `SetDoNotSell` should appear **before**
+  `MeticaSdk.Initialize` in source order, in the same file. FAIL when present but **after**
+  `Initialize` (ordering bug). When **absent**: if a consent-management platform is detected
+  (Google UMP `ConsentInformation` / `using GoogleMobileAds.Ump`, or another CMP), emit
+  **ADVISORY** — "consent may be CMP-managed; confirm the same consent state reaches both the
+  MAX and Metica paths before init" — rather than a blind FAIL; absent with no CMP detected
+  stays FAIL.
 - `<format>_callbacks_subscribed` — for each used format, `OnAdLoadSuccess` + `OnAdLoadFailed`
   are subscribed.
 - `rewarded_reward_callback` — when rewarded is used, `OnAdRewarded` is subscribed.
@@ -176,6 +181,7 @@ shipped games):
 - `init_callback_all_paths` — **behavioral, FAIL-capable.** The init-done callback (`OnInitialized`) must fire on **every** path through initialization, including early-return and empty/failed-config paths — games kick off their first loads inside it, so a skipped callback means no ads ever load. **Also** verify auction-affecting extra parameters are set **before** the init-done callback fires. FAIL an init path that returns without invoking the callback; ADVISORY if untraceable.
 - `retry_ownership` — **behavioral.** If `disable_auto_retries` (or equivalent) is set, MAX won't retry, so the client must own load-failure retries: **FAIL** when auto-retry is disabled and no client retry path exists. **ADVISORY** for dead retry logic — a retry counter declared/reset but never incremented or read (a retry lost in a rewrite). Cite the disable call / the counter.
 - `dead_code_signal` — **behavioral, ADVISORY.** A field or list carefully populated but **never read** (or a method never called) often marks a call lost in a rewrite — surface it and ask; do not assume it is safe to delete. Cite the populate site and note the absent read.
+- `sdk_calls_on_main_thread` — **behavioral, FAIL-capable.** Every `MeticaSdk` call — `Initialize`, `Load<Format>`, `Show<Format>`, `Create<Format>` — must run on the **Unity main thread**. The SDK captures the `SynchronizationContext` **at the call site** and marshals that format's callbacks back to it (read `Assets/MeticaSdk/Runtime/.../LoadCallbackProxy.cs` / `ShowCallbackProxy.cs` to confirm); a call issued from a background thread captures a null/non-Unity context, so the callback throws (`NullReferenceException` in the proxy) or runs off-main. **FAIL** a call provably reachable only from an off-main context — a CMP/consent callback (`OnConsentInfoUpdated` / a UMP `OnComplete`), an AppLovin/Amazon SDK callback, a `Task` / `ThreadPool` / `new Thread` body, or an `async` continuation after `ConfigureAwait(false)` — with no marshal to the main thread (a dispatcher / `UnityMainThreadDispatcher` / `SynchronizationContext.Post` / a flag read from `Update`). **ADVISORY** when the calling thread can't be proven. Cite the off-main entry → the unmarshaled SDK call.
 
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
 `<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
