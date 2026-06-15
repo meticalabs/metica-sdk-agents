@@ -337,7 +337,8 @@ If discovery found **more than one** wrapper candidate, list them here and requi
 **Collect `USER_ID_EXPR` here.** `null`/empty is valid (Metica auto-generates a stable per-device id, and the validator PASSes it), but a real identity source gives correct cross-session attribution — ask for it now, as part of this preview, rather than silently shipping an anonymous default the user didn't choose:
 
 ```
-userId is currently unset (defaults to null, which the validator will reject).
+userId is currently unset (defaults to null). Metica will auto-generate a stable
+per-device id, but a real identity source gives correct cross-session attribution.
 Provide the C# expression for the player identity:
   1) SystemInfo.deviceUniqueIdentifier
   2) PlayerProfile.PlayerId
@@ -695,7 +696,7 @@ The list is harvested as the rewrite pass runs — each `drop`-class match emits
 The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
 
 ```
-⚠ The validator flagged credential placeholders / a null userId.
+⚠ The validator flagged credential placeholders / a test-value userId.
   These will be caught on every re-run of the validator (CI, post-edit, audit).
   Replace with your real values, then re-run @agent-unity-validator to confirm green.
 ```
