@@ -20,7 +20,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used when MaxSDK is present, where MeticaSDK mediates through AppLovin MAX). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
-- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` (the integrator then prompts the user to replace it; the validator's `user_id_not_test_value` check FAILs until a real expression is wired). Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
+- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` — valid (MeticaSDK then auto-generates a stable per-device userId, which the validator PASSes), but the integrator still recommends wiring the host app's real identity source for correct cross-session attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name suggested in the cohort-gating recipe. Default: `metica_rollout`.
@@ -334,7 +334,7 @@ Confirm these inferences:
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
 
-**Collect `USER_ID_EXPR` here.** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
+**Collect `USER_ID_EXPR` here.** `null`/empty is valid (Metica auto-generates a stable per-device id, and the validator PASSes it), but a real identity source gives correct cross-session attribution — ask for it now, as part of this preview, rather than silently shipping an anonymous default the user didn't choose:
 
 ```
 userId is currently unset (defaults to null, which the validator will reject).
@@ -626,7 +626,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_reload_on_hidden` | autofix | Append `OnAdHidden += ad => Load<Fmt>();`. |
 | `<fmt>_show_failed_subscribed` | autofix | Append `OnAdShowFailed += (ad, err) => Load<Fmt>();`. |
 | `placeholder_ids_replaced` | prompt | Ask for the real key; substitute in source. |
-| `user_id_not_test_value` | prompt | Ask for the real expression. For the integrator's own output this was already collected at plan time (Step 3), so run-1 should pass; this prompt is the fallback for hand-rolled code linted outside the integrator flow. |
+| `user_id_not_test_value` | prompt | A hardcoded test literal (`"test"` / `"debug"` / digits-only …) was passed as the userId — ask for the real expression. (`null`/empty no longer FAILs — Metica auto-generates.) For the integrator's own output the value was collected at plan time (Step 3). |
 | `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
@@ -691,7 +691,7 @@ The list is harvested as the rewrite pass runs — each `drop`-class match emits
 
 #### Credential hygiene (now validator-driven)
 
-The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and null/test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
+The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
 
 ```
 ⚠ The validator flagged credential placeholders / a null userId.

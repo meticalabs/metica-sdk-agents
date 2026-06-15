@@ -90,10 +90,15 @@ reference exists). SDK casing note: MRec is `LoadMrec` / `MeticaAdsCallbacks.Mre
 - `placeholder_ids_replaced` — FAIL if a placeholder credential (`"YOUR_METICA_API_KEY"`,
   `"YOUR_METICA_APP_ID"`, `"YOUR_MAX_SDK_KEY"`, `"REPLACE_ME"`) appears as a **string-literal
   value**. A constant merely *named* `YOUR_METICA_API_KEY` that holds a real value is fine.
-- `user_id_not_test_value` — FAIL if the 3rd positional arg of `MeticaInitConfig(api, app,
-  userId)` is `null`, empty, a digits-only string, or a test/debug/dummy/placeholder word.
-  Match the word at delimiter boundaries so legitimate ids like `"contest-user-42"` don't
-  false-positive. Handles multi-line constructor calls.
+- `user_id_not_test_value` — the 3rd positional arg of `MeticaInitConfig(api, app, userId)`.
+  **PASS** `null` and `""` (empty) — MeticaSDK auto-generates a stable per-device userId when none
+  is provided, so empty/null is a valid production setting (say so in the finding). **PASS** real
+  ids (UUIDs, hashes, a platform-id expression). **FAIL** a hardcoded test literal — `"test"`,
+  `"test-user"`, `"debug"`, `"dummy"`, a digits-only string like `"123"`, or any value containing
+  `test`/`debug`/`dummy` — matched at delimiter boundaries so legitimate ids like
+  `"contest-user-42"` don't false-positive. **ADVISORY** for the known Metica debug/QA cohort
+  overrides `metica-force-holdout` / `metica-force-test` / `metica-force-trial` (flag for
+  production-build verification, don't FAIL). Handles multi-line constructor calls.
 - `revenue_callback_subscribed` — ADVISORY only; note whether `OnAdRevenuePaid` is wired.
 
 **Behavioral rules** (require following the code, not just textual presence — these are the
