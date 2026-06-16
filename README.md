@@ -119,7 +119,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Test suites cover the scripts: `resolver`, `download`, `compile`, `update-check`, and `log-monitor`. The verification logic lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
+The five test suites — `resolver`, `download`, `compile`, `update-check`, `log-monitor` — cover the scripts under `scripts/` (`resolve-plugin-dir.sh`, `download-metica-sdk.sh`, `compile-check.sh`, `check-for-update.sh`, `log-monitor-start.sh` / `log-monitor-stop.sh`). The verification logic lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
 
 The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-2.4.0.unitypackage` and silently skips when it's absent; the other four run on any clean clone.
 

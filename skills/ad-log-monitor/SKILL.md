@@ -267,7 +267,7 @@ Group by unique signature. For each, give the count, one example line, and your 
 - `E/Metica: api_key invalid (401)` — bad/expired Metica key; all Metica behaviour downstream is meaningless
 - `MAX: no fill` — environmental, usually fine
 - `FATAL EXCEPTION` — crash; quote the stack and flag
-- `NullReferenceException` in `Metica.Ads.LoadCallbackProxy` / `ShowCallbackProxy` (or a null `_unitySyncContext`) — an ad **`Load`/`Show` was issued off the Unity main thread**, so the SDK captured no valid `SynchronizationContext` to marshal the callback back on. Common trigger: the first load fires from a CMP/consent callback (`OnConsentInfoUpdated` / UMP `OnComplete`) or another background thread. Flag it; the fix is to marshal the ad call to the main thread.
+- `NullReferenceException` in `Metica.Ads.LoadCallbackProxy` / `ShowCallbackProxy` (or a null `_unitySyncContext`) — **likely indicator** that an ad `Load`/`Show` was issued off the Unity main thread (the SDK captures the `SynchronizationContext` at the call site, so a call from a background thread leaves nothing to marshal the callback back on). Treat it as a hypothesis unless the quoted stack/surrounding lines confirm the off-thread call site; a common trigger is the first load firing from a CMP/consent callback (`OnConsentInfoUpdated` / UMP `OnComplete`). Flag it and, when confirmed, recommend marshaling the ad call to the main thread.
 
 #### Step 8. Write the report
 
