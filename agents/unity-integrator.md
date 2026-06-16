@@ -493,7 +493,7 @@ Event-name table (Max → Metica):
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
 MAX_SDK_KEY="${MAX_SDK_KEY:-YOUR_MAX_SDK_KEY}"
-USER_ID_EXPR="${USER_ID_EXPR:-null}"          # C# expression; default null → validator FAIL until replaced
+USER_ID_EXPR="${USER_ID_EXPR:-null}"          # C# expression; null is valid (Metica auto-generates) — real identity recommended
 # from Step 2.5:
 ADAPTER_FOLDER="<resolved adapter folder>"   # default Assets/Scripts/Metica (relative to $PROJECT)
 NAMESPACE="<resolved namespace>"              # dominant + .Metica, else (empty) or MeticaIntegration — never Metica.AbTest
@@ -538,7 +538,7 @@ echo "Generated MeticaAdService.cs in $ADAPTER_FOLDER (formats: $FORMATS)"
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
-USER_ID_EXPR="${USER_ID_EXPR:-null}"          # validator FAILs until replaced with a real expression
+USER_ID_EXPR="${USER_ID_EXPR:-null}"          # null is valid (Metica auto-generates) — real identity recommended
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" below
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
