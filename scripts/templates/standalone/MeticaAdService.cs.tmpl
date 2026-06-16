@@ -19,6 +19,13 @@ public class MeticaAdService : MonoBehaviour
 {
     private bool _initialized = false;
 
+    [Header("Metica — set these in the Inspector / prefab (the build pipeline can rotate them per app)")]
+    [SerializeField] private string _apiKey = "__METICA_API_KEY__";
+    [SerializeField] private string _appId  = "__METICA_APP_ID__";
+    // @mediation-begin
+    [SerializeField] private string _maxSdkKey = "__MAX_SDK_KEY__";
+    // @mediation-end
+
     void Start() => Initialize();
 
     // Idempotent — safe to call again (e.g. from your own bootstrap after login).
@@ -31,7 +38,7 @@ public class MeticaAdService : MonoBehaviour
         MeticaSdk.Ads.SetHasUserConsent(true);
         MeticaSdk.Ads.SetDoNotSell(false);
         MeticaSdk.SetLogEnabled(true);
-        var config = new MeticaInitConfig("__METICA_API_KEY__", "__METICA_APP_ID__", __USER_ID__);
+        var config = new MeticaInitConfig(_apiKey, _appId, __USER_ID__);
         MeticaSdk.Initialize(config, __MEDIATION__, OnInitialized);
     }
 
@@ -43,16 +50,16 @@ public class MeticaAdService : MonoBehaviour
 
         // Subscribe each used format's callbacks + kick off its initial load.
         // @fmt-begin:interstitial
-        InitInterstitial("interstitial_main");
+        InitInterstitial();
         // @fmt-end:interstitial
         // @fmt-begin:rewarded
-        InitRewarded("rewarded_main");
+        InitRewarded();
         // @fmt-end:rewarded
         // @fmt-begin:banner
-        InitBanner("banner_main");
+        InitBanner();
         // @fmt-end:banner
         // @fmt-begin:mrec
-        InitMrec("mrec_main");
+        InitMrec();
         // @fmt-end:mrec
     }
 
@@ -69,12 +76,11 @@ public class MeticaAdService : MonoBehaviour
 
     // @fmt-begin:interstitial
     // ===================== Interstitial =====================
-    private string _interstitialAdUnitId;
+    [SerializeField] private string _interstitialAdUnitId = "interstitial_main";
     private int _interstitialRetry = 0;
 
-    private void InitInterstitial(string adUnitId)
+    private void InitInterstitial()
     {
-        _interstitialAdUnitId = adUnitId;
         MeticaAdsCallbacks.Interstitial.OnAdLoadSuccess += OnInterstitialLoadSuccess;
         MeticaAdsCallbacks.Interstitial.OnAdLoadFailed  += OnInterstitialLoadFailed;
         MeticaAdsCallbacks.Interstitial.OnAdShowSuccess += OnInterstitialShowSuccess;
@@ -111,12 +117,11 @@ public class MeticaAdService : MonoBehaviour
 
     // @fmt-begin:rewarded
     // ===================== Rewarded =====================
-    private string _rewardedAdUnitId;
+    [SerializeField] private string _rewardedAdUnitId = "rewarded_main";
     private int _rewardedRetry = 0;
 
-    private void InitRewarded(string adUnitId)
+    private void InitRewarded()
     {
-        _rewardedAdUnitId = adUnitId;
         MeticaAdsCallbacks.Rewarded.OnAdLoadSuccess += OnRewardedLoadSuccess;
         MeticaAdsCallbacks.Rewarded.OnAdLoadFailed  += OnRewardedLoadFailed;
         MeticaAdsCallbacks.Rewarded.OnAdShowSuccess += OnRewardedShowSuccess;
@@ -155,17 +160,17 @@ public class MeticaAdService : MonoBehaviour
 
     // @fmt-begin:banner
     // ===================== Banner =====================
-    private string _bannerAdUnitId;
+    [SerializeField] private string _bannerAdUnitId = "banner_main";
     private bool _bannerShowing = false;
 
-    private void InitBanner(string adUnitId)
+    private void InitBanner()
     {
-        _bannerAdUnitId = adUnitId;
         MeticaAdsCallbacks.Banner.OnAdLoadSuccess += OnBannerLoadSuccess;
         MeticaAdsCallbacks.Banner.OnAdLoadFailed  += OnBannerLoadFailed;
         MeticaAdsCallbacks.Banner.OnAdClicked     += OnBannerClicked;
         MeticaAdsCallbacks.Banner.OnAdRevenuePaid += OnBannerRevenuePaid;
         CreateBanner();
+        HideBanner();   // the underlying MaxAdView is visible-by-default once created; start hidden and Show on demand
         LoadBanner();
     }
 
@@ -196,17 +201,17 @@ public class MeticaAdService : MonoBehaviour
 
     // @fmt-begin:mrec
     // ===================== MRec (note SDK casing: Mrec) =====================
-    private string _mrecAdUnitId;
+    [SerializeField] private string _mrecAdUnitId = "mrec_main";
     private bool _mrecShowing = false;
 
-    private void InitMrec(string adUnitId)
+    private void InitMrec()
     {
-        _mrecAdUnitId = adUnitId;
         MeticaAdsCallbacks.Mrec.OnAdLoadSuccess += OnMrecLoadSuccess;
         MeticaAdsCallbacks.Mrec.OnAdLoadFailed  += OnMrecLoadFailed;
         MeticaAdsCallbacks.Mrec.OnAdClicked     += OnMrecClicked;
         MeticaAdsCallbacks.Mrec.OnAdRevenuePaid += OnMrecRevenuePaid;
         CreateMrec();
+        HideMrec();   // the underlying MaxAdView is visible-by-default once created; start hidden and Show on demand
         LoadMrec();
     }
 

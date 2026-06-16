@@ -57,7 +57,10 @@ You're scanning `.cs` files. A textual match inside a `// comment`, a `/* block 
 surrounding lines and confirm the match is live code**
 before you trust it. This is more reliable than grep-with-stripping because you actually see
 the context. Scope your reading to the integration files (`Assets/Scripts/...`, the adapter
-folder) and the callees reachable from a candidate site — do not read the whole project.
+folder) and the callees reachable from a candidate site — do not read the whole project. The
+**scene/prefab wiring rules** below additionally read `Assets/**/*.unity`, `Assets/**/*.prefab`,
+the relevant `.meta` files, and `ProjectSettings/EditorBuildSettings.asset` — all stable Unity
+YAML, scanned as text.
 
 **Lint only the project's own integration code — but read the SDK to verify behavior.** Don't
 emit findings *about* the vendored SDKs (`Assets/MaxSdk/`, `Assets/MeticaSdk/`), the package
@@ -182,6 +185,12 @@ shipped games):
 - `retry_ownership` — **behavioral.** If `disable_auto_retries` (or equivalent) is set, MAX won't retry, so the client must own load-failure retries: **FAIL** when auto-retry is disabled and no client retry path exists. **ADVISORY** for dead retry logic — a retry counter declared/reset but never incremented or read (a retry lost in a rewrite). Cite the disable call / the counter.
 - `dead_code_signal` — **behavioral, ADVISORY.** A field or list carefully populated but **never read** (or a method never called) often marks a call lost in a rewrite — surface it and ask; do not assume it is safe to delete. Cite the populate site and note the absent read.
 - `sdk_calls_on_main_thread` — **behavioral, FAIL-capable.** Every `MeticaSdk` call — `Initialize`, `Load<Format>`, `Show<Format>`, `Create<Format>` — must run on the **Unity main thread**. The SDK captures the `SynchronizationContext` **at the call site** and marshals that format's callbacks back to it (read `Assets/MeticaSdk/Runtime/.../LoadCallbackProxy.cs` / `ShowCallbackProxy.cs` to confirm); a call issued from a background thread captures a null/non-Unity context, so the callback throws (`NullReferenceException` in the proxy) or runs off-main. **FAIL** a call provably reachable only from an off-main context — a CMP/consent callback (`OnConsentInfoUpdated` / a UMP `OnComplete`), an AppLovin/Amazon SDK callback, a `Task` / `ThreadPool` / `new Thread` body, or an `async` continuation after `ConfigureAwait(false)` — with no marshal to the main thread (a dispatcher / `UnityMainThreadDispatcher` / `SynchronizationContext.Post` / a flag read from `Update`). **ADVISORY** when the calling thread can't be proven. Cite the off-main entry → the unmarshaled SDK call.
+
+**Scene / prefab wiring rules** (a clean compile + green code rules do **not** mean the integration is live — it isn't until the MonoBehaviour is attached and its credentials set). These scan the serialized `.unity` / `.prefab` / `.meta` YAML Unity writes in a stable text format — deterministic reads, no compiler, no LLM:
+
+- `no_missing_script_orphans` — grep every `.unity` and `.prefab` under `Assets/` for `m_Script: {fileID: 0,` (a MonoBehaviour whose script no longer resolves — usually a deleted/renamed class). Report each owning GameObject's `m_Name`. **FAIL** when the orphan is integration-related (the GameObject name or neighbouring properties reference Metica/ads — e.g. a leftover `MeticaManager`); **ADVISORY** for unrelated orphans (real project debt, but outside this integration's scope).
+- `metica_service_attached` — find the generated service `.cs` (the class that calls `MeticaSdk.Initialize`), read its `.meta` `guid`, and grep the build scenes (`ProjectSettings/EditorBuildSettings.asset` `m_Scenes`) + all `.prefab` files for that guid. **FAIL** when nothing references it — the component is never instantiated, so `MeticaAdService.Instance` is null and no ads load. **ADVISORY** when the `.meta` or scene list can't be read.
+- `metica_service_credentials_set` — locate the `MeticaAdService` MonoBehaviour entry in the prefab/scene YAML by its script guid and read the serialized credential fields (`_apiKey` / `_appId` / `_maxSdkKey`). **FAIL** when any is empty, equals a placeholder default (`YOUR_*` / `__METICA_*__`), or fails a format check (a Metica api key is 32-char hex). **ADVISORY** when the serialized values can't be confidently parsed (e.g. a prefab variant / nested prefab override the validator can't resolve). This is the prefab-side counterpart of `placeholder_ids_replaced`, which only sees C# string literals.
 
 **MaxSDK-API misuse** — read `references/max-metica-api-map.tsv` (rows are
 `<pattern>\t<replacement>\t<kind>\t<notes>`). Scan the project for Max-API call sites across
