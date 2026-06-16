@@ -627,7 +627,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_reload_on_hidden` | autofix | Append `OnAdHidden += ad => Load<Fmt>();`. |
 | `<fmt>_show_failed_subscribed` | autofix | Append `OnAdShowFailed += (ad, err) => Load<Fmt>();`. |
 | `placeholder_ids_replaced` | prompt | Ask for the real key; substitute in source. |
-| `user_id_not_test_value` | prompt | A hardcoded test literal (`"test"` / `"debug"` / digits-only …) was passed as the userId — ask for the real expression. (`null`/empty no longer FAILs — Metica auto-generates.) For the integrator's own output the value was collected at plan time (Step 3). |
+| `user_id_not_test_value` | prompt | A hardcoded test literal (`"test"` / `"debug"` / digits-only …) was passed as the userId — ask for the real expression. (`null`/empty is valid — Metica auto-generates.) For the integrator's own output the value was collected at plan time (Step 3). |
 | `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |

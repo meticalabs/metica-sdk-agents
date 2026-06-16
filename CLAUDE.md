@@ -13,7 +13,7 @@ This is **not application code** — it is a Claude Code *plugin* that ships thr
 - **Data + templates** — `metica-versions.yaml` (compat matrix), `references/max-metica-api-map.tsv` (+ its narrative twin) and `scripts/templates/standalone/MeticaAdService.cs.tmpl` are read directly by the agents.
 - **Reference docs** — `agents/contracts.md` (the inter-agent JSON contracts) and `references/` (MaxSdk↔MeticaSdk API parity; `3pa-forwarders.md` holds the canonical third-party-analytics revenue-forwarder shapes the integrator generates into `OnAdRevenuePaid`).
 
-There is no build step and no compiled artifact. Changing an agent or skill = editing its `.md`; the surviving scripts change only when the system tooling around them does.
+There is no build step and no compiled artifact. Changing an agent or skill = editing its `.md`; the scripts change only when the system tooling around them does.
 
 ## Commands
 
