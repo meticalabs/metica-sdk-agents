@@ -20,7 +20,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used when MaxSDK is present, where MeticaSDK mediates through AppLovin MAX). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
-- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` (the integrator then prompts the user to replace it; the validator's `user_id_not_test_value` check FAILs until a real expression is wired). Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
+- `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` — valid (MeticaSDK then auto-generates a stable per-device userId, which the validator PASSes), but the integrator still recommends wiring the host app's real identity source for correct cross-session attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name suggested in the cohort-gating recipe. Default: `metica_rollout`.
@@ -334,10 +334,11 @@ Confirm these inferences:
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
 
-**Collect `USER_ID_EXPR` here.** The default `null` is *known in advance* to trip the validator's `user_id_not_test_value` rule on the first run. Rather than walk into that failure and recover reactively, ask now — as part of this preview — so run-1 validation passes:
+**Collect `USER_ID_EXPR` here.** `null`/empty is valid (Metica auto-generates a stable per-device id, and the validator PASSes it), but a real identity source gives correct cross-session attribution — ask for it now, as part of this preview, rather than silently shipping an anonymous default the user didn't choose:
 
 ```
-userId is currently unset (defaults to null, which the validator will reject).
+userId is currently unset (defaults to null). Metica will auto-generate a stable
+per-device id, but a real identity source gives correct cross-session attribution.
 Provide the C# expression for the player identity:
   1) SystemInfo.deviceUniqueIdentifier
   2) PlayerProfile.PlayerId
@@ -492,7 +493,7 @@ Event-name table (Max → Metica):
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
 MAX_SDK_KEY="${MAX_SDK_KEY:-YOUR_MAX_SDK_KEY}"
-USER_ID_EXPR="${USER_ID_EXPR:-null}"          # C# expression; default null → validator FAIL until replaced
+USER_ID_EXPR="${USER_ID_EXPR:-null}"          # C# expression; null is valid (Metica auto-generates) — real identity recommended
 # from Step 2.5:
 ADAPTER_FOLDER="<resolved adapter folder>"   # default Assets/Scripts/Metica (relative to $PROJECT)
 NAMESPACE="<resolved namespace>"              # dominant + .Metica, else (empty) or MeticaIntegration — never Metica.AbTest
@@ -503,7 +504,7 @@ FORMATS="<formats the game actually uses>"   # detected from the Max call sites 
 
 Then generate:
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped as above), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<escaped MAX SDK key>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec`. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (below), **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**, and substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped as above), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<escaped MAX SDK key>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs). The result is a single `MonoBehaviour` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec` — these (and `Initialize`) must be **called on the Unity main thread** (the SDK captures the `SynchronizationContext` at the call site); when rewriting call sites that fire from a CMP/consent or other off-main callback, marshal them to the main thread. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
 
 2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them).
 
@@ -537,7 +538,7 @@ echo "Generated MeticaAdService.cs in $ADAPTER_FOLDER (formats: $FORMATS)"
 ```bash
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
-USER_ID_EXPR="${USER_ID_EXPR:-null}"          # validator FAILs until replaced with a real expression
+USER_ID_EXPR="${USER_ID_EXPR:-null}"          # null is valid (Metica auto-generates) — real identity recommended
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" below
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
@@ -626,7 +627,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `<fmt>_reload_on_hidden` | autofix | Append `OnAdHidden += ad => Load<Fmt>();`. |
 | `<fmt>_show_failed_subscribed` | autofix | Append `OnAdShowFailed += (ad, err) => Load<Fmt>();`. |
 | `placeholder_ids_replaced` | prompt | Ask for the real key; substitute in source. |
-| `user_id_not_test_value` | prompt | Ask for the real expression. For the integrator's own output this was already collected at plan time (Step 3), so run-1 should pass; this prompt is the fallback for hand-rolled code linted outside the integrator flow. |
+| `user_id_not_test_value` | prompt | A hardcoded test literal (`"test"` / `"debug"` / digits-only …) was passed as the userId — ask for the real expression. (`null`/empty is valid — Metica auto-generates.) For the integrator's own output the value was collected at plan time (Step 3). |
 | `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
@@ -634,8 +635,13 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `smartfloors_analytics_only` | surface | Group-aware ad logic (branching ad load/show/ad-unit selection on the Smart Floors user group / `IsForcedHoldout`, or on a returned-`adUnitId` equality check) is a **redesign**, not a line edit — and a real revenue regression. Surface the cited branch (`file:line`) and stop; the integrator's own codegen never emits this (it only logs the group), so a FAIL means hand-rolled code that must be simplified to the docs pattern (pass the configured id through, treat trial/holdout identically). |
 | `banner_setter_after_create` / `mrec_setter_after_create` | autofix \| surface | If the setter and its `Create*` sit in the **same method**, reorder so `Create*` precedes the setter (autofix). If they're in different methods / call paths, surface the setter `file:line` + the `Create*` it must follow and stop — cross-method reordering isn't a safe line edit. The integrator's own setter-ordering patch pass keeps generated code green, so a FAIL is hand-rolled. |
 | `threepa_forwarder_in_revenue_paid` | surface | A 3PA revenue forwarder wired outside `OnAdRevenuePaid` (e.g. in `OnAdHidden`) loses click-through revenue. Relocating an analytics call is game logic, not a line edit — surface the forwarder `file:line` + its enclosing handler and the target (`OnAdRevenuePaid`), and stop. |
+| `interstitial_setter_after_create` / `rewarded_setter_after_create` | autofix \| surface | Same as the banner/MRec setter rule: reorder when setter + `Create*`/load are in one method, else surface. |
+| `callbacks_fire_on_every_path` | surface | A parked/stale callback is a control-flow bug, not a line edit — surface the store site + the path with no invocation and stop. |
+| `init_callback_all_paths` | surface | An init path that skips `OnInitialized` (early-return / empty-config) is a logic fix — surface the path and stop. The integrator's own codegen always invokes the callback, so a FAIL is hand-rolled. |
+| `retry_ownership` | surface | Auto-retry disabled with no client retry path — surface the `disable_auto_retries` site and the missing retry, and stop. |
+| `sdk_calls_on_main_thread` | surface | An ad call issued off the Unity main thread (e.g. from a CMP/consent callback) needs marshaling to the main thread — a control-flow fix, not a line edit. Surface the off-main call site and stop. The integrator's own codegen drives all ad calls from `MonoBehaviour` lifecycle / main-thread paths, so a FAIL is hand-rolled. |
 
-`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `interstitial_setter_after_create` / `rewarded_setter_after_create`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `format_path_symmetry`, `dead_code_signal`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
@@ -687,10 +693,10 @@ The list is harvested as the rewrite pass runs — each `drop`-class match emits
 
 #### Credential hygiene (now validator-driven)
 
-The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and null/test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
+The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
 
 ```
-⚠ The validator flagged credential placeholders / a null userId.
+⚠ The validator flagged credential placeholders / a test-value userId.
   These will be caught on every re-run of the validator (CI, post-edit, audit).
   Replace with your real values, then re-run @agent-unity-validator to confirm green.
 ```

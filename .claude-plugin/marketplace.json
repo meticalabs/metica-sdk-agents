@@ -8,7 +8,7 @@
   },
   "metadata": {
     "description": "Subagents that integrate MeticaSDK into Unity projects in one pass — including projects that already use AppLovin MAX — plus an ad-log-monitor skill for verifying integrations on device.",
-    "version": "2.2.0"
+    "version": "2.3.0"
   },
   "plugins": [
     {

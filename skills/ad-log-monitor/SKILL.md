@@ -7,7 +7,7 @@ description: Verify a Metica + AppLovin MAX integration's runtime ad lifecycle o
 
 > This is a skill, not a sub-agent, because the workflow is interactive (start → user plays → stop → analyse → repeat → compare) and benefits from staying in the main conversation, where the user can ask follow-up questions on the analysis without context-switching to a sub-agent.
 
-This skill verifies a Metica + AppLovin MAX integration from live device logs. Three phases:
+This skill verifies a Metica + AppLovin MAX integration from live device logs. Throughout, **distinguish what the log *proves* from what you *infer*** — quote the lines as evidence, and label an inference as an inference. Three phases:
 
 1. **Phase 1 — capture.** Kick off a background log capture on a connected device. *Scripted.*
 2. **Phase 2 — analyse one route.** Stop the capture, then read the log and produce a structured Markdown analysis for one route (trial or holdout). *Stop is scripted; the analysis itself is your job.*
@@ -255,7 +255,7 @@ Cite actual timestamps in the report — don't just write "parallel". The number
 #### Step 7. Errors & warnings
 
 ```bash
-ERR='metica.*(error|exception|fail)|applovin.*error|MAX.*error|MaxSdk.*error|loadAd.*fail|sdk.*not initialized|invalid.*(api.?key|app.?id)|HTTP [45][0-9][0-9]|FATAL EXCEPTION'
+ERR='metica.*(error|exception|fail)|applovin.*error|MAX.*error|MaxSdk.*error|loadAd.*fail|sdk.*not initialized|invalid.*(api.?key|app.?id)|HTTP [45][0-9][0-9]|FATAL EXCEPTION|CallbackProxy|NullReferenceException|_unitySyncContext'
 grep -iE "$ERR" "$LOG" \
   | sed -E 's/^[A-Za-z]{3}[[:space:]]+[0-9]+[[:space:]]+[0-9:]+[[:space:]]+[^[:space:]]+[[:space:]]+//' \
   | sed -E 's/^[0-9-]+[[:space:]]+[0-9:.]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[A-Z][[:space:]]+//' \
@@ -267,6 +267,7 @@ Group by unique signature. For each, give the count, one example line, and your 
 - `E/Metica: api_key invalid (401)` — bad/expired Metica key; all Metica behaviour downstream is meaningless
 - `MAX: no fill` — environmental, usually fine
 - `FATAL EXCEPTION` — crash; quote the stack and flag
+- `NullReferenceException` in `Metica.Ads.LoadCallbackProxy` / `ShowCallbackProxy` (or a null `_unitySyncContext`) — **likely indicator** that an ad `Load`/`Show` was issued off the Unity main thread (the SDK captures the `SynchronizationContext` at the call site, so a call from a background thread leaves nothing to marshal the callback back on). Treat it as a hypothesis unless the quoted stack/surrounding lines confirm the off-thread call site; a common trigger is the first load firing from a CMP/consent callback (`OnConsentInfoUpdated` / UMP `OnComplete`). Flag it and, when confirmed, recommend marshaling the ad call to the main thread.
 
 #### Step 8. Write the report
 
@@ -442,6 +443,7 @@ The baseline is the **production store build** — a different build from the de
 - If holdout's fill rate / top networks / revenue-per-impression **track** the baseline → the harness is faithful; trust the trial-vs-holdout verdict.
 - If holdout **diverges sharply** from baseline → **FLAG it as a build/harness concern, not a Metica effect**: the holdout dev-build isn't reproducing production, so the A/B comparison rests on a shaky control. Recommend reconciling the holdout build with production before believing the numbers.
 - Always caveat that baseline gaps can be **build/version differences** (different app version, store vs sideloaded, no Metica) rather than real behavioral deltas. Never let a baseline number flip the trial-vs-holdout verdict.
+- **Extra-parameter parity.** Grep each route's load lines for the auction-affecting extra parameters (`setLocalExtraParameter` / `setExtraParameter`, e.g. `disable_auto_retries`, `adaptive_banner`, APS `amazon_ad_response`, floor params). If a route sets parameters the others don't, the comparison isn't apples-to-apples — call it out: a holdout/baseline that omits a parameter the trial sets (or vice-versa) can explain a fill/eCPM delta on its own, independent of Metica. Quote the differing parameter lines.
 
 ### 3. Apply verdict rules (prose)
 
@@ -449,6 +451,7 @@ The baseline is the **production store build** — a different build from the de
 - `trial fill rate < holdout fill rate` materially → **FLAG**. Floor priced too high.
 - `trial fill rate < holdout` AND `trial revenue/impression > holdout` → *expected Metica tradeoff* (fewer fills, higher prices). **Note, don't flag.**
 - Trial-only lifecycle anomalies (show without ready, reload latency >5s, missing reward callback) → **FLAG**. A regression in the runtime ad logic itself, independent of bid economics.
+- **Fewer ready ad units / a collapsed multi-unit waterfall in the trial group → do NOT flag.** For users Metica actively optimizes, the SDK manages ad loading internally, so the game's multi-unit waterfall behaves as a single managed pipeline — "only one ad ready at a time" is **expected** for the trial group, not a regression. The holdout (control) group runs the game's exact baseline waterfall unchanged, so this asymmetry between routes is by design. Only flag it if the *holdout* also collapses (then it's a real loading bug, not the optimization). This concerns waterfall **structure** — how many units are ready at once — not the fill-rate metric in the rules above; a collapsed trial waterfall does not by itself mean a lower trial fill rate.
 - `trial load response time` or `time to first ad ready` materially worse than holdout → **FLAG**. A loading regression, not bid economics. (Scope this to the timing metrics only — fill-rate deltas are covered by the rules above.)
 - `trial 3PA forward rate < holdout` for any provider → **FLAG**. All forwarders share the Unity main-thread dispatch surface, so a trial-only drop signals the wrapper-architecture asymmetry — analytics under-reporting independent of revenue.
 - Trial-only errors (next section) → **FLAG**.

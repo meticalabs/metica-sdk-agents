@@ -119,9 +119,9 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-Test suites cover the four surviving scripts: `resolver`, `download`, `compile`, and `log-monitor`. The verification logic now lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
+The five test suites — `resolver`, `download`, `compile`, `update-check`, `log-monitor` — cover the scripts under `scripts/` (`resolve-plugin-dir.sh`, `download-metica-sdk.sh`, `compile-check.sh`, `check-for-update.sh`, `log-monitor-start.sh` / `log-monitor-stop.sh`). The verification logic lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
 
-The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-2.4.0.unitypackage` and silently skips when it's absent; the other three run on any clean clone.
+The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-2.4.0.unitypackage` and silently skips when it's absent; the other four run on any clean clone.
 
 ## Repo layout
 
@@ -132,6 +132,8 @@ metica-sdk-agents/
 │   └── plugin.json                    # plugin manifest
 ├── install.sh                         # one-line installer
 ├── metica-versions.yaml               # compat matrix
+├── hooks/
+│   └── hooks.json                     # SessionStart update-notify hook
 ├── agents/
 │   ├── contracts.md                   # JSON schemas for sub-agent outputs
 │   ├── unity-compat-checker.md
@@ -142,6 +144,7 @@ metica-sdk-agents/
 │       └── SKILL.md                   # runtime ad-lifecycle verification + trial-vs-holdout comparison
 ├── scripts/                           # only what an agent can't do in prose
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for agents + skill
+│   ├── check-for-update.sh            # SessionStart update-notify check
 │   ├── compile-check.sh               # batch-mode Unity build behind the validator's compiles_cleanly rule
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
@@ -149,8 +152,9 @@ metica-sdk-agents/
 │   └── templates/standalone/          # MeticaAdService.cs.tmpl — one MonoBehaviour, per-format @fmt regions
 ├── references/
 │   ├── max-metica-api-map.tsv         # machine-readable MaxSdk → MeticaSdk map; read by both validator + integrator
-│   └── max-vs-metica-2.4.0-api.md     # narrative parity doc (keep in sync with the TSV)
-└── tests/                             # 4 suite scripts (+ run-all.sh) + log-monitor fixture
+│   ├── max-vs-metica-2.4.0-api.md     # narrative parity doc (keep in sync with the TSV)
+│   └── 3pa-forwarders.md              # canonical 3PA revenue-forwarder shapes
+└── tests/                             # 5 suite scripts (+ run-all.sh) + log-monitor fixture
 ```
 
 ## License
