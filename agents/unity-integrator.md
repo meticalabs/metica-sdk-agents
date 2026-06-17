@@ -743,6 +743,17 @@ Notes:
 
 Replace `<PROVIDER>` and the read-expression with the detected value. When the provider is `none`, omit this section entirely (no rollout recipe makes sense without a remote-config provider).
 
+#### Standing caveats (every run)
+
+End the report with the threading reminder on **every** run.
+
+```
+⚠️ Threading: call MeticaSdk.Initialize and all Load*/Show* from the Unity main
+   thread (the SDK marshals callbacks to the SynchronizationContext captured at the
+   call site). Don't kick off init from a consent/UMP callback or a Task continuation
+   without marshalling first.
+```
+
 ## Hard rules
 
 - Never modify any file under `Assets/MaxSdk/`. When MaxSDK is present, rewrite only the game's direct `MaxSdk.*` call sites (scene/game logic) — never a dedicated Max-wrapper file (see the wrapper-scoping rule in Step 5).

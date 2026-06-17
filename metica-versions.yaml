@@ -38,6 +38,10 @@ versions:
     release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.2.7"
     deprecated: false
 
+# Known issue MET-11632 (fixed in 2.4.2): on SDK < 2.4.2, IL2CPP + managed stripping
+# (Low/Medium/High) strips an anonymous type in the Android init bridge → JsonConvert emits
+# "{}" → every user forced to HOLDOUT. compat-checker's `managed_stripping` check WARNs on this.
+
 # Type discipline:
 #   *_min / *_max version fields are strings. Empty string = no bound.
 #   java_min / android_api_min are integers (major version number).
