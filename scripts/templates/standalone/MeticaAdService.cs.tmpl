@@ -32,6 +32,13 @@ public class MeticaAdService : MonoBehaviour
     public void Initialize()
     {
         if (_initialized) return;
+        if (string.IsNullOrEmpty(_apiKey) || string.IsNullOrEmpty(_appId))
+        {
+            // Credentials are Inspector/prefab-set — bail WITHOUT latching _initialized so a
+            // corrected config can re-run init (don't permanently wedge on an unset field).
+            Debug.LogError("[Metica] apiKey/appId not set on the MeticaAdService component — skipping init.");
+            return;
+        }
         _initialized = true;
 
         // Privacy MUST precede Initialize (same-file ordering the validator enforces).
