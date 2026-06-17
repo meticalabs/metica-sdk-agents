@@ -32,11 +32,12 @@ public class MeticaAdService : MonoBehaviour
     public void Initialize()
     {
         if (_initialized) return;
-        if (string.IsNullOrEmpty(_apiKey) || string.IsNullOrEmpty(_appId))
+        if (string.IsNullOrEmpty(_apiKey) || _apiKey.StartsWith("YOUR_") ||
+            string.IsNullOrEmpty(_appId)  || _appId.StartsWith("YOUR_"))
         {
-            // Credentials are Inspector/prefab-set — bail WITHOUT latching _initialized so a
-            // corrected config can re-run init (don't permanently wedge on an unset field).
-            Debug.LogError("[Metica] apiKey/appId not set on the MeticaAdService component — skipping init.");
+            // Credentials are Inspector/prefab-set — bail WITHOUT latching _initialized (so a
+            // corrected config can re-run init). Treat the YOUR_* placeholder defaults as unset.
+            Debug.LogError("[Metica] apiKey/appId unset or still a YOUR_* placeholder on the MeticaAdService component — skipping init.");
             return;
         }
         _initialized = true;
