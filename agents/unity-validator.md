@@ -169,10 +169,18 @@ shipped games):
   handler. **FAIL** when such a call is found inside `OnAdHidden` / a dismissal handler / any
   other lifecycle hook — that wiring reports revenue only on user-dismissal, so click-through
   users (who never dismiss) lose every revenue event. **ADVISORY** when the call *is* inside
-  `OnAdRevenuePaid` — correct placement, but dispatch still rides Unity's main thread
-  (`SynchronizationContext.Post`), so production click-through-no-return scenarios may still lose
-  events until Metica provides a Java-side forward path. Cite the forwarder call + its enclosing
-  handler.
+  `OnAdRevenuePaid` — correct placement. On **SDK < 2.4.2** dispatch still rides Unity's main
+  thread (`SynchronizationContext.Post`), which is paused during a fullscreen ad, so
+  click-through-no-return / app-closed-mid-ad scenarios can still lose events — note it. On
+  **SDK ≥ 2.4.2** the project should additionally set
+  `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread` (MET-11567) so the fullscreen
+  (interstitial/rewarded) revenue handler — and the 3PA forwarder inside it — runs synchronously on
+  the native thread and survives the app closing mid-ad; **ADVISORY** when a 2.4.2+ project leaves
+  it at the default `UnityMainThread`. In NativeThread mode the handler runs **off** the Unity main
+  thread, so it must be **thread-safe** — **FAIL** a handler that, under NativeThread, calls a
+  Unity-main-thread-only API (`PlayerPrefs`, `GameObject`/component access, `Time.*`, `Resources.*`,
+  instantiation). Cite the forwarder call + its enclosing handler (+ the `RevenueCallbackDelivery`
+  setting if present).
 
 **Integration-review rules** (mechanism-level; follow the code, and where a verdict turns on SDK behavior, read the vendored SDK to confirm):
 
