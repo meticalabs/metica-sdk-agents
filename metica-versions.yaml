@@ -49,12 +49,12 @@ versions:
 # Known issue MET-11632 (fixed in 2.4.2): on SDK < 2.4.2, IL2CPP + managed stripping
 # (Low/Medium/High) strips an anonymous type in the Android init bridge → JsonConvert emits
 # "{}" → every user forced to HOLDOUT. compat-checker's `managed_stripping` check WARNs on this.
-# Behavior change (2.4.2, Android): banner/MRec creation and loading are now separated — the client
-# must call `Create<Format>` (CreateBanner/CreateMrec) and then `Show<Format>` (ShowBanner/ShowMrec);
-# a load/show issued with no preceding `Create` for the same adUnitId displays nothing. Canonical
-# lifecycle: Create → Load → Show. The integrator's template already generates this (Create → Load
-# in Init<Format>, Show as a separate game-triggered call); the validator's banner/MRec rules expect
-# it.
+# Behavior change (2.4.2, Android): banner/MRec creation and display are now separate steps — the
+# client must call `Create<Format>` (CreateBanner/CreateMrec) and then `Show<Format>` (ShowBanner/
+# ShowMrec); a show/load issued with no preceding `Create` for the same adUnitId displays nothing.
+# Canonical lifecycle: Create → Show (the SDK loads the ad and auto-refreshes; an explicit `Load` is
+# only for manual refresh after StopAutoRefresh). The integrator's template generates Create → Show
+# in Init<Format>; the validator's banner/MRec rules expect it.
 
 # Type discipline:
 #   *_min / *_max version fields are strings. Empty string = no bound.

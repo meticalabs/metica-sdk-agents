@@ -152,12 +152,13 @@ shipped games):
   disabled `adaptive_banner=true` in a shipped game, costing fill/eCPM. Cite the setter site →
   the (missing or later) `Create` (≥2 evidence). `ADVISORY` with `unresolved` if the ordering
   can't be traced (e.g. setter and create in different methods with no resolvable call order).
-  On **SDK ≥ 2.4.2 (Android)** banner/MRec **creation and loading are separated**: the client must
-  call `CreateBanner`/`CreateMrec` and then `LoadBanner`/`ShowBanner` (`LoadMrec`/`ShowMrec`) — the
-  canonical lifecycle is `Create<Format>` → `Load<Format>` → `Show<Format>`, and a `Load`/`Show`
-  with no preceding `Create` for the same id displays nothing. Apply the same create-precedence
-  here: **FAIL** a banner/MRec `Load`/`Show` not preceded on every path by a `Create` for the same
-  `adUnitId`; `ADVISORY` with `unresolved` when the ordering can't be traced.
+  On **SDK ≥ 2.4.2 (Android)** banner/MRec **creation and display are separate steps**: the client
+  must call `CreateBanner`/`CreateMrec` and then `ShowBanner`/`ShowMrec` — the canonical lifecycle is
+  `Create<Format>` → `Show<Format>` (the SDK loads and auto-refreshes; an explicit `Load` is only for
+  manual refresh after `Stop*AutoRefresh`), and a `Show`/`Load` with no preceding `Create` for the
+  same id displays nothing. Apply the same create-precedence here: **FAIL** a banner/MRec
+  `Show`/`Load` not preceded on every path by a `Create` for the same `adUnitId`; `ADVISORY` with
+  `unresolved` when the ordering can't be traced.
 - `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral.**
   Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters. **Read the
   vendored SDK** (`Assets/MeticaSdk/Runtime/...`) to confirm whether a param set before the

@@ -165,18 +165,20 @@ public class MeticaAdService : MonoBehaviour
         MeticaAdsCallbacks.Banner.OnAdLoadFailed  += OnBannerLoadFailed;
         MeticaAdsCallbacks.Banner.OnAdClicked     += OnBannerClicked;
         MeticaAdsCallbacks.Banner.OnAdRevenuePaid += OnBannerRevenuePaid;
+        // Creation and display are separate steps: Create, then Show. The SDK loads the ad
+        // and auto-refreshes it — an explicit Show is required for the banner to appear.
         CreateBanner();
-        LoadBanner();
+        ShowBanner();
     }
 
-    // When placementTag is set, attach it via SetBannerPlacement before Load so
-    // revenue postbacks keep the placement dimension.
+    // When placementTag is set, attach it via SetBannerPlacement after Create / before Show
+    // so revenue postbacks keep the placement dimension.
     public void CreateBanner(MeticaAdViewPosition position = MeticaAdViewPosition.BottomCenter, string placementTag = null)
     {
         MeticaSdk.Ads.CreateBanner(_bannerAdUnitId, new MeticaAdViewConfiguration(position));
         if (!string.IsNullOrEmpty(placementTag)) MeticaSdk.Ads.SetBannerPlacement(_bannerAdUnitId, placementTag);
     }
-    public void LoadBanner()    => MeticaSdk.Ads.LoadBanner(_bannerAdUnitId);
+    public void LoadBanner()    => MeticaSdk.Ads.LoadBanner(_bannerAdUnitId);   // manual refresh only (after StopBannerAutoRefresh); not needed in the Create→Show flow
     public void ShowBanner()    { MeticaSdk.Ads.ShowBanner(_bannerAdUnitId);    _bannerShowing = true; }
     public void HideBanner()    { MeticaSdk.Ads.HideBanner(_bannerAdUnitId);    _bannerShowing = false; }
     public void DestroyBanner() { MeticaSdk.Ads.DestroyBanner(_bannerAdUnitId); _bannerShowing = false; }
@@ -206,8 +208,10 @@ public class MeticaAdService : MonoBehaviour
         MeticaAdsCallbacks.Mrec.OnAdLoadFailed  += OnMrecLoadFailed;
         MeticaAdsCallbacks.Mrec.OnAdClicked     += OnMrecClicked;
         MeticaAdsCallbacks.Mrec.OnAdRevenuePaid += OnMrecRevenuePaid;
+        // Creation and display are separate steps: Create, then Show. The SDK loads the ad
+        // and auto-refreshes it — an explicit Show is required for the MRec to appear.
         CreateMrec();
-        LoadMrec();
+        ShowMrec();
     }
 
     public void CreateMrec(MeticaAdViewPosition position = MeticaAdViewPosition.Centered, string placementTag = null)
@@ -215,7 +219,7 @@ public class MeticaAdService : MonoBehaviour
         MeticaSdk.Ads.CreateMrec(_mrecAdUnitId, new MeticaAdViewConfiguration(position));
         if (!string.IsNullOrEmpty(placementTag)) MeticaSdk.Ads.SetMrecPlacement(_mrecAdUnitId, placementTag);
     }
-    public void LoadMrec()    => MeticaSdk.Ads.LoadMrec(_mrecAdUnitId);
+    public void LoadMrec()    => MeticaSdk.Ads.LoadMrec(_mrecAdUnitId);   // manual refresh only (after StopMrecAutoRefresh); not needed in the Create→Show flow
     public void ShowMrec()    { MeticaSdk.Ads.ShowMrec(_mrecAdUnitId);    _mrecShowing = true; }
     public void HideMrec()    { MeticaSdk.Ads.HideMrec(_mrecAdUnitId);    _mrecShowing = false; }
     public void DestroyMrec() { MeticaSdk.Ads.DestroyMrec(_mrecAdUnitId); _mrecShowing = false; }
