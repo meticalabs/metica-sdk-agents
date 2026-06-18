@@ -58,7 +58,7 @@ MaxSdk.ShowBanner(	MeticaSdk.Ads.ShowBanner	rename
 MaxSdk.HideBanner(	MeticaSdk.Ads.HideBanner	rename
 MaxSdk.DestroyBanner(	MeticaSdk.Ads.DestroyBanner	rename
 MaxSdk.SetBannerPlacement(	MeticaSdk.Ads.SetBannerPlacement	rename
-MaxSdk.StartBannerAutoRefresh(	MeticaSdk.Ads.StartBannerAutoRefresh	rename	Metica banners do NOT auto-refresh by default — call this explicitly after Show.
+MaxSdk.StartBannerAutoRefresh(	MeticaSdk.Ads.StartBannerAutoRefresh	rename	Banners auto-refresh by default; call this only to re-enable refresh after StopBannerAutoRefresh.
 MaxSdk.StopBannerAutoRefresh(	MeticaSdk.Ads.StopBannerAutoRefresh	rename
 MaxSdk.SetBannerBackgroundColor(	MeticaSdk.Ads.SetBannerBackgroundColor	signature-change	UnityEngine.Color → hex color string. Convert at the call site (ColorUtility.ToHtmlStringRGB).
 MaxSdk.SetBannerExtraParameter(	MeticaSdk.Ads.SetBannerExtraParameter	rename
