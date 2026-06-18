@@ -13,7 +13,7 @@ placement carries the click-through-no-return / app-closed-mid-ad caveat surface
 report.
 
 On **SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread`
-(MET-11567, set once before init) so the fullscreen (interstitial/rewarded) `OnAdRevenuePaid`
+(once, before `MeticaSdk.Initialize`) so the fullscreen (interstitial/rewarded) `OnAdRevenuePaid`
 handler — and the forwarder inside it — runs synchronously on the native callback thread and the
 revenue event survives the app closing mid-ad. The trade-off: the handler is then **off** the Unity
 main thread, so the forwarder calls below must be **thread-safe** — the native provider SDK calls
