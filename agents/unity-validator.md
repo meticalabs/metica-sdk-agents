@@ -152,6 +152,13 @@ shipped games):
   disabled `adaptive_banner=true` in a shipped game, costing fill/eCPM. Cite the setter site →
   the (missing or later) `Create` (≥2 evidence). `ADVISORY` with `unresolved` if the ordering
   can't be traced (e.g. setter and create in different methods with no resolvable call order).
+  On **SDK ≥ 2.4.2 (Android)** banner/MRec **creation and display are separate steps**: the client
+  must call `CreateBanner`/`CreateMrec` and then `ShowBanner`/`ShowMrec` — the canonical lifecycle is
+  `Create<Format>` → `Show<Format>` (the SDK loads and auto-refreshes; an explicit `Load` is only for
+  manual refresh after `Stop*AutoRefresh`), and a `Show`/`Load` with no preceding `Create` for the
+  same id displays nothing. Apply the same create-precedence here: **FAIL** a banner/MRec
+  `Show`/`Load` not preceded on every path by a `Create` for the same `adUnitId`; `ADVISORY` with
+  `unresolved` when the ordering can't be traced.
 - `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral.**
   Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters. **Read the
   vendored SDK** (`Assets/MeticaSdk/Runtime/...`) to confirm whether a param set before the
@@ -169,10 +176,20 @@ shipped games):
   handler. **FAIL** when such a call is found inside `OnAdHidden` / a dismissal handler / any
   other lifecycle hook — that wiring reports revenue only on user-dismissal, so click-through
   users (who never dismiss) lose every revenue event. **ADVISORY** when the call *is* inside
-  `OnAdRevenuePaid` — correct placement, but dispatch still rides Unity's main thread
-  (`SynchronizationContext.Post`), so production click-through-no-return scenarios may still lose
-  events until Metica provides a Java-side forward path. Cite the forwarder call + its enclosing
-  handler.
+  `OnAdRevenuePaid` — correct placement. On **SDK < 2.4.2** dispatch still rides Unity's main
+  thread (`SynchronizationContext.Post`), which is paused during a fullscreen ad, so
+  click-through-no-return / app-closed-mid-ad scenarios can still lose events — note it. On
+  **SDK ≥ 2.4.2** the project should additionally set
+  `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread` — once, **before**
+  `MeticaSdk.Initialize` — so the fullscreen (interstitial/rewarded) revenue handler — and the 3PA
+  forwarder inside it — runs synchronously on the native thread and survives the app closing
+  mid-ad; **ADVISORY** when a 2.4.2+ project leaves it at the default `UnityMainThread`, and
+  **ADVISORY** when it is set but only **after** `MeticaSdk.Initialize` (so it isn't in effect when
+  the SDK wires up revenue delivery). In NativeThread mode the handler runs **off** the Unity main
+  thread, so it must be **thread-safe** — **FAIL** a handler that, under NativeThread, calls a
+  Unity-main-thread-only API (`PlayerPrefs`, `GameObject`/component access, `Time.*`, `Resources.*`,
+  instantiation). Cite the forwarder call + its enclosing handler (+ the `RevenueCallbackDelivery`
+  setting if present).
 
 **Integration-review rules** (mechanism-level; follow the code, and where a verdict turns on SDK behavior, read the vendored SDK to confirm):
 

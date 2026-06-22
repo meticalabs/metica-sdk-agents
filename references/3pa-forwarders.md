@@ -7,9 +7,19 @@ Step 5) and referenced by the validator's `threepa_forwarder_in_revenue_paid` ru
 **Single rule that governs all of them:** the forwarder call lives **inside the per-format
 `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid` handler** — never `OnAdHidden`, a dismissal
 hook, or any other lifecycle event. Forwarding on dismissal loses every click-through user
-(they never dismiss). All forwarders dispatch through Unity's main thread
-(`SynchronizationContext.Post`), so even correct placement carries the click-through-no-return
-caveat surfaced in the Step 7 report.
+(they never dismiss). On **SDK < 2.4.2** all forwarders dispatch through Unity's main thread
+(`SynchronizationContext.Post`) — which is paused while a fullscreen ad is shown — so even correct
+placement carries the click-through-no-return / app-closed-mid-ad caveat surfaced in the Step 7
+report.
+
+On **SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread`
+(once, before `MeticaSdk.Initialize`) so the fullscreen (interstitial/rewarded) `OnAdRevenuePaid`
+handler — and the forwarder inside it — runs synchronously on the native callback thread and the
+revenue event survives the app closing mid-ad. The trade-off: the handler is then **off** the Unity
+main thread, so the forwarder calls below must be **thread-safe** — the native provider SDK calls
+(Firebase `LogEvent`, `Adjust.TrackAdRevenue`, `AppMetrica.ReportAdRevenue`, `AppsFlyer.sendEvent`)
+are fine, but do **not** touch Unity APIs (`PlayerPrefs`, `GameObject`, `Time.*`) in the handler.
+Banner/MRec revenue is unaffected (still delivered on the main thread).
 
 **Prefer relocation over generation.** When the game already calls these providers (it almost
 always does), move its **existing** calls into the handler — they are version-correct for the
