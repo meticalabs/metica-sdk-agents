@@ -7,7 +7,10 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DOWNLOAD="$PLUGIN_DIR/scripts/download-metica-sdk.sh"
-LOCAL_BUILD="$PLUGIN_DIR/../Metica SDK builds/MeticaSdk-2.4.0.unitypackage"
+# Pin version-dependent tests to a fixed version (decoupled from the floating
+# `latest:` in metica-versions.yaml, so bumping latest doesn't break them).
+VER="2.4.0"
+LOCAL_BUILD="$PLUGIN_DIR/../Metica SDK builds/MeticaSdk-$VER.unitypackage"
 EXPECTED_SHA="8bea5e13a759949f98b961df6b4d730db16ab5e133a5a38fc942195e72fdf067"
 
 pass=0
@@ -83,7 +86,7 @@ fi
 proj=$(make_temp_project)
 logf="$(log_for dry-run)"
 METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --dry-run >"$logf" 2>&1
-if [ -f "$proj/Assets/MeticaSDK-2.4.0.unitypackage" ]; then
+if ls "$proj/Assets/"MeticaSDK-*.unitypackage >/dev/null 2>&1; then
     printf "  FAIL  dry-run wrote to Assets/\n"; fail=$((fail+1))
 elif grep -q "^PLAN$" "$logf"; then
     printf "  ok    dry-run plans without writing\n"; pass=$((pass+1))
@@ -95,9 +98,9 @@ rm -rf "$proj"
 # 2. Real install, dev mode — file placed + sha matches
 proj=$(make_temp_project)
 logf="$(log_for install-sha)"
-METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" >"$logf" 2>&1
-if [ -f "$proj/Assets/MeticaSDK-2.4.0.unitypackage" ]; then
-    got=$(shasum -a 256 "$proj/Assets/MeticaSDK-2.4.0.unitypackage" | awk '{print $1}')
+METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --version="$VER" >"$logf" 2>&1
+if [ -f "$proj/Assets/MeticaSDK-$VER.unitypackage" ]; then
+    got=$(shasum -a 256 "$proj/Assets/MeticaSDK-$VER.unitypackage" | awk '{print $1}')
     if [ "$got" = "$EXPECTED_SHA" ]; then
         printf "  ok    install + sha256 match\n"; pass=$((pass+1))
     else
@@ -146,9 +149,9 @@ local_paths:
   "2.4.0": "$LOCAL_BUILD"
 EOF
 logf="$(log_for sha-mismatch)"
-if METICA_SDK_DEV=1 bash "$PATCHED_PLUGIN/scripts/download-metica-sdk.sh" --project="$proj" >"$logf" 2>&1; then
+if METICA_SDK_DEV=1 bash "$PATCHED_PLUGIN/scripts/download-metica-sdk.sh" --project="$proj" --version="$VER" >"$logf" 2>&1; then
     printf "  FAIL  sha mismatch should have exited non-zero\n"; fail=$((fail+1))
-elif [ -f "$proj/Assets/MeticaSDK-2.4.0.unitypackage" ]; then
+elif [ -f "$proj/Assets/MeticaSDK-$VER.unitypackage" ]; then
     printf "  FAIL  sha mismatch left a file in Assets/\n"; fail=$((fail+1))
 else
     printf "  ok    sha256 mismatch: exit non-zero AND no file written\n"; pass=$((pass+1))
@@ -220,8 +223,10 @@ cp -R "$PLUGIN_DIR/scripts" "$PATCHED_PLUGIN/scripts"
 SDK_COPY_DIR="$(mktemp -d -t metica-sdk-curl-XXXXXX)"
 cp "$LOCAL_BUILD" "$SDK_COPY_DIR/sdk.unitypackage"
 FILE_URL="file://$SDK_COPY_DIR/sdk.unitypackage"
-awk -v url="$FILE_URL" '
-    /^[[:space:]]+download_url: / && !done {
+# Replace the download_url for the pinned version's row (matched by /v$VER/), so the
+# test stays correct regardless of which version is `latest:`.
+awk -v url="$FILE_URL" -v ver="$VER" '
+    index($0, "download_url:") && index($0, "/v" ver "/") && !done {
         sub(/".*"/, "\"" url "\"")
         done = 1
     }
@@ -229,8 +234,8 @@ awk -v url="$FILE_URL" '
 ' "$PLUGIN_DIR/metica-versions.yaml" > "$PATCHED_PLUGIN/metica-versions.yaml"
 # No dev yaml — force the curl path (METICA_SDK_DEV not set)
 logf="$(log_for curl-file)"
-if bash "$PATCHED_PLUGIN/scripts/download-metica-sdk.sh" --project="$proj" >"$logf" 2>&1; then
-    if [ -f "$proj/Assets/MeticaSDK-2.4.0.unitypackage" ] && grep -q "Checksum verified." "$logf"; then
+if bash "$PATCHED_PLUGIN/scripts/download-metica-sdk.sh" --project="$proj" --version="$VER" >"$logf" 2>&1; then
+    if [ -f "$proj/Assets/MeticaSDK-$VER.unitypackage" ] && grep -q "Checksum verified." "$logf"; then
         printf "  ok    curl path via file:// URL + checksum verified\n"; pass=$((pass+1))
     else
         printf "  FAIL  curl path: file missing or checksum line absent\n"; sed 's/^/    /' "$logf"; fail=$((fail+1))
@@ -259,6 +264,44 @@ assert_pass "--help exits 0" bash "$DOWNLOAD" --help
 
 # 15. Unknown arg → fail
 assert_fail "unknown arg exits non-zero" bash "$DOWNLOAD" --project=/tmp --bogus
+
+# 16. --clean removes an existing Assets/MeticaSdk install before placement
+proj=$(make_temp_project)
+mkdir -p "$proj/Assets/MeticaSdk/Runtime"
+echo 'old' > "$proj/Assets/MeticaSdk/Runtime/old.cs"
+touch "$proj/Assets/MeticaSdk.meta"
+logf="$(log_for clean-removes-dir)"
+if METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --version="$VER" --clean >"$logf" 2>&1; then
+    if [ ! -e "$proj/Assets/MeticaSdk" ] && [ ! -e "$proj/Assets/MeticaSdk.meta" ] \
+       && [ -f "$proj/Assets/MeticaSDK-$VER.unitypackage" ]; then
+        printf "  ok    --clean removes existing install + places package\n"; pass=$((pass+1))
+    else
+        printf "  FAIL  --clean did not remove old dir/meta or place package\n"; sed 's/^/    /' "$logf"; fail=$((fail+1))
+    fi
+else
+    printf "  FAIL  --clean exited non-zero:\n"; sed 's/^/    /' "$logf"; fail=$((fail+1))
+fi
+rm -rf "$proj"
+
+# 17. --clean --dry-run plans the removal without touching the dir
+proj=$(make_temp_project)
+mkdir -p "$proj/Assets/MeticaSdk"
+echo 'old' > "$proj/Assets/MeticaSdk/keep.cs"
+logf="$(log_for clean-dry-run)"
+METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --clean --dry-run >"$logf" 2>&1
+if [ -f "$proj/Assets/MeticaSdk/keep.cs" ] && grep -q "will remove" "$logf"; then
+    printf "  ok    --clean --dry-run plans removal without deleting\n"; pass=$((pass+1))
+else
+    printf "  FAIL  --clean --dry-run deleted files or omitted plan line:\n"; sed 's/^/    /' "$logf"; fail=$((fail+1))
+fi
+rm -rf "$proj"
+
+# 18. --clean implies --force over an existing .unitypackage
+proj=$(make_temp_project)
+touch "$proj/Assets/MeticaSdk-2.2.7.unitypackage"
+assert_pass "--clean implies --force over existing package" \
+    env METICA_SDK_DEV=1 bash "$DOWNLOAD" --project="$proj" --clean
+rm -rf "$proj"
 
 echo "----"
 printf "passed: %d   failed: %d\n" "$pass" "$fail"

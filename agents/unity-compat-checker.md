@@ -61,8 +61,11 @@ ordering (`2020.3.24f1 < 2021.3`, `8.0.0 < 8.2.0`). When a value can't be found,
 `detected: null` and `level: "UNKNOWN"` with a one-line `hint`.
 
 The `metica_sdk` FAIL is the integrator's only auto-resolvable failure: its `hint` must give
-the exact download URL from the matched YAML row, e.g. *"Install MeticaSDK 2.4.0: download
-<download_url> and double-click in Unity to import."*
+the exact download URL from the matched YAML row. Word it by whether the SDK is **missing** vs
+**outdated** (the integrator reads `detected` to choose a fresh install vs an upgrade):
+
+- `detected: null` (missing) — *"Install MeticaSDK 2.4.3: download <download_url> and double-click in Unity to import."*
+- `detected` is a real version below target — *"Upgrade MeticaSDK <detected> → 2.4.3: download <download_url> and import (the integrator can clean-swap and migrate the integration code)."*
 
 The `managed_stripping` WARN `hint` must name the bug and the fix (substitute the detected SDK version for `{detected}`):
 

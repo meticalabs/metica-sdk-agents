@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, leftover placeholder credentials, test-value userIds, and MaxSDK-API misuse — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash, Read, Grep
 model: sonnet
 ---
@@ -34,7 +34,8 @@ MaxSDK is present.
 ## Setup — establish `PLUGIN_DIR`
 
 You need `PLUGIN_DIR` to run the compile check and to read
-`references/max-metica-api-map.tsv`. Resolve it automatically; do not ask the user.
+`references/max-metica-api-map.tsv` and `references/metica-sdk-migration.md`. Resolve it
+automatically; do not ask the user.
 
 ```bash
 PLUGIN_DIR=""
@@ -214,6 +215,19 @@ shipped games):
 - `MaxSdkUtils.*` (`kind=exempt`) is never flagged — stateless helpers, mix-safe.
 
 Emit a single PASS row for each rule when there are no matches anywhere.
+
+**Deprecated MeticaSDK API** — read `references/metica-sdk-migration.md` (the per-version
+migration map). First read the **installed** SDK version from
+`Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs` → `Version` so you know which deltas apply, then scan
+the game's integration code (not the vendored SDK) for use of symbols the map marks **obsoleted**
+or **signature-changed** at or below that version:
+
+- `metica_deprecated_api` — **ADVISORY** (obsoleted symbols still compile — `[Obsolete]` is a
+  warning, not an error, so `compiles_cleanly` does not catch them; this is the only check that
+  does). Emit one row per match with `detail` carrying the suggested replacement from the map (seed:
+  `MeticaSmartFloors.IsSuccess` → `IsForcedHoldout` / `UserGroup`). This is the validator's
+  post-upgrade confirmation that no stale obsoleted usage remains. Emit a single PASS row when
+  there are no matches.
 
 ## Compile check (the one thing you shell out for)
 

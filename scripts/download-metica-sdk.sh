@@ -3,7 +3,11 @@
 #
 # Usage:
 #   download-metica-sdk.sh --project=<path> [--version=<x.y.z>]
-#                          [--skip-checksum] [--import] [--force] [--dry-run]
+#                          [--skip-checksum] [--import] [--force] [--clean] [--dry-run]
+#
+#   --clean  remove an existing Assets/MeticaSdk install before placing the new
+#            package (for version upgrades — Unity's importPackage overlays files,
+#            so removed files would otherwise orphan). Implies --force.
 #
 # Env:
 #   METICA_SDK_DEV=1  use local_path from metica-versions.dev.yaml (no network).
@@ -27,6 +31,7 @@ VERSION=""
 SKIP_CHECKSUM=0
 DO_IMPORT=0
 FORCE=0
+CLEAN=0
 DRY_RUN=0
 
 for arg in "$@"; do
@@ -36,13 +41,19 @@ for arg in "$@"; do
         --skip-checksum) SKIP_CHECKSUM=1 ;;
         --import)        DO_IMPORT=1 ;;
         --force)         FORCE=1 ;;
+        --clean)         CLEAN=1 ;;
         --dry-run)       DRY_RUN=1 ;;
         -h|--help)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) echo "Unknown arg: $arg" >&2; exit 1 ;;
     esac
 done
+
+# --clean authorizes replacing an existing install (upgrade), so it implies --force.
+[ "$CLEAN" = "1" ] && FORCE=1
+
+SDK_DIR="$PROJECT/Assets/MeticaSdk"
 
 [ -n "$PROJECT" ] || { echo "Missing --project=<path>" >&2; exit 1; }
 [ -d "$PROJECT" ] || { echo "Project not found: $PROJECT" >&2; exit 1; }
@@ -149,6 +160,13 @@ print_plan() {
         echo "                (verification skipped — METICA_SDK_DEV=1)"
     fi
     echo "  target        $TARGET"
+    if [ "$CLEAN" = "1" ]; then
+        if [ -d "$SDK_DIR" ]; then
+            echo "  clean         will remove $SDK_DIR before placement (upgrade)"
+        else
+            echo "  clean         requested — no existing $SDK_DIR to remove"
+        fi
+    fi
     if [ -n "$EXISTING_PACKAGE" ] || [ -n "$EXISTING_DIR" ]; then
         echo "  existing      $EXISTING_PACKAGE $EXISTING_DIR"
         [ "$FORCE" = "1" ] && echo "                (--force: will overwrite)" \
@@ -222,6 +240,13 @@ if [ "$SKIP_CHECKSUM" = "0" ]; then
     echo "Checksum verified."
 else
     echo "WARN: Checksum verification skipped (METICA_SDK_DEV=1 + --skip-checksum)." >&2
+fi
+
+# ---- clean existing install (upgrade) --------------------------------------
+
+if [ "$CLEAN" = "1" ] && [ -d "$SDK_DIR" ]; then
+    rm -rf "$SDK_DIR" "$SDK_DIR.meta" || { echo "Failed to remove existing $SDK_DIR" >&2; exit 1; }
+    echo "Removed existing install: $SDK_DIR"
 fi
 
 # ---- install ----------------------------------------------------------------
