@@ -1,6 +1,6 @@
 ---
 name: unity-integrator
-description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → replace Max in the game's direct call sites with MeticaSDK, leave any dedicated Max-wrapper file untouched, no A/B router) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. MeticaSDK installation is enforced by the compat-checker's `metica_sdk` row — the integrator never downloads or imports the SDK itself; the user does that once after the compat-check BLOCK message, then re-runs.
+description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → replace Max in the game's direct call sites with MeticaSDK, leave any dedicated Max-wrapper file untouched, no A/B router) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
 model: sonnet
 ---
@@ -111,11 +111,29 @@ The `@agent-unity-*` names below are the **bare** agent names used by the one-li
 Invoke `@agent-unity-compat-checker` with the project path. Extract the JSON.
 
 - `status: PASS` (with possible WARN rows) → continue.
-- `status: BLOCK` → check whether the **only** FAIL row is `metica_sdk` (see "MeticaSDK auto-install" below). If so, offer to install it. Otherwise render the BLOCK remediation block and exit non-zero. Do **not** prompt the user to override non-fixable failures.
+- `status: BLOCK` → check whether the **only** FAIL row is `metica_sdk` (see "MeticaSDK auto-install / upgrade" below). If so, resolve it — a fresh install (offer to download/import) or an upgrade (proceed; swap in Step 5) depending on the row's `detected`. Otherwise render the BLOCK remediation block and exit non-zero. Do **not** prompt the user to override non-fixable failures.
 
-#### MeticaSDK auto-install (only resolvable failure)
+#### MeticaSDK auto-install / upgrade (the resolvable `metica_sdk` failure)
 
-If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "metica_sdk"`, the failure is fully self-fixable via `scripts/download-metica-sdk.sh`. Offer the install:
+If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "metica_sdk"`, the failure is resolvable. Read the row's `detected` field to tell the two cases apart:
+
+- **`detected` is null / empty / `none`** — the SDK is **missing**. This is a **fresh install**: set `INTEGRATION_MODE=fresh` and offer the install (below).
+- **`detected` is a real version string below the target** — an older MeticaSDK is already installed. This is an **upgrade**: set `INTEGRATION_MODE=upgrade`, record `DETECTED_SDK=<detected>` and `TARGET_SDK=<target>`, read `references/metica-sdk-migration.md` for the `<detected> → <target>` deltas, and **proceed to Step 2 without blocking or swapping**. The package swap and code migration run in Step 5 — *after* the Step 4 git snapshot — so a single `git reset --hard pre-metica-integration` restores the pre-upgrade SDK and integration code together. Tell the user:
+
+```
+Found MeticaSDK <detected>; target is <target>. This is an upgrade, not a fresh install.
+
+After a git snapshot I'll swap the package (clean-import the target) and migrate your
+integration code in place — the plan lists the exact deltas (e.g. SmartFloors.IsSuccess →
+IsForcedHoldout). New-optional capabilities (CMP flow, NativeThread revenue delivery) are
+surfaced as suggestions, not auto-applied.
+```
+
+(All other compat constraints are evaluated against the **target** version, so a non-`metica_sdk` FAIL still BLOCKs — upgrade mode only proceeds past the `metica_sdk`-below-target row.)
+
+##### Fresh install offer
+
+If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "metica_sdk"` with a missing `detected`, the failure is fully self-fixable via `scripts/download-metica-sdk.sh`. Offer the install:
 
 ```
 MeticaSDK is not installed in this project.
@@ -203,6 +221,26 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read each candidate's surrounding lines and set `HAS_MAX=true` only when at least one is live code** — not a `//` comment, a `/* block */`, or a `"string literal"` (e.g. a diagnostics log). If every candidate is a comment/string, treat Max as absent. The corroborating signals (`S_FOLDER`/`S_MANIFEST`) are supporting context for the report, not a substitute for confirming a live call.
 
 `HAS_MAX` affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` when Max is absent, `MeticaMediationInfo(MAX, …)` when present) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override the detection by saying "treat Max as present/absent" — honor it.
+
+#### Existing MeticaSDK integration? (refines fresh vs upgrade vs finish)
+
+Does the game already have **Metica integration code** — `MeticaSdk.` usage (esp. `MeticaSdk.Initialize`) or a `MeticaAdService` outside the vendored SDK?
+
+```bash
+# Existing Metica integration code in the game (not the vendored SDK):
+METICA_USAGE="$(while IFS= read -r f; do
+    grep -nE 'MeticaSdk\.|MeticaAdService' "$f" | sed "s|^|${f#$PROJECT/}:|"
+done < <(game_cs))"
+```
+
+Read each hit's context to drop comment/string matches, then combine with `INTEGRATION_MODE` from Step 1:
+
+- **fresh** (SDK was missing) → fresh codegen (the default flow).
+- **upgrade** (SDK present but below target) **+ integration code present** → **upgrade-migrate**: Step 5 clean-swaps the package and migrates the existing integration code per `references/metica-sdk-migration.md`. Record the adapter file(s) and any obsoleted/signature-changed symbols the code uses (seed: `MeticaSmartFloors.IsSuccess`).
+- **upgrade + no integration code** → swap the package in Step 5, then fresh codegen (nothing to migrate).
+- SDK already at target (compat PASS) **+ integration code present** → already integrated; do not regenerate over it — report and stop unless the user asks for a specific change.
+
+Record the outcome under `Existing Metica integration` in the structured block.
 
 #### The discovery checklist (the call-site/wrapper signals run when MaxSDK is present; the namespace + remote-config signals in Step 2.5 always run)
 
@@ -382,7 +420,27 @@ confusing failure from `git tag` later.
 
 ### Step 5 — Apply code changes
 
-(Note: MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project and its types are available to generated code.)
+(Note: MeticaSDK installation is enforced at step 1 by the `metica_sdk` row of the compat-check — if the user hasn't imported the `.unitypackage` yet, compat-check returns BLOCK with a direct download URL and the integrator refuses to proceed. By the time we reach step 5, MeticaSDK is installed in the project — at the target version for a fresh install, or about to be swapped to it when `INTEGRATION_MODE=upgrade` (below).)
+
+#### When `INTEGRATION_MODE=upgrade`: swap the package, then migrate the integration code
+
+Run this **first**, before the codegen/rewrite passes below — and only after the Step 4 snapshot exists (so the swap is recoverable). Two ordered parts:
+
+**(a) Clean-swap the SDK package to the target.** Unity's `-importPackage` overlays files, so removing the old install first prevents orphaned files from a renamed/deleted SDK source. Use the `--clean` flag:
+
+```bash
+bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$TARGET_SDK" --clean --import
+```
+
+`--clean` removes `Assets/MeticaSdk` (and its `.meta`) before placing and importing the target package. If headless Unity isn't available it falls back to placing the `.unitypackage` and asking the user to import manually (same fallback as the fresh install) — surface that and pause until they confirm the import, since the migration in (b) compiles against the new types.
+
+**(b) Migrate the existing integration code** per `references/metica-sdk-migration.md` (the `<DETECTED_SDK> → <TARGET_SDK>` section is the source of truth for which symbols changed). For each symbol the existing code uses:
+
+- **obsoleted** (e.g. `MeticaSmartFloors.IsSuccess` → `IsForcedHoldout` / `UserGroup`) and **signature-changed** rows → rewrite the call site with an anchor re-check (re-read the file immediately before editing; refuse if it changed on disk — same discipline as the Step 6.5 autofix loop). Edit existing files only; create no net-new files.
+- **new-optional** rows (CMP flow, `InitializeAnalytics`, `MeticaAds.RevenueCallbackDelivery`, `LevelPlay`) → **do not auto-apply**. Collect them as suggestions for the Step 7 report — especially `RevenueCallbackDelivery = CallbackDelivery.NativeThread` (set before `MeticaSdk.Initialize`), the recommended ≥2.4.2 way to keep a fullscreen 3PA revenue forwarder from being lost on app-close-mid-ad (the handler then runs off the main thread, so it must be thread-safe — see `references/metica-sdk-migration.md`).
+- **unchanged** / **behavior-changed** rows → no edit; note any behavior change (e.g. idempotent re-init) in the report if it affects the existing code.
+
+Log every migration edit to `.metica-integration.log` next to the adapter folder. If there is **no** existing integration code (upgrade with package-only swap), skip (b) and continue to fresh codegen below. When MaxSDK is present, the Max-callsite rewrite below still applies on top of the migration.
 
 #### When MaxSDK is present: scan + propose Max-callsite refactor
 
@@ -642,7 +700,9 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `retry_ownership` | surface | Auto-retry disabled with no client retry path — surface the `disable_auto_retries` site and the missing retry, and stop. |
 | `sdk_calls_on_main_thread` | surface | An ad call issued off the Unity main thread (e.g. from a CMP/consent callback) needs marshaling to the main thread — a control-flow fix, not a line edit. Surface the off-main call site and stop. The integrator's own codegen drives all ad calls from `MonoBehaviour` lifecycle / main-thread paths, so a FAIL is hand-rolled. |
 
-`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `format_path_symmetry`, `dead_code_signal`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+`*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `format_path_symmetry`, `dead_code_signal`, `metica_deprecated_api`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
+
+`metica_deprecated_api` (leftover use of an obsoleted/signature-changed Metica symbol after an upgrade) is advisory because obsolete symbols still compile. During an upgrade the integrator already migrates these in **Step 5(b)** — autofix direct renames (e.g. `IsSuccess` → `IsForcedHoldout`), surface semantic signature changes. A `metica_deprecated_api` ADVISORY still present after the loop is a symbol the migration deliberately left (a signature change needing judgment, or out of the upgrade's scope) — clean up a direct rename in place with an anchor re-check, otherwise surface it in Step 7 with the replacement from the migration map.
 
 2. **Anchor re-check before every autofix edit:** re-read the target file and confirm the line the validator reported still matches. On mismatch (file changed on disk / open in an editor), **do not retry the write** — surface the suggested patch + `file:line` for manual application and log the refusal. Surface, never retry.
 
@@ -674,12 +734,33 @@ Autofixes applied this run (see .metica-integration.log):
 
 Then the standard summary (whether MaxSDK was present, SDK version, files changed, compat-checker one-liner, validator one-liner).
 
+#### SDK upgrade (when `INTEGRATION_MODE=upgrade`)
+
+Lead the summary with the upgrade outcome:
+
+```
+Upgraded MeticaSDK <DETECTED_SDK> → <TARGET_SDK>.
+  Package: clean-swapped and imported (or: placed in Assets/ — import in Unity, then re-run validation).
+  Code migrations applied (see .metica-integration.log):
+  - <file>:<line>  MeticaSmartFloors.IsSuccess → IsForcedHoldout
+  Resolved by this upgrade:
+  - MET-11632 (IL2CPP + managed stripping → forced HOLDOUT) is fixed at ≥2.4.2; the
+    compat-checker managed_stripping WARN no longer applies.
+  New capabilities available (not applied — adopt if you want them):
+  - MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread (set before Initialize) —
+    keeps fullscreen revenue + any 3PA forwarder from being lost on app-close-mid-ad; the handler
+    then runs off the Unity main thread, so it must be thread-safe.
+  - CMP terms flow (4-arg Initialize + MeticaCmpFlowSettings); InitializeAnalytics (analytics-only).
+```
+
+Pull the migrated symbols and the available-capabilities list from the `<DETECTED_SDK> → <TARGET_SDK>` section of `references/metica-sdk-migration.md`; omit any sub-list that's empty for this project.
+
 #### Dropped MaxSDK calls (no Metica equivalent)
 
 When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.UpdateBannerPosition`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
 
 ```
-Dropped (no MeticaSdk equivalent in 2.4.0):
+Dropped (no MeticaSdk equivalent in <target_sdk>):
 - <file>:<line>  MaxSdk.LoadAppOpenAd("appopen_main")
     → App Open Ads not supported. Either remove the feature or keep
       a separate Max-only init path for it.
@@ -767,6 +848,7 @@ End the report with the threading reminder on **every** run.
 ## References
 
 - `../../references/max-vs-metica-2.4.0-api.md` — API parity table (MaxSdk ↔ MeticaSdk).
+- `../../references/metica-sdk-migration.md` — per-version MeticaSDK migration map (what changes between SDK versions); drives the `INTEGRATION_MODE=upgrade` code migration in Step 5.
 - `../../scripts/templates/standalone/MeticaAdService.cs.tmpl` — the single orchestrator template: one `MeticaAdService` MonoBehaviour with per-format `@fmt` regions (named callback handlers, exp-backoff retry on interstitial/rewarded load failure, focus pause/resume for banner/MRec).
 - [meticalabs/metica-unity@develop `Assets/Scripts/HomeScreen.cs`](https://github.com/meticalabs/metica-unity/blob/develop/Assets/Scripts/HomeScreen.cs) — the **canonical demo and primary API reference**. It compiles against the real SDK, so it wins when it diverges from the docs page (e.g. it qualifies the nested enum `MeticaMediationInfo.MeticaMediationType.MAX` and PascalCases `SmartFloors.IsForcedHoldout`).
 - [docs.metica.com Unity SDK Ad implementation](https://docs.metica.com/api/unity-sdk/unity-sdk-2#a-d-implementation) — **secondary** reference for callback set + lifecycle shape. The docs example has known transcription errors against the SDK (unqualified `MeticaMediationType.MAX`, camelCase `isForcedHoldout`); never transcribe it verbatim — the SDK source and canonical demo take precedence.

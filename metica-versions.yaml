@@ -5,9 +5,40 @@
 schema: "metica-versions/1.0.0"
 
 # The version selected when no explicit --version is passed.
-latest: "2.4.0"
+latest: "2.4.3"
 
 versions:
+  "2.4.3":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.2.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.4.3/MeticaSdk-2.4.3.unitypackage"
+    sha256: "6c2ee641278ceb6f2e8637a0dae876f2c7434540062ae3b51556a4321a069fc1"
+    released_at: "2026-06-19"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.4.3"
+    deprecated: false
+
+  # 2.4.1 has no published .unitypackage artifact; the MET-11632 fix landed in 2.4.2.
+  "2.4.2":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.2.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.4.2/MeticaSdk-2.4.2.unitypackage"
+    sha256: "4c61f5be8c64e18e02375eff7dc27993b8fb692a268e60529dd71fdad808f350"
+    released_at: "2026-06-17"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.4.2"
+    deprecated: false
+
   "2.4.0":
     platforms: ["android"]
     unity_min: "2021.3"
