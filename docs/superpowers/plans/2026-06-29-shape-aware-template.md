@@ -31,7 +31,7 @@ Files modified by this PR:
 - **`.claude-plugin/plugin.json`** — bump `version` (minor).
 - **`.claude-plugin/marketplace.json`** — bump `metadata.version` (lockstep).
 
-No new files. No new tests. No new scripts.
+Beyond this plan doc itself (which is documentation, not code), the PR adds no new files. No new tests. No new scripts.
 
 ---
 

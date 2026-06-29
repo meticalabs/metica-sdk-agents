@@ -616,6 +616,8 @@ Then generate:
    | `__START_HOOK__` | `void Start() => Initialize();` | (empty) | (empty) |
    | `__FOCUS_HOOK__` | the canonical `private void OnApplicationFocus(bool hasFocus)` block (with `BannerOnFocus`/`MrecOnFocus` dispatch inside `// @fmt-begin:<fmt>` regions, identical to the pre-tokenisation template) | (empty) | (empty) |
    | `__STATIC__` | (empty) | `static ` | (empty) |
+   | `__INTERSTITIAL_LOAD_FAILED_BODY__` | docs-verbatim exp-backoff retry using `MonoBehaviour.Invoke` (see below) | log-only — let SDK retry internally (see below) | log-only — let SDK retry internally (see below) |
+   | `__REWARDED_LOAD_FAILED_BODY__` | docs-verbatim exp-backoff retry using `MonoBehaviour.Invoke` (see below) | log-only — let SDK retry internally (see below) | log-only — let SDK retry internally (see below) |
 
    For `__FOCUS_HOOK__` under `monobehaviour`, emit verbatim:
 
@@ -632,13 +634,36 @@ Then generate:
        }
    ```
 
-   Under `static_class` / `plain_class`, substitute an empty string — the host wires its own focus handling and calls `MeticaAdService.BannerOnFocus(...)` / `MeticaAdService.MrecOnFocus(...)` (static) or `_metica.BannerOnFocus(...)` / `_metica.MrecOnFocus(...)` (plain instance) from its own `OnApplicationFocus` handler. The two per-format helpers (`BannerOnFocus`, `MrecOnFocus`) are emitted regardless of shape — only the focus *dispatch* block is shape-dependent.
+   Under `static_class` / `plain_class`, substitute an empty string — the host wires its own focus handling and calls `MeticaAdService.BannerOnFocus(...)` / `MeticaAdService.MrecOnFocus(...)` (static) or `_metica.BannerOnFocus(...)` / `_metica.MrecOnFocus(...)` (plain instance) from its own `OnApplicationFocus` handler. The two per-format helpers (`BannerOnFocus`, `MrecOnFocus`) are emitted regardless of shape (declared `public` in the template so non-MonoBehaviour hosts can call them) — only the focus *dispatch* block is shape-dependent.
+
+   For `__INTERSTITIAL_LOAD_FAILED_BODY__` and `__REWARDED_LOAD_FAILED_BODY__`:
+
+   - **Under `monobehaviour`**, emit the docs-verbatim exp-backoff retry (this is the body of today's `OnInterstitialLoadFailed` / `OnRewardedLoadFailed`):
+
+     ```csharp
+             _interstitialRetry++;
+             double delay = System.Math.Pow(2, System.Math.Min(6, _interstitialRetry));
+             Debug.LogWarning($"[Metica] interstitial load failed: {error.message}, retrying in {delay}s");
+             Invoke(nameof(LoadInterstitial), (float)delay);
+     ```
+
+     Same shape for the rewarded variant — substitute `_rewardedRetry` and `LoadRewarded`.
+
+   - **Under `static_class` / `plain_class`**, emit a log-only body — no app-side retry call:
+
+     ```csharp
+             Debug.LogWarning($"[Metica] interstitial load failed: {error.message} — MeticaSDK auto-retry handles re-loading.");
+     ```
+
+     Same shape for the rewarded variant — substitute the format name in the log message.
+
+     Under these shapes the `_interstitialRetry` / `_rewardedRetry` field is unused (only written in `OnLoadSuccess`, never read). That's a CS0414 *warning*, not an error — the code still compiles. The retry-counter field stays in the template so the MonoBehaviour shape can reset it; if the user later wants an app-side retry on non-MonoBehaviour shapes, they can add the deferred-call invocation themselves.
 
    **(b) `@fmt-region` drop** — **after** shape substitution (the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt-begin:banner` / `@fmt-end:banner` / `@fmt-begin:mrec` / `@fmt-end:mrec` markers, which the drop pass needs to evaluate against `$FORMATS`): **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`**.
 
    **(c) Existing tokens** — substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped as above), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<escaped MAX SDK key>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs).
 
-   **(d) Shape-specific caveats** — when `$SHAPE` is `static_class` or `plain_class`, the per-format `OnInterstitialLoadFailed` / `OnRewardedLoadFailed` handlers in the template call `Invoke(nameof(Load<Format>), (float)delay)` to schedule the exp-backoff retry. `Invoke` is a `MonoBehaviour` instance method and does NOT exist on `static class` / `plain class`. The integrator does **not** auto-rewrite this — instead, Step 7's shape-tailored walkthrough (see below) explicitly tells the user to either (i) wire a `MonoBehaviour` proxy that hosts the retry timer or (ii) replace those two lines with the host's own deferred-call mechanism. The template ships the `Invoke(...)` calls verbatim under all shapes so the MonoBehaviour shape stays compilable today; non-MonoBehaviour shapes accept one known follow-up edit, surfaced explicitly.
+   **(d) Compile guarantee** — every shape compiles out of the box. The two retry bodies above are the only place `MonoBehaviour`-specific API (`Invoke(string, float)`) shows up, and the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution keeps `Invoke` strictly inside the `monobehaviour` branch. Under `static_class` / `plain_class`, the SDK's built-in load-failure retry handles re-loading; the Step 7 walkthrough explains how to wire an app-side retry from the host's main loop if the team wants an additional safety net.
 
    The result is a single class that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec` — these (and `Initialize`) must be **called on the Unity main thread** (the SDK captures the `SynchronizationContext` at the call site); when rewriting call sites that fire from a CMP/consent or other off-main callback, marshal them to the main thread. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
 
@@ -892,21 +917,15 @@ hasFocus) from your own OnApplicationFocus handler somewhere in your
 game (typically a persistent MonoBehaviour, or wherever your app
 already handles Unity application-focus events).
 
-Heads-up — exp-backoff retry on fullscreen load failure: the generated
-OnInterstitialLoadFailed / OnRewardedLoadFailed handlers call
-Invoke(nameof(LoadInterstitial), (float)delay) — that's a
-MonoBehaviour-only method which does NOT exist on a static class.
-Two ways to handle:
-  (a) Add a tiny MonoBehaviour proxy in your bootstrap scene that
-      forwards Invoke calls to the static handlers (one line per
-      retry call); or
-  (b) Replace those two Invoke(...) lines with your project's own
-      deferred-call mechanism (a coroutine runner, a System.Timers.
-      Timer, a Task.Delay continuation marshalled to the main
-      thread, etc.).
-The MeticaAdService.cs file is yours after generation — edit those
-two lines (one in OnInterstitialLoadFailed, one in OnRewardedLoadFailed)
-to fit your project.
+Load-failure retry: under static_class, MeticaAdService relies on
+MeticaSDK's built-in exp-backoff retry — OnInterstitialLoadFailed /
+OnRewardedLoadFailed log the failure and do not schedule an app-side
+retry (MonoBehaviour.Invoke is unavailable here). If you want an
+additional app-side safety net, add a deferred-call into those two
+handlers from your own scheduler (a coroutine runner, a System.Timers.
+Timer, a Task.Delay continuation marshalled to the main thread, etc.).
+The MeticaAdService.cs file is yours after generation — extend those
+two log-only bodies if you need belt-and-braces retry.
 ```
 
 **When `SHAPE=plain_class`:**
@@ -932,14 +951,13 @@ your own OnApplicationFocus handler (typically a persistent
 MonoBehaviour or wherever your app handles Unity application-focus
 events).
 
-Heads-up — exp-backoff retry on fullscreen load failure: the generated
-OnInterstitialLoadFailed / OnRewardedLoadFailed handlers call
-Invoke(nameof(LoadInterstitial), (float)delay). Invoke is a
-MonoBehaviour-only instance method that doesn't exist on a plain
-class. Replace those two lines with your project's deferred-call
-mechanism (coroutine runner / System.Timers.Timer / Task.Delay
-marshalled to the main thread), or wrap MeticaAdService in a thin
-MonoBehaviour proxy that hosts the timer.
+Load-failure retry: under plain_class, MeticaAdService relies on
+MeticaSDK's built-in exp-backoff retry — OnInterstitialLoadFailed /
+OnRewardedLoadFailed log the failure and do not schedule an app-side
+retry (MonoBehaviour.Invoke is unavailable here). If you want an
+additional app-side safety net, extend those two handlers with a
+deferred-call from your project's scheduler (a coroutine runner /
+System.Timers.Timer / Task.Delay marshalled to the main thread).
 ```
 
 The walkthrough emits exactly one block matching `$SHAPE`; the other two are omitted.

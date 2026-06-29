@@ -87,12 +87,9 @@ public __CLASS_HEADER__
     }
 
     private __STATIC__void OnInterstitialLoadSuccess(MeticaAd ad) { _interstitialRetry = 0; Debug.Log($"[Metica] interstitial loaded: {ad.adUnitId}"); }
-    private __STATIC__void OnInterstitialLoadFailed(MeticaAdError error)   // docs-verbatim exponential backoff
+    private __STATIC__void OnInterstitialLoadFailed(MeticaAdError error)
     {
-        _interstitialRetry++;
-        double delay = System.Math.Pow(2, System.Math.Min(6, _interstitialRetry));
-        Debug.LogWarning($"[Metica] interstitial load failed: {error.message}, retrying in {delay}s");
-        Invoke(nameof(LoadInterstitial), (float)delay);
+        __INTERSTITIAL_LOAD_FAILED_BODY__
     }
     private __STATIC__void OnInterstitialShowSuccess(MeticaAd ad) { Debug.Log("[Metica] interstitial displayed"); }
     // Show-failed does NOT fire OnAdHidden, so reload here to keep the loop alive.
@@ -130,12 +127,9 @@ public __CLASS_HEADER__
     }
 
     private __STATIC__void OnRewardedLoadSuccess(MeticaAd ad) { _rewardedRetry = 0; Debug.Log($"[Metica] rewarded loaded: {ad.adUnitId}"); }
-    private __STATIC__void OnRewardedLoadFailed(MeticaAdError error)   // docs-verbatim exponential backoff
+    private __STATIC__void OnRewardedLoadFailed(MeticaAdError error)
     {
-        _rewardedRetry++;
-        double delay = System.Math.Pow(2, System.Math.Min(6, _rewardedRetry));
-        Debug.LogWarning($"[Metica] rewarded load failed: {error.message}, retrying in {delay}s");
-        Invoke(nameof(LoadRewarded), (float)delay);
+        __REWARDED_LOAD_FAILED_BODY__
     }
     private __STATIC__void OnRewardedShowSuccess(MeticaAd ad) { Debug.Log("[Metica] rewarded displayed"); }
     private __STATIC__void OnRewardedShowFailed(MeticaAd ad, MeticaAdError error) { Debug.LogError($"[Metica] rewarded show failed: {error.message}"); LoadRewarded(); }
@@ -176,7 +170,7 @@ public __CLASS_HEADER__
     public __STATIC__void HideBanner()    { MeticaSdk.Ads.HideBanner(_bannerAdUnitId);    _bannerShowing = false; }
     public __STATIC__void DestroyBanner() { MeticaSdk.Ads.DestroyBanner(_bannerAdUnitId); _bannerShowing = false; }
 
-    private __STATIC__void BannerOnFocus(bool hasFocus)   // pause auto-refresh while backgrounded
+    public __STATIC__void BannerOnFocus(bool hasFocus)   // pause auto-refresh while backgrounded (public so non-MonoBehaviour shapes can wire from host OnApplicationFocus)
     {
         if (!_bannerShowing) return;
         if (hasFocus) { MeticaSdk.Ads.StartBannerAutoRefresh(_bannerAdUnitId); MeticaSdk.Ads.ShowBanner(_bannerAdUnitId); }
@@ -217,7 +211,7 @@ public __CLASS_HEADER__
     public __STATIC__void HideMrec()    { MeticaSdk.Ads.HideMrec(_mrecAdUnitId);    _mrecShowing = false; }
     public __STATIC__void DestroyMrec() { MeticaSdk.Ads.DestroyMrec(_mrecAdUnitId); _mrecShowing = false; }
 
-    private __STATIC__void MrecOnFocus(bool hasFocus)   // pause auto-refresh while backgrounded
+    public __STATIC__void MrecOnFocus(bool hasFocus)   // pause auto-refresh while backgrounded (public so non-MonoBehaviour shapes can wire from host OnApplicationFocus)
     {
         if (!_mrecShowing) return;
         if (hasFocus) { MeticaSdk.Ads.StartMrecAutoRefresh(_mrecAdUnitId); MeticaSdk.Ads.ShowMrec(_mrecAdUnitId); }
