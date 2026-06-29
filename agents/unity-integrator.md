@@ -852,6 +852,98 @@ Dropped (no MeticaSdk equivalent in <target_sdk>):
 
 The list is harvested as the rewrite pass runs — each `drop`-class match emits a removed line plus the row's `notes` column as the explanation.
 
+#### Wiring `MeticaAdService` into your project (shape-tailored)
+
+Render exactly one of the three blocks below, picked by `$SHAPE`. This is the first thing the user needs after codegen — how to construct/attach the generated class and call `Initialize()` from their bootstrap. The two paths that the integrator can't take on the user's behalf (manual MonoBehaviour attach in the Unity Editor, or wiring a static/plain class into the host's existing static bootstrap) are explicit here, not implied.
+
+**When `SHAPE=monobehaviour`** (the default):
+
+```
+Open your bootstrap scene (the first scene Unity loads — typically the
+one in Project Settings → Player → Default Scene, or your Bootstrap /
+MainMenu scene).
+  1. Create an empty GameObject named `MeticaAds`.
+  2. Add the MeticaAdService component to it (the file just generated
+     at <ADAPTER_FOLDER>/MeticaAdService.cs).
+  3. (Optional) Mark DontDestroyOnLoad if you reload scenes — but
+     Initialize() is idempotent, so re-Start() in a new scene also works.
+
+That's the entire wiring. Start() calls Initialize() automatically.
+```
+
+**When `SHAPE=static_class`:**
+
+```
+MeticaAdService is a static class — call Initialize() once from your
+bootstrap. For example, from your existing static ad-manager:
+
+  public static class AdsManager
+  {
+      public static void Init()
+      {
+          // ... your existing setup ...
+          MeticaAdService.Initialize();
+      }
+  }
+
+Banner/MRec focus pause/resume (only if you use those formats): call
+MeticaAdService.BannerOnFocus(hasFocus) and MeticaAdService.MrecOnFocus(
+hasFocus) from your own OnApplicationFocus handler somewhere in your
+game (typically a persistent MonoBehaviour, or wherever your app
+already handles Unity application-focus events).
+
+Heads-up — exp-backoff retry on fullscreen load failure: the generated
+OnInterstitialLoadFailed / OnRewardedLoadFailed handlers call
+Invoke(nameof(LoadInterstitial), (float)delay) — that's a
+MonoBehaviour-only method which does NOT exist on a static class.
+Two ways to handle:
+  (a) Add a tiny MonoBehaviour proxy in your bootstrap scene that
+      forwards Invoke calls to the static handlers (one line per
+      retry call); or
+  (b) Replace those two Invoke(...) lines with your project's own
+      deferred-call mechanism (a coroutine runner, a System.Timers.
+      Timer, a Task.Delay continuation marshalled to the main
+      thread, etc.).
+The MeticaAdService.cs file is yours after generation — edit those
+two lines (one in OnInterstitialLoadFailed, one in OnRewardedLoadFailed)
+to fit your project.
+```
+
+**When `SHAPE=plain_class`:**
+
+```
+Construct one MeticaAdService instance in your bootstrap, store it
+(singleton / DI container / static field), and call Initialize():
+
+  public class AdsManager
+  {
+      private MeticaAdService _metica;
+      public void Init()
+      {
+          _metica = new MeticaAdService();
+          _metica.Initialize();
+      }
+      public void Show() => _metica.ShowInterstitial("level_end");
+  }
+
+Banner/MRec focus pause/resume (only if you use those formats): call
+_metica.BannerOnFocus(hasFocus) / _metica.MrecOnFocus(hasFocus) from
+your own OnApplicationFocus handler (typically a persistent
+MonoBehaviour or wherever your app handles Unity application-focus
+events).
+
+Heads-up — exp-backoff retry on fullscreen load failure: the generated
+OnInterstitialLoadFailed / OnRewardedLoadFailed handlers call
+Invoke(nameof(LoadInterstitial), (float)delay). Invoke is a
+MonoBehaviour-only instance method that doesn't exist on a plain
+class. Replace those two lines with your project's deferred-call
+mechanism (coroutine runner / System.Timers.Timer / Task.Delay
+marshalled to the main thread), or wrap MeticaAdService in a thin
+MonoBehaviour proxy that hosts the timer.
+```
+
+The walkthrough emits exactly one block matching `$SHAPE`; the other two are omitted.
+
 #### Credential hygiene (now validator-driven)
 
 The validator's `placeholder_ids_replaced` and `user_id_not_test_value` checks catch leftover `YOUR_*` keys and test/debug userId literals. When they FAIL, the validator emits a `<file>:<line>` location and the offending value — surface these verbatim from the validator's JSON output rather than re-grepping in the integrator. A short reminder is still useful inline:
