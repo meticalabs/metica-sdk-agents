@@ -323,6 +323,27 @@ Runs whether or not MaxSDK is present. Detect which third-party analytics (3PA) 
 
 Record **all** providers found (a game may forward to several providers at once). The result drives Step 5's "3PA revenue forwarders" patch pass and one ADVISORY line in the Step 7 report; it does **not** change which artifacts are generated. Surface the detected set in the detection report.
 
+#### Signal 4 — `host_ad_shape` (suggested template shape)
+
+Runs whether or not MaxSDK is present. Determines which of three template shapes `MeticaAdService.cs` should be rendered as, so the generated class slots into the host project's ad-code style without leaving dead unreachable code (the MET-11820 issue #1 regression — a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never `GetComponent`s or singleton-fetches it).
+
+For Max-present projects, look at the host's ad-related `.cs` files (the Max-touching inventory from the discovery scan plus any sibling files in the same directory). For Max-absent projects, look at files matching `*Ad*.cs` / `*Ads*.cs` / `*Mediation*.cs` under `Assets/Scripts/`. For each, classify by class shape:
+
+- `monobehaviour` — the class declares `: MonoBehaviour` (directly or transitively).
+- `static_class` — the class is declared `static class`.
+- `plain_class` — instantiable class, no `MonoBehaviour`, no `static`.
+
+Count by shape; the **majority shape** becomes the suggested default for `MeticaAdService`. Tie-break: `monobehaviour` wins (matches docs.metica.com demo, reachable from any scene). When no ad-related files are found at all (clean project, first integration), default to `monobehaviour`.
+
+Record under `Host ad shape` in the detection report:
+
+```
+Host ad shape (majority): static_class (4 of 5 ad files static, 1 monobehaviour)
+Suggested MeticaAdService shape: static_class
+```
+
+The user confirms or overrides this suggestion in the Step 3 plan (see `SHAPE` collection below).
+
 #### Secondary checks (inline at generation time)
 
 These do not need a detection-report row; they are applied during codegen:
@@ -368,6 +389,7 @@ Confirm these inferences:
   - namespace      = Game.Ads.Metica                   (AdManager.cs's namespace + .Metica)
   - adapter folder = Assets/Scripts/Ads/Metica/        (next to the wrapper)
   - userId         = <ASK NOW — see below>
+  - shape          = static_class                      (suggested from host's ad code; see Step 2.5 Signal 4 — ASK NOW)
 ```
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
@@ -384,6 +406,29 @@ Provide the C# expression for the player identity:
 ```
 
 Bake the chosen expression into `USER_ID_EXPR` before codegen. (The reactive autofix prompt for this rule remains only as a fallback for hand-rolled code linted outside this flow — see Step 7.)
+
+**Collect `SHAPE` here.** Step 2.5 Signal 4 produced a suggested shape based on the host's existing ad code. The user confirms or overrides — picking the wrong shape ships dead unreachable code (the MET-11820 issue #1 regression: a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never has a hook to fetch it):
+
+```
+The integrator suggests SHAPE=<suggested_shape> based on the host's ad code
+(Step 2.5 Signal 4: <counts>). Pick how MeticaAdService should be generated:
+
+  [a] monobehaviour  — attach to a GameObject; Start() auto-initializes.
+                       Reachable from any scene script via FindObjectOfType
+                       or a serialized reference. Fits Unity-component-style
+                       hosts.
+  [b] static_class   — host calls MeticaAdService.Initialize() explicitly
+                       from its own bootstrap (e.g., a static AdsManager.Init).
+                       Banner/MRec focus-pause/resume becomes a method the
+                       host calls from its own OnApplicationFocus.
+  [c] plain_class    — host constructs `new MeticaAdService()` and stores it
+                       (singleton / DI container / static field), then calls
+                       Initialize() on the instance.
+
+Choose [a/b/c] or press Enter to accept the suggestion:
+```
+
+Bake the chosen value into `SHAPE` (one of `monobehaviour`, `static_class`, `plain_class`) before codegen — Step 5 reads it to substitute the template tokens (`__CLASS_HEADER__`, `__START_HOOK__`, `__FOCUS_HOOK__`, `__STATIC__`).
 
 **Tier 3 — the full plan.** Below the summary + inferences, include the complete detail:
 
