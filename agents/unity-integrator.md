@@ -960,8 +960,30 @@ When **MaxSDK was present**, the report must also include:
 
 1. **Max-callsite outcome** — the files rewritten to call `MeticaAdService` directly (or, if the user declined, the inventory as an action checklist).
 2. **Orphaned Max** — if a dedicated Max-wrapper file (e.g. `AdManager.cs`) was left untouched per the wrapper-scoping rule, note that it is now unused by the rewritten call sites and is the user's to delete when ready. Also note that `Assets/MaxSdk/` and the AppLovin dependency can be removed once they confirm the swap works (the integrator does not remove them).
-3. **Cohort-gating recipe** (only when Step 2.5 detected a remote-config provider ≠ `none`) — see below.
-4. **Manual steps remaining** — set the real user identity in `MeticaInitConfig` (validator will keep failing until you do), choose the `SetHasUserConsent`/`SetDoNotSell` values per compliance posture.
+3. **Wrapper `MaxSdkCallbacks` subscription sites** — the wrapper-scoping rule leaves wrapper files read-only, including their `MaxSdkCallbacks.<Format>.On*Event +=` subscriptions. Those subscriptions stay live: when MeticaSDK runs MAX under the hood (`MeticaMediationInfo(MAX, …)`), the underlying `AppLovinSdk` instance fires events on every loaded ad, **including Metica-driven loads under a trial-routed user**, so each wrapper subscription's handler fires too. List every site found during Step 2 discovery (one bullet per `MaxSdkCallbacks.*Event +=` match in a wrapper file). Then add this guidance verbatim:
+
+   ```
+   Effect if your code keeps the wrapper reachable alongside MeticaAdService:
+     • Analytics in the wrapper's handlers run TWICE (once via the wrapper,
+       once via Metica's per-format handlers).
+     • Custom retry loops in the wrapper compete with MeticaSDK's built-in
+       exp-backoff retry.
+     • State flags (`_isLoading` / `_lastShownAt`) become stale relative to
+       MeticaSDK's actual ad lifecycle.
+
+   Two ways to fix:
+     (a) Ensure your routing layer keeps the wrapper unreachable when running
+         the Metica chain (e.g. cohort-gate at the bootstrap, only one chain
+         alive per user — recommended).
+     (b) Manually unsubscribe these handlers when switching to the Metica
+         chain (only needed if both chains can be live simultaneously, which
+         is uncommon).
+   ```
+
+   Skip this section entirely when Step 2 discovery returned `Max wrapper: none` — there's no wrapper to enumerate.
+
+4. **Cohort-gating recipe** (only when Step 2.5 detected a remote-config provider ≠ `none`) — see below.
+5. **Manual steps remaining** — set the real user identity in `MeticaInitConfig` (validator will keep failing until you do), choose the `SetHasUserConsent`/`SetDoNotSell` values per compliance posture.
 
 #### Cohort-gating recipe (MaxSDK present + remote-config provider detected)
 
