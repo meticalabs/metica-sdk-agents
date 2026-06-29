@@ -67,9 +67,10 @@ AppsFlyer.sendEvent("af_ad_revenue", new Dictionary<string, string> {
 
 > `ad.revenue` is `double?` (the SDK marks impression revenue as optional). The `?? 0.0` is
 > required — Firebase / Adjust / AppMetrica / AppsFlyer all take `double`, not `double?`. Don't
-> remove. `ad.networkName`, `ad.adFormat`, and `ad.placementTag` are `string?` but their consumers
-> here are `string` parameters / `Dictionary<string,string>` values, which accept `null` in C#, so
-> they need no coalesce; `ad.adUnitId` is non-nullable `string`.
+> remove. `ad.networkName` and `ad.adFormat` are `string?` but their consumers here are `string`
+> parameters / `Dictionary<string,string>` values, which accept `null` in C#, so they need no
+> coalesce; `ad.adUnitId` is non-nullable `string`. `ad.placementTag` (`string?`) isn't passed to
+> any consumer in these snippets.
 
 Mirror the same handler shape for `OnBannerRevenuePaid`, `OnRewardedRevenuePaid`, and
 `OnMrecRevenuePaid` — every used format that the project forwards.
