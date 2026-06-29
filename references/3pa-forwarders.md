@@ -38,20 +38,20 @@ var p = new[] {
     new Firebase.Analytics.Parameter("ad_source",    ad.networkName),
     new Firebase.Analytics.Parameter("ad_unit_name", ad.adUnitId),
     new Firebase.Analytics.Parameter("ad_format",    ad.adFormat),
-    new Firebase.Analytics.Parameter("value",        ad.revenue),
+    new Firebase.Analytics.Parameter("value",        ad.revenue ?? 0.0),
     new Firebase.Analytics.Parameter("currency",     "USD"),
 };
 Firebase.Analytics.FirebaseAnalytics.LogEvent("ad_impression", p);
 
 // Adjust — use the game's existing AdjustAdRevenue wiring if present
 var adjustRevenue = new AdjustAdRevenue("applovin_max_sdk");
-adjustRevenue.SetRevenue(ad.revenue, "USD");
+adjustRevenue.SetRevenue(ad.revenue ?? 0.0, "USD");
 adjustRevenue.AdRevenueNetwork = ad.networkName;
 adjustRevenue.AdRevenueUnit    = ad.adUnitId;
 Adjust.TrackAdRevenue(adjustRevenue);
 
 // AppMetrica
-AppMetrica.Instance.ReportAdRevenue(new Io.AppMetrica.AdRevenue(ad.revenue, "USD") {
+AppMetrica.Instance.ReportAdRevenue(new Io.AppMetrica.AdRevenue(ad.revenue ?? 0.0, "USD") {
     AdType    = Io.AppMetrica.AdType.Other,
     AdNetwork = ad.networkName,
     AdUnitId  = ad.adUnitId,
@@ -59,11 +59,17 @@ AppMetrica.Instance.ReportAdRevenue(new Io.AppMetrica.AdRevenue(ad.revenue, "USD
 
 // AppsFlyer
 AppsFlyer.sendEvent("af_ad_revenue", new Dictionary<string, string> {
-    { "af_revenue",  ad.revenue.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+    { "af_revenue",  (ad.revenue ?? 0.0).ToString(System.Globalization.CultureInfo.InvariantCulture) },
     { "af_currency", "USD" },
     { "af_ad_network", ad.networkName },
 });
 ```
+
+> `ad.revenue` is `double?` (the SDK marks impression revenue as optional). The `?? 0.0` is
+> required — Firebase / Adjust / AppMetrica / AppsFlyer all take `double`, not `double?`. Don't
+> remove. `ad.networkName`, `ad.adFormat`, and `ad.placementTag` are `string?` but their consumers
+> here are `string` parameters / `Dictionary<string,string>` values, which accept `null` in C#, so
+> they need no coalesce; `ad.adUnitId` is non-nullable `string`.
 
 Mirror the same handler shape for `OnBannerRevenuePaid`, `OnRewardedRevenuePaid`, and
 `OnMrecRevenuePaid` — every used format that the project forwards.
