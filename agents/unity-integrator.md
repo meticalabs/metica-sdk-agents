@@ -325,7 +325,7 @@ Record **all** providers found (a game may forward to several providers at once)
 
 #### Signal 4 — `host_ad_shape` (suggested template shape)
 
-Runs whether or not MaxSDK is present. Determines which of three template shapes `MeticaAdService.cs` should be rendered as, so the generated class slots into the host project's ad-code style without leaving dead unreachable code (the MET-11820 issue #1 regression — a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never `GetComponent`s or singleton-fetches it).
+Runs whether or not MaxSDK is present. Determines which of three template shapes `MeticaAdService.cs` should be rendered as, so the generated class slots into the host project's ad-code style without leaving dead unreachable code (e.g. a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never `GetComponent`s or singleton-fetches it — the component is alive but no host call path reaches it).
 
 For Max-present projects, look at the host's ad-related `.cs` files (the Max-touching inventory from the discovery scan plus any sibling files in the same directory). For Max-absent projects, look at files matching `*Ad*.cs` / `*Ads*.cs` / `*Mediation*.cs` under `Assets/Scripts/`. For each, classify by class shape:
 
@@ -407,7 +407,7 @@ Provide the C# expression for the player identity:
 
 Bake the chosen expression into `USER_ID_EXPR` before codegen. (The reactive autofix prompt for this rule remains only as a fallback for hand-rolled code linted outside this flow — see Step 7.)
 
-**Collect `SHAPE` here.** Step 2.5 Signal 4 produced a suggested shape based on the host's existing ad code. The user confirms or overrides — picking the wrong shape ships dead unreachable code (the MET-11820 issue #1 regression: a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never has a hook to fetch it):
+**Collect `SHAPE` here.** Step 2.5 Signal 4 produced a suggested shape based on the host's existing ad code. The user confirms or overrides — picking the wrong shape ships dead unreachable code (e.g. a `MonoBehaviour` `MeticaAdService` in a `static class AdsManager` host that never has a hook to fetch it):
 
 ```
 The integrator suggests SHAPE=<suggested_shape> based on the host's ad code
@@ -700,7 +700,7 @@ echo "Generated MeticaAdService.cs in $ADAPTER_FOLDER (formats: $FORMATS)"
 API_KEY="${API_KEY:-YOUR_METICA_API_KEY}"
 APP_ID="${APP_ID:-YOUR_METICA_APP_ID}"
 USER_ID_EXPR="${USER_ID_EXPR:-null}"          # null is valid (Metica auto-generates) — real identity recommended
-SHAPE="${SHAPE:-monobehaviour}"               # monobehaviour | static_class | plain_class (Step 3 prompt; defaults to monobehaviour for Max-absent projects)
+SHAPE="${SHAPE:?required from Step 3}"        # monobehaviour | static_class | plain_class (collected via the Step 3 prompt, suggested by Step 2.5 Signal 4)
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" below
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
@@ -723,7 +723,7 @@ ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
 
 **File to generate** (under `$ADAPTER_FOLDER`):
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__`), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. Shape-specific caveats (the `Invoke(...)` retry calls under non-`monobehaviour` shapes) are surfaced in Step 7's walkthrough — same handling as the Max-present codegen. The result is a single self-initializing class (mirrors the docs.metica.com example under `monobehaviour`): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, `OnAdShowFailed`-recovery, and docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`); banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag and no app-side retry. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__` / `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__`), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. Every shape compiles out of the box (the `Invoke(...)` retry call is scoped strictly to the `monobehaviour` branch via the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution). The result is a single self-initializing class (mirrors the docs.metica.com example under `monobehaviour`): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, and `OnAdShowFailed`-recovery; under **`monobehaviour`** they additionally carry docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`), while under **`static_class` / `plain_class`** the load-failure handlers are log-only and MeticaSDK's built-in retry handles re-loading (Step 7's walkthrough shows how to add an app-side retry from a host scheduler if desired). Banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag under `monobehaviour`, and no app-side focus dispatch under `static_class` / `plain_class` (the host wires its own focus handler and calls `MeticaAdService.BannerOnFocus(...)` / `MrecOnFocus(...)`, both `public` for that purpose); no app-side retry under any shape. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
@@ -884,9 +884,9 @@ Render exactly one of the three blocks below, picked by `$SHAPE`. This is the fi
 **When `SHAPE=monobehaviour`** (the default):
 
 ```
-Open your bootstrap scene (the first scene Unity loads — typically the
-one in Project Settings → Player → Default Scene, or your Bootstrap /
-MainMenu scene).
+Open your bootstrap scene (the first scene Unity loads — the scene
+at index 0 in File → Build Settings → Scenes In Build; usually your
+Bootstrap / MainMenu scene).
   1. Create an empty GameObject named `MeticaAds`.
   2. Add the MeticaAdService component to it (the file just generated
      at <ADAPTER_FOLDER>/MeticaAdService.cs).
