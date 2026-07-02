@@ -4,3 +4,8 @@ metica-versions.dev.yaml
 # Personal/local Claude Code overlay — each contributor keeps their own; never committed.
 # Shared guidance lives in the committed CLAUDE.md.
 CLAUDE.local.md
+
+# Planning / scratch artifacts produced by Claude Code skills (e.g. superpowers:writing-plans).
+# Plans belong in the PR description or the originating conversation, not the repo (see CLAUDE.md).
+docs/superpowers/
+docs/plans/
