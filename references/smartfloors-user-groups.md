@@ -34,7 +34,10 @@ tag it read at init.
 
 ## Worked example — the sciplay integration
 
-The `.../sciplay/Advertisement/MeticaService` integration correctly implements the pattern:
+The `.../sciplay/Advertisement/MeticaService` integration correctly implements the pattern.
+It lives in an **external client codebase, not this repository**, so the `file:line`
+references below are **illustrative** — they anchor the pattern in real shipped code; they can't
+be opened from here.
 
 - **Group read at init** — `MeticaInitializeService.cs:83` reads the group from the init
   response and tags it to analytics at `:88`.
