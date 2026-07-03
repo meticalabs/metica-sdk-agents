@@ -2,7 +2,7 @@
 name: unity-validator
 description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash, Read, Grep
-model: sonnet
+model: opus
 ---
 
 # Metica Unity Validator
