@@ -1,7 +1,9 @@
 # SmartFloors user groups: group-aware ad control
 
-The Metica SmartFloors **user group** (`initResponse.SmartFloors.UserGroup`, and the
-`IsForcedHoldout` flag) is the single source of truth for **how the app runs its ad loading**.
+The Metica SmartFloors **user group** — `initResponse.SmartFloors.UserGroup` — is the single
+source of truth for **how the app runs its ad loading**. (`IsForcedHoldout` is a separate boolean
+flag on the same response, `true` for the holdout group; it's a convenience for the holdout-vs-not
+split, not part of the group value itself — branch on whichever the SDK version exposes.)
 Metica's own integration guidance directs integrators to branch ad-control logic on the group,
 and real shipped Metica integrations implement exactly this pattern. This doc records the
 sanctioned shape so the validator and the `ad-log-monitor` skill agree on what is expected
@@ -40,8 +42,10 @@ A correct group-aware integration wires the pattern like this:
 - **Waterfall gated to holdout** — expose a single `IsMultipleAdsEnabled`-style predicate that is
   true only for holdout; the multi-unit waterfall runs only when it is true, and trial loads a
   single default unit.
-- **Callbacks resolve the unit id per group** — the load/show callbacks resolve the reported unit
-  id by group rather than assuming the requested id was served.
+- **Attribute callbacks by group, not by returned id** — in the load/show callbacks, log and
+  attribute the impression/revenue by the group tag read at init, rather than assuming the
+  returned `MeticaAd.adUnitId` matches the requested id. Don't rewrite or route on the returned
+  id — attribution only.
 
 Two cautions when implementing this shape (not blockers):
 
