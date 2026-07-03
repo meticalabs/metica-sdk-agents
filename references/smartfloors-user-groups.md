@@ -3,10 +3,9 @@
 The Metica SmartFloors **user group** (`initResponse.SmartFloors.UserGroup`, and the
 `IsForcedHoldout` flag) is the single source of truth for **how the app runs its ad loading**.
 Metica's own integration guidance directs integrators to branch ad-control logic on the group,
-and a real shipped integration (`.../sciplay/Advertisement/MeticaService`) implements exactly
-this pattern. This doc records the sanctioned shape so the validator and the `ad-log-monitor`
-skill agree on what is expected (mirroring the role `max-metica-api-map.tsv` plays for the
-Max↔Metica surface).
+and real shipped Metica integrations implement exactly this pattern. This doc records the
+sanctioned shape so the validator and the `ad-log-monitor` skill agree on what is expected
+(mirroring the role `max-metica-api-map.tsv` plays for the Max↔Metica surface).
 
 ## The sanctioned pattern
 
@@ -32,28 +31,25 @@ Because of both, **ad-unit-based routing/analysis is unreliable**. App code must
 configured id through unchanged, never second-guess what comes back, and attribute by the group
 tag it read at init.
 
-## Worked example — the sciplay integration
+## Worked example — the shape of a group-aware integration
 
-The `.../sciplay/Advertisement/MeticaService` integration correctly implements the pattern.
-It lives in an **external client codebase, not this repository**, so the `file:line`
-references below are **illustrative** — they anchor the pattern in real shipped code; they can't
-be opened from here.
+A correct group-aware integration wires the pattern like this:
 
-- **Group read at init** — `MeticaInitializeService.cs:83` reads the group from the init
-  response and tags it to analytics at `:88`.
-- **Waterfall gated to holdout** — `MeticaInfoProvider.cs:17-26` exposes `IsMultipleAdsEnabled`,
-  true only for holdout; trial loads a single default unit.
-- **Callbacks resolve the unit id per group** — `IMeticaThreadSafeEvents.cs:171-181` (and the
-  per-format handlers) resolve the reported unit id by group rather than assuming the requested
-  id was served.
+- **Group read at init** — read the group from the init response inside `OnInitialized` and tag
+  it to an analytics user-property (e.g. a `metica_group` tag).
+- **Waterfall gated to holdout** — expose a single `IsMultipleAdsEnabled`-style predicate that is
+  true only for holdout; the multi-unit waterfall runs only when it is true, and trial loads a
+  single default unit.
+- **Callbacks resolve the unit id per group** — the load/show callbacks resolve the reported unit
+  id by group rather than assuming the requested id was served.
 
-Two advisory notes on that integration (not blockers):
+Two cautions when implementing this shape (not blockers):
 
-1. The trial id-coercion (`_pendingLoadUnitId ?? sdkUnitId`) can misrepresent what actually
-   served, given the holdout-fallback caveat above — keep revenue attribution on the
-   `metica_group` tag they already set, not on the coerced id.
-2. The `_pendingLoadUnitId == null` path logs-then-falls-back silently, assuming the pending id
-   is always set before the callback fires.
+1. Coercing the trial callback's unit id back to the requested id (e.g. `pendingLoadId ??
+   sdkUnitId`) can misrepresent what actually served, given the holdout-fallback caveat above —
+   keep revenue attribution on the group tag, not on the coerced id.
+2. Assuming the pending id is always set before the callback fires (logging then falling back
+   silently when it is not) is fragile — handle the unset case explicitly.
 
 ## Expected differences between groups (do not flag)
 
