@@ -118,6 +118,23 @@ ones grep gets wrong):
 | `<format>_load_after_init` (every used format) | Is **every** path that reaches `Load<Format>` (and `Create<Format>` for banner/MRec) only reachable **after init has *completed***? In the canonical pattern the initial load is kicked off from `Init<Format>`, which is called **inside** `OnInitialized`; reloads (auto-reload-on-hidden, exponential-backoff retry) are downstream of that first post-init load. Accepted proof: the load originates from the `OnInitialized` path — directly, or via a reload/retry chain rooted in a post-init load. (ADVISORY if a load can run before init completes — e.g. issued from `Awake()` / `Start()` ahead of the init callback — or no such gate can be proven.) |
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
 
+**Ad-unit-id routing is unreliable** (project-wide, not per-format):
+
+- `adunit_routing_unreliable` — **behavioral, FAIL-capable.** Under SmartFloors the **trial**
+  group is served Metica-dedicated ad units regardless of the id the app requested, and even
+  trial users are sometimes served the **holdout ad unit as a connection-issue fallback** — so a
+  returned `MeticaAd.adUnitId` is **not** a reliable routing signal (see
+  `references/smartfloors-user-groups.md`). **FAIL** when a guard branches on whether a returned
+  `ad.adUnitId` `==` / `!=` a configured id (or a stored copy of it) and that branch **gates an
+  ad-control decision** — selecting/branching an ad-unit id, gating a `Load*`/`Show*`, or
+  switching ad-lifecycle state. App code must pass the configured id through unchanged and
+  attribute by **group**, never second-guess what comes back. **PASS** when the returned id is
+  only logged/attributed (no ad-control branch) or never compared. **Group-aware branching**
+  (`response.SmartFloors.UserGroup` / `IsForcedHoldout` driving load/show strategy) is the
+  sanctioned pattern and is **not** flagged by this rule. Cite the comparison → the ad-control
+  branch it gates (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be traced —
+  never a blind FAIL.
+
 **Ad-state flag hygiene** (project-wide, not per-format):
 
 - `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a self-managed ad state flag
