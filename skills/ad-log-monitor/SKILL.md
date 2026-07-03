@@ -183,6 +183,26 @@ grep -E "OnInterstitialDisplayedEvent|OnInterstitialHiddenEvent" "$LOG" | head -
 
 For each impression, MAX prints a `MaxAdInfo` blob with `networkName='…'`, `revenue=…`, `revenuePrecision='…'`. Extract those tuples (you may need a separate grep with `-oE` on the inner tokens). If revenue isn't logged at all, say so in the report — **don't fabricate values**.
 
+##### 3.3b. Revenue callback presence (high-severity — the revenue-reporting source of truth)
+
+The ad-revenue **callback** — distinct from the Displayed event — is the single event the integration subscribes to in order to report revenue to Metica **and** forward it to every 3PA tool (Adjust / Firebase / AppsFlyer / AppMetrica). If it doesn't fire, revenue reporting is broken **at the source**: there is nothing for the 3PA forwarders (Step 5.5) to forward, so the forward-rate check there is vacuous. Verify it fires **once per impression** for each format:
+
+```bash
+# Revenue-paid callback signals (any one of these is the callback firing for this format):
+#   MAX native event : On<Format>AdRevenuePaidEvent  (note OnMRecAdRevenuePaidEvent for MRec)
+#   Metica path      : MaxAdRevenueListener.onAdRevenuePaid
+#   Metica Unity log : [Metica] <format> revenue paid
+grep -iE "OnInterstitialAdRevenuePaidEvent|MaxAdRevenueListener\.onAdRevenuePaid|\[Metica\].*interstitial revenue paid" "$LOG" | head -20
+```
+
+Compare the **revenue-callback count to the impression count** (Shows from Step 3.2) for the format:
+
+- **Impressions > 0 and revenue callbacks == 0 → FLAG (high severity).** State it plainly: *revenue callbacks are missing — reported revenue to Metica and every 3PA analytics tool is broken; no revenue event ever fired for N impressions.* This is a shipped-revenue-loss bug, not a cosmetic gap. Quote an impression line (the Displayed/Show) with no matching revenue-paid line as evidence.
+- **Revenue callbacks fired for only some impressions** (0 < callbacks < impressions) → **FLAG**: partial revenue reporting; quote the impressions with no matching callback and note how many were lost.
+- **~1 callback per impression** → PASS for presence (Step 5.5 then measures whether each callback actually *forwarded* to the 3PA tools).
+
+Record the callback count (and the impression denominator) in the per-format **Revenue per Impression** section of the report. Substitute the rewarded / banner / mrec event names for the other formats (`OnRewardedAdRevenuePaidEvent`, `OnBannerAdRevenuePaidEvent`, `OnMRecAdRevenuePaidEvent`). Note the difference from Step 5.5: **this check is whether the revenue callback fired at all** (Metica + 3PA source); **Step 5.5 is whether an existing callback was forwarded onward** to each 3PA provider. A zero here makes Step 5.5's ratios meaningless — call the missing callback out first.
+
 ##### 3.4. Reward sequencing (rewarded only)
 
 ```bash
@@ -222,7 +242,7 @@ Detect which providers are present, then grep each one's forwarded-event signal:
 | AppsFlyer | `AppsFlyer .* af_ad_revenue` or `af_inapp_ad_view` (depends on the game's chosen event name) |
 | AppMetrica | `AppMetrica .* reportAdRevenue` or `Reporting ad revenue` (depends on integration) |
 
-The MAX-side denominator is unchanged: `Invoking event: On(Interstitial|Banner|MRec|Rewarded|AppOpen)AdRevenuePaidEvent` (pure MAX — note `OnMRecAdRevenuePaidEvent` for MRec), or `MaxAdRevenueListener.onAdRevenuePaid` on the Metica path.
+The MAX-side denominator is unchanged: `Invoking event: On(Interstitial|Banner|MRec|Rewarded|AppOpen)AdRevenuePaidEvent` (pure MAX — note `OnMRecAdRevenuePaidEvent` for MRec), or `MaxAdRevenueListener.onAdRevenuePaid` on the Metica path. **Sanity-check the denominator first (Step 3.3b):** if impressions occurred but this denominator is **zero**, the revenue callback never fired — revenue reporting is broken at the source and the forward-rate ratios below are vacuous. Lead with that missing-callback FLAG; the per-provider forward rate is only meaningful once the callback is firing.
 
 For each detected provider, report **by format**:
 
@@ -327,12 +347,14 @@ A short prose paragraph or bullet list with timestamped key events (first loadAd
 | ... | ... |
 
 ### Revenue per Impression
-| Show # | Network | Revenue | Precision |
-|---|---|---|---|
-| 1 | ... | $0.0123 | publisher_defined |
+**Revenue callbacks fired: N of M impressions** (Step 3.3b) — `OK` when ~1:1, **FLAG (high severity)** when impressions > 0 but callbacks = 0 (revenue reporting to Metica + all 3PA tools broken at the source), **FLAG** when partial. This is the revenue-reporting source-of-truth check — call it out before the per-provider forward rate.
+
+| Show # | Network | Revenue | Precision | Revenue callback fired? |
+|---|---|---|---|---|
+| 1 | ... | $0.0123 | publisher_defined | yes / **NO** |
 | ... |
 
-If revenue isn't logged in this build, say so explicitly here.
+If revenue isn't logged in this build, say so explicitly here. A missing revenue *value* in the MaxAdInfo blob is a logging gap; a missing revenue *callback* (the last column all "NO") is a reporting bug — distinguish the two.
 
 ---
 
@@ -403,7 +425,7 @@ Note any events lost or stalled at the end of the capture window, and whether th
 
 ## Key Observations
 
-Numbered list. Surface anything worth a human's attention — broken reward sequencing, networks that never win, suspicious reload latency, missing floor params, trial-only crashes. Be specific; cite line numbers or timestamps.
+Numbered list. Surface anything worth a human's attention — **missing revenue callbacks (revenue reporting to Metica + all 3PA tools broken at the source — lead with this when it happens)**, broken reward sequencing, networks that never win, suspicious reload latency, missing floor params, trial-only crashes. Be specific; cite line numbers or timestamps.
 ````
 
 Once the file is written, summarise to the user: which formats appeared, headline findings, and whether they should run the second route now (if this was the first capture) or proceed to Phase 3 (if both routes are present).
@@ -426,6 +448,7 @@ Once the file is written, summarise to the user: which formats appeared, headlin
 | Fill rate (Loaded / Loads) | …% | …% | … | …% |
 | Show rate (Shows / Loaded) | …% | …% | … | …% |
 | Avg revenue per impression | $… | $… | … | $… |
+| Revenue callbacks fired (of impressions) | …/… | …/… | … | …/… |
 | Reload latency (median Hidden→next loadAd) | …ms | …ms | … | …ms |
 | Load response time (median fill) | …ms | …ms | … | …ms |
 | Time to first ad ready | …ms | …ms | … | …ms |
@@ -454,6 +477,7 @@ The baseline is the **production store build** — a different build from the de
 - **Fewer ready ad units / a collapsed multi-unit waterfall in the trial group → do NOT flag.** For users Metica actively optimizes, the SDK manages ad loading internally, so the game's multi-unit waterfall behaves as a single managed pipeline — "only one ad ready at a time" is **expected** for the trial group, not a regression. The holdout (control) group runs the game's exact baseline waterfall unchanged, so this asymmetry between routes is by design. Only flag it if the *holdout* also collapses (then it's a real loading bug, not the optimization). This concerns waterfall **structure** — how many units are ready at once — not the fill-rate metric in the rules above; a collapsed trial waterfall does not by itself mean a lower trial fill rate.
 - `trial load response time` or `time to first ad ready` materially worse than holdout → **FLAG**. A loading regression, not bid economics. (Scope this to the timing metrics only — fill-rate deltas are covered by the rules above.)
 - `trial 3PA forward rate < holdout` for any provider → **FLAG**. All forwarders share the Unity main-thread dispatch surface, so a trial-only drop signals the wrapper-architecture asymmetry — analytics under-reporting independent of revenue.
+- **Revenue callbacks missing on either route (impressions > 0 but revenue-callback count = 0 for a format, Step 3.3b) → FLAG (high severity), regardless of A/B direction.** No revenue callback means Metica and every 3PA tool report nothing for that format — revenue is broken at the source, not merely mis-priced. If it's **trial-only**, it's a trial-build regression in the revenue wiring; if it's **both routes**, the game's revenue-callback subscription is broken independent of Metica. Either way it dominates the verdict — call it out above the bid-economics rules, since a revenue-per-impression delta is meaningless when the callback never fired.
 - Trial-only errors (next section) → **FLAG**.
 
 ### 4. Error diff (cross-route)

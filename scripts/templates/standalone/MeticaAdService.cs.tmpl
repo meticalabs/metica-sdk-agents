@@ -10,6 +10,13 @@
 // a project doesn't use, and for a larger project the integrator can lift each
 // region into a MeticaAdService.<Format>.cs partial class (see integrator.md Step 5).
 // Wiring guidance per shape lives in the Step 7 final report.
+//
+// Init is CMP-aware. With no consent management platform, __START_HOOK__ carries the
+// shape's auto-init hook (e.g. `void Start() => Initialize();` under MonoBehaviour) and
+// Initialize() uses the configured privacy defaults. When a CMP is present, __START_HOOK__
+// is EMPTY for every shape — init is deferred until consent resolves, and the host calls
+// the Initialize(bool hasUserConsent, bool doNotSell) overload from its CMP completion
+// callback (marshalled to the Unity main thread). See the Step 7 report for the wiring.
 using UnityEngine;
 using Metica;
 using Metica.Ads;
@@ -24,14 +31,24 @@ public __CLASS_HEADER__
     __START_HOOK__
 
     // Idempotent — safe to call again (e.g. from your own bootstrap after login).
-    public __STATIC__void Initialize()
+    // Uses the configured default privacy values; when a consent management platform
+    // resolves consent at runtime, call the (bool, bool) overload from the CMP
+    // completion callback (on the Unity main thread) instead of this one.
+    public __STATIC__void Initialize() => Initialize(true, false);
+
+    // Consent-gated entry point — pass the CMP-resolved consent values here. Privacy is
+    // set from the resolved values (not hardcoded), still before MeticaSdk.Initialize
+    // (the same-file ordering the validator enforces). This is the single real init path;
+    // the parameterless overload above delegates to it, so there is exactly one
+    // MeticaSdk.Initialize call site.
+    public __STATIC__void Initialize(bool hasUserConsent, bool doNotSell)
     {
         if (_initialized) return;
         _initialized = true;
 
         // Privacy MUST precede Initialize (same-file ordering the validator enforces).
-        MeticaSdk.Ads.SetHasUserConsent(true);
-        MeticaSdk.Ads.SetDoNotSell(false);
+        MeticaSdk.Ads.SetHasUserConsent(hasUserConsent);
+        MeticaSdk.Ads.SetDoNotSell(doNotSell);
         MeticaSdk.SetLogEnabled(true);
         var config = new MeticaInitConfig("__METICA_API_KEY__", "__METICA_APP_ID__", __USER_ID__);
         MeticaSdk.Initialize(config, __MEDIATION__, OnInitialized);

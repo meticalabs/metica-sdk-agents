@@ -2,7 +2,7 @@
 name: unity-integrator
 description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → replace Max in the game's direct call sites with MeticaSDK, leave any dedicated Max-wrapper file untouched, no A/B router) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
-model: sonnet
+model: opus
 ---
 
 # Metica Unity Integrator
@@ -26,6 +26,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name suggested in the cohort-gating recipe. Default: `metica_rollout`.
 - `NAMESPACE` — explicit namespace string for all generated files. If omitted, auto-detected from the project's dominant namespace (Step 2.5). Pass an empty string to force bare/no-namespace.
 - `ADAPTER_FOLDER` — explicit **project-relative** path for the generated Metica adapter folder (must start with `Assets/`; do not pass an absolute path or a parent-relative path like `../foo`). If omitted, auto-picked in Step 2.5 (default `Assets/Scripts/Metica`).
+- `CMP_PROVIDER` — `google-ump` | `max-cmp` | `custom` | `none`. If omitted, auto-detected in Step 2.5 (Signal 5). When a real CMP is detected, the generated init is **consent-gated**: `__START_HOOK__` is emitted empty for every shape (no auto-init), and the host calls the consent-gated `Initialize(bool, bool)` overload from the CMP completion callback (Step 7 shows the per-shape wiring). `none` preserves the shape's default auto-init.
 
 ## Setup — establish `PLUGIN_DIR`
 
@@ -277,7 +278,7 @@ Assemble findings into a Markdown block with the anchors above. This block is **
 
 The rest of discovery: which remote-config provider already exists (drives Step 7's cohort-gating recipe — does NOT change generated artifacts), and which namespace the generated files should live in. These run **whether or not MaxSDK is present** and feed the **same** structured discovery block (under `Remote-config provider` and the codegen-plan's `Namespace` line). All detection is done via Bash + Grep + Read — no script.
 
-Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing.
+Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER` + `CMP_PROVIDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing.
 
 #### Signal 1 — `remote_config_provider`
 
@@ -344,6 +345,19 @@ Suggested MeticaAdService shape: static_class
 
 The user confirms or overrides this suggestion in the Step 3 plan (see `SHAPE` collection below).
 
+#### Signal 5 — `cmp_provider`
+
+Runs whether or not MaxSDK is present. Detect whether the host uses a **consent management platform (CMP)** — a runtime consent gate whose result is not known when the shape's auto-init hook (`Start()` under `monobehaviour`) would fire. This **does** change codegen: when a CMP is present the generated init is consent-gated (Step 5 emits `__START_HOOK__` empty for every shape), because auto-initializing MeticaSDK (and the AppLovin/MAX mediation underneath it) with a hardcoded `SetHasUserConsent(true)` before the CMP resolves ships a wrong/empty consent state to the ad networks — a compliance violation. Grep to locate a candidate, then **Read the surrounding lines and confirm it's live code** (not a `//` comment or a `"string literal"`) before setting the provider:
+
+- **`google-ump`** (Google User Messaging Platform) — any of, confirmed live:
+  - a `.cs` under `Assets/Scripts/` matching `^using GoogleMobileAds\.Ump` (Grep tool: pattern `^using GoogleMobileAds\.Ump`, glob `Assets/Scripts/**/*.cs`)
+  - a real call to `ConsentInformation.Update(` / `ConsentInformation.CanRequestAds(` / `ConsentForm.Load(` / `ConsentForm.LoadAndShowConsentFormIfRequired(`, or a subscribed `OnConsentInfoUpdated` handler
+- **`max-cmp`** (AppLovin MAX CMP) — a real call to `MaxCmpService.` (e.g. `MaxCmpService.ShowCmpForIfNeeded(`). Locate via the same `(MaxSdkBase|MaxSdkCallbacks|MaxSdk|MaxCmpService)\.` scan the Max-callsite inventory uses; confirm the `MaxCmpService.` hit is live code.
+- **`custom`** — a host-owned consent gate feeding privacy: a method/callback whose result flows into `SetHasUserConsent` / `SetDoNotSell` (or into a "consent resolved" event) that is **not** one of the above. Only classify `custom` when you can cite the consent-resolution callback; when unsure, report `none` and note the ambiguity for the Step 3 plan.
+- **`none`** — no CMP above detected. Preserves the shape's default auto-init.
+
+If more than one is present (e.g. both UMP and `MaxCmpService`), report the one that actually gates privacy/init; list the others in the detection report. Record under `CMP provider` in the structured block. This feeds the Step 5 `__START_HOOK__` substitution (empty for all shapes when a CMP is present) and the Step 7 consent-gated-init walkthrough.
+
 #### Secondary checks (inline at generation time)
 
 These do not need a detection-report row; they are applied during codegen:
@@ -360,13 +374,15 @@ Detected remote-config provider: firebase (3 of 71 .cs files import Firebase.Rem
   Alternatives present: (none)  |  appmetrica (1 import)  |  ...
   → cohort-gating recipe will be included in the final report (Step 7)
 Detected dominant namespace: MyGame.Services (38 of 71 .cs files)
+Detected CMP: google-ump (UserMessagingPlatform — ConsentForm.LoadAndShowConsentFormIfRequired)
+  → init will be consent-gated: no auto-init hook; wire Initialize(bool, bool) from the CMP callback (Step 7)
 Resolved adapter folder: Assets/Scripts/Ads/Metica   (next to wrapper AdManager.cs)
 Resolved namespace wrap: MyGame.Services.Metica
 ```
 
-When MaxSDK is absent, omit the provider line. When no namespace dominates and the project has no namespaces at all, show `Resolved namespace wrap: (none — emit without wrapper)`. When a wrapper was detected, the adapter-folder line shows the wrapper-adjacent resolution `(next to wrapper <file>)`; otherwise it shows the default pick (`Assets/_Project/Scripts/Metica`, `Assets/Game/Scripts/Metica`, or `Assets/Scripts/Metica`).
+When MaxSDK is absent, omit the provider line. The CMP line always shows (Signal 5 runs whether or not MaxSDK is present); when no CMP is detected show `Detected CMP: none (shape default auto-init preserved)`. When no namespace dominates and the project has no namespaces at all, show `Resolved namespace wrap: (none — emit without wrapper)`. When a wrapper was detected, the adapter-folder line shows the wrapper-adjacent resolution `(next to wrapper <file>)`; otherwise it shows the default pick (`Assets/_Project/Scripts/Metica`, `Assets/Game/Scripts/Metica`, or `Assets/Scripts/Metica`).
 
-Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
+Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`, `CMP_PROVIDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
 
 ### Step 3 — Plan-mode preview (the single audit checkpoint)
 
@@ -390,9 +406,12 @@ Confirm these inferences:
   - adapter folder = Assets/Scripts/Ads/Metica/        (next to the wrapper)
   - userId         = <ASK NOW — see below>
   - shape          = static_class                      (suggested from host's ad code; see Step 2.5 Signal 4 — ASK NOW)
+  - CMP            = google-ump → consent-gated init (no auto-init hook; you wire Initialize(bool,bool) from the CMP callback — Step 7)
 ```
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
+
+When a CMP was detected (Step 2.5 Signal 5), list it here as a confirmed inference — it changes the generated init flow (deferred, consent-gated for every shape) and adds a manual wiring step, so the user must see it before approval. When the CMP was classified `custom`, name the consent-resolution callback you cited so the user can correct a misclassification. When no CMP was detected, omit the `CMP` line.
 
 **Collect `USER_ID_EXPR` here.** `null`/empty is valid (Metica auto-generates a stable per-device id, and the validator PASSes it), but a real identity source gives correct cross-session attribution — ask for it now, as part of this preview, rather than silently shipping an anonymous default the user didn't choose:
 
@@ -525,11 +544,20 @@ MaxSdk.InitializeSdk();
 MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterLoaded;
 // ... more callback subscriptions ...
 
-// after:
+// after (monobehaviour shape, no CMP — auto-init on Start()):
 gameObject.AddComponent<MeticaAdService>();  // MeticaAdService is a MonoBehaviour; its Start() initializes the SDK (privacy + MeticaSdk.Initialize)
 // Delete the MaxSdkCallbacks.* subscriptions entirely — MeticaAdService's
 // per-format regions own those, including auto-reload.
+
+// after (CMP present, any shape — __START_HOOK__ is empty, so init is deferred to the consent callback):
+var _ads = gameObject.AddComponent<MeticaAdService>();   // (static_class/plain_class: use the shape's construct pattern from Step 7)
+// Do NOT rely on the auto-init hook here — call _ads.Initialize(hasUserConsent, doNotSell) from the
+// CMP completion callback, marshalled to the Unity main thread (see the Step 7 shape-tailored wiring).
+// If the game's Max bootstrap ran behind a MaxCmpService/UMP gate today, move THIS init into that
+// same callback rather than firing it inline.
 ```
+
+The exact construct/attach line differs by `$SHAPE`; the bootstrap above is the `monobehaviour` illustration. Step 7's shape-tailored wiring block is the source of truth for how the host constructs the class and (when a CMP is present) calls `Initialize(hasUserConsent, doNotSell)` from the consent callback.
 
 **Method calls (receiver swap + casing/name remap per references/max-vs-metica-2.4.0-api.md):**
 
@@ -600,6 +628,7 @@ SHAPE="${SHAPE:?required from Step 3}"        # monobehaviour | static_class | p
 ADAPTER_FOLDER="<resolved adapter folder>"   # default Assets/Scripts/Metica (relative to $PROJECT)
 NAMESPACE="<resolved namespace>"              # dominant + .Metica, else (empty) or MeticaIntegration — never Metica.AbTest
 FORMATS="<formats the game actually uses>"   # detected from the Max call sites (Step 5 scan); subset of {banner, interstitial, rewarded, mrec}
+CMP_PROVIDER="<resolved cmp provider>"        # google-ump | max-cmp | custom | none (Step 2.5 Signal 5) — empties __START_HOOK__ when ≠ none
 ```
 
 **Input validation + escaping (inline)** — each key (API_KEY, APP_ID, MAX_SDK_KEY) is embedded as a C# string literal, so validate and escape it before substituting: **reject** an empty value or one containing a control char (newline / CR / tab), then **escape** `\` → `\\` first, then `"` → `\"` (backslash first so the quote-escaping backslashes aren't doubled). If any key is invalid, stop and ask the user — do not write any file. `USER_ID_EXPR` is **not** escaped — it is a C# *expression* embedded verbatim (e.g. `SystemInfo.deviceUniqueIdentifier`), not a string literal.
@@ -618,6 +647,8 @@ Then generate:
    | `__STATIC__` | (empty) | `static ` | (empty) |
    | `__INTERSTITIAL_LOAD_FAILED_BODY__` | docs-verbatim exp-backoff retry using `MonoBehaviour.Invoke` (see below) | log-only — let SDK retry internally (see below) | log-only — let SDK retry internally (see below) |
    | `__REWARDED_LOAD_FAILED_BODY__` | docs-verbatim exp-backoff retry using `MonoBehaviour.Invoke` (see below) | log-only — let SDK retry internally (see below) | log-only — let SDK retry internally (see below) |
+
+   **CMP override for `__START_HOOK__`:** the `__START_HOOK__` values above are the **no-CMP** defaults. When `CMP_PROVIDER != none` (Step 2.5 Signal 5), substitute `__START_HOOK__` with an **empty** hook for **every** shape (including `monobehaviour` — drop the `void Start() => Initialize();` auto-init), so init is deferred until consent resolves. Emit a one-line comment in its place, e.g. `// No auto-init: CMP (<CMP_PROVIDER>) gates consent — host calls Initialize(hasUserConsent, doNotSell) from the CMP callback (main thread). See Step 7.` The host then calls the consent-gated `Initialize(bool hasUserConsent, bool doNotSell)` overload (already in the template, carrying `__STATIC__`) with the resolved values. Do **not** move privacy or init into the auto-init hook in this case — deferring them until consent resolves is the whole point. Both `Initialize` overloads are emitted regardless of CMP/shape; the parameterless one delegates to the two-arg one, so there is still exactly one `MeticaSdk.Initialize(` call site (`init_count` stays green) and privacy stays same-file before init (`privacy_before_init` stays green). The CMP callback frequently fires **off** the Unity main thread (UMP especially), so the Step 7 wiring marshals the `Initialize(...)` call to the main thread — consistent with the validator's `sdk_calls_on_main_thread` rule.
 
    For `__FOCUS_HOOK__` under `monobehaviour`, emit verbatim:
 
@@ -704,6 +735,7 @@ SHAPE="${SHAPE:?required from Step 3}"        # monobehaviour | static_class | p
 FORMATS="${FORMATS:-interstitial}"
 NAMESPACE="<resolved namespace>"              # see "Resolved namespace rule" below
 ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
+CMP_PROVIDER="<resolved cmp provider>"        # google-ump | max-cmp | custom | none (Step 2.5 Signal 5) — empties __START_HOOK__ when ≠ none
 ```
 
 **Input validation + escaping (inline)** — validate and escape every key the agent embeds, exactly as in the Max-present path: reject an empty value or a control char (newline / CR / tab); escape `\` → `\\` first, then `"` → `\"`. Stop and ask the user on any failure; do not write any file.
@@ -723,22 +755,24 @@ ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
 
 **File to generate** (under `$ADAPTER_FOLDER`):
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__` / `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__`), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. Every shape compiles out of the box (the `Invoke(...)` retry call is scoped strictly to the `monobehaviour` branch via the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution). The result is a single self-initializing class (mirrors the docs.metica.com example under `monobehaviour`): `Start()` calls an idempotent `Initialize()` that sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, and `OnAdShowFailed`-recovery; under **`monobehaviour`** they additionally carry docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`), while under **`static_class` / `plain_class`** the load-failure handlers are log-only and MeticaSDK's built-in retry handles re-loading (Step 7's walkthrough shows how to add an app-side retry from a host scheduler if desired). Banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag under `monobehaviour`, and no app-side focus dispatch under `static_class` / `plain_class` (the host wires its own focus handler and calls `MeticaAdService.BannerOnFocus(...)` / `MrecOnFocus(...)`, both `public` for that purpose); no app-side retry under any shape. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__` / `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__`, **including the CMP override that empties `__START_HOOK__` for every shape when `CMP_PROVIDER != none`**), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), and — with no MaxSDK present — set the mediation arg to `null`. Every shape compiles out of the box (the `Invoke(...)` retry call is scoped strictly to the `monobehaviour` branch via the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution). The result mirrors the docs.metica.com example under `monobehaviour`: with no CMP, `Start()` auto-inits by calling an idempotent `Initialize()` that delegates to `Initialize(true, false)`; with a CMP, `__START_HOOK__` is empty and the host calls `Initialize(bool hasUserConsent, bool doNotSell)` from its consent callback. Either way the consent-gated overload sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, and `OnAdShowFailed`-recovery; under **`monobehaviour`** they additionally carry docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`), while under **`static_class` / `plain_class`** the load-failure handlers are log-only and MeticaSDK's built-in retry handles re-loading (Step 7's walkthrough shows how to add an app-side retry from a host scheduler if desired). Banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag under `monobehaviour`, and no app-side focus dispatch under `static_class` / `plain_class` (the host wires its own focus handler and calls `MeticaAdService.BannerOnFocus(...)` / `MrecOnFocus(...)`, both `public` for that purpose); no app-side retry under any shape. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
    public class MeticaAdService : MonoBehaviour
    {
        private bool _initialized = false;
-       void Start() => Initialize();
-       public void Initialize()                     // idempotent
+       __START_HOOK__                               // `void Start() => Initialize();` (monobehaviour, no CMP); empty for other shapes or when a CMP is present
+       public void Initialize() => Initialize(true, false);   // idempotent; uses configured privacy defaults
+       // Consent-gated entry — host calls this from its CMP callback (main thread) when a CMP is present:
+       public void Initialize(bool hasUserConsent, bool doNotSell)
        {
            if (_initialized) return; _initialized = true;
-           MeticaSdk.Ads.SetHasUserConsent(true);   // privacy precedes Initialize, same file
-           MeticaSdk.Ads.SetDoNotSell(false);
+           MeticaSdk.Ads.SetHasUserConsent(hasUserConsent);  // privacy precedes Initialize, same file
+           MeticaSdk.Ads.SetDoNotSell(doNotSell);
            MeticaSdk.SetLogEnabled(true);
            var config = new MeticaInitConfig("<API_KEY_ESCAPED>", "<APP_ID_ESCAPED>", <USER_ID_EXPR>);
-           MeticaSdk.Initialize(config, null, OnInitialized);   // named callback, not a lambda
+           MeticaSdk.Initialize(config, null, OnInitialized);   // named callback, not a lambda; the one init call site
        }
        private void OnInitialized(MeticaInitResponse response)
        {
@@ -754,7 +788,7 @@ ADAPTER_FOLDER="${ADAPTER_FOLDER:-Assets/Scripts/Metica}"
    }
    ```
 
-   **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`. For a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to fit the game's conventions — the validator is content-based and passes either way. There is **no separate bootstrap file**: attach `MeticaAdService` to a GameObject in the first scene and `Start()` initializes it (or call `Initialize()` yourself after, e.g., login — it's idempotent).
+   **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`. For a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to fit the game's conventions — the validator is content-based and passes either way. There is **no separate bootstrap file**: attach `MeticaAdService` to a GameObject in the first scene. With no CMP, `Start()` initializes it (or call `Initialize()` yourself after, e.g., login — it's idempotent). With a CMP, `__START_HOOK__` is empty and the host calls `Initialize(hasUserConsent, doNotSell)` from its consent callback (on the Unity main thread) — see the Step 7 shape-tailored wiring / CMP walkthrough.
 
 **Hard correctness invariants** (validator-enforced):
 
@@ -801,6 +835,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `interstitial_setter_after_create` / `rewarded_setter_after_create` | autofix \| surface | Same as the banner/MRec setter rule: reorder when setter + `Create*`/load are in one method, else surface. |
 | `callbacks_fire_on_every_path` | surface | A parked/stale callback is a control-flow bug, not a line edit — surface the store site + the path with no invocation and stop. |
 | `init_callback_all_paths` | surface | An init path that skips `OnInitialized` (early-return / empty-config) is a logic fix — surface the path and stop. The integrator's own codegen always invokes the callback, so a FAIL is hand-rolled. |
+| `init_gated_on_cmp` | surface | A CMP is present but `MeticaSdk.Initialize` runs before consent resolves — deferring init to the CMP completion callback is a control-flow fix, not a line edit. Surface the CMP call site + the un-gated `Initialize`, and stop. The integrator's own codegen emits an empty `__START_HOOK__` when a CMP is detected, so a FAIL is hand-rolled or a mis-wired host callback. |
 | `retry_ownership` | surface | Auto-retry disabled with no client retry path — surface the `disable_auto_retries` site and the missing retry, and stop. |
 | `sdk_calls_on_main_thread` | surface | An ad call issued off the Unity main thread (e.g. from a CMP/consent callback) needs marshaling to the main thread — a control-flow fix, not a line edit. Surface the off-main call site and stop. The integrator's own codegen drives all ad calls from `MonoBehaviour` lifecycle / main-thread paths, so a FAIL is hand-rolled. |
 
@@ -961,6 +996,61 @@ System.Timers.Timer / Task.Delay marshalled to the main thread).
 ```
 
 The walkthrough emits exactly one block matching `$SHAPE`; the other two are omitted.
+
+#### CMP-gated init wiring (when a CMP was detected)
+
+Include this addendum whenever Step 2.5 Signal 5 detected a CMP (`CMP_PROVIDER ≠ none`) — it runs whether or not MaxSDK is present, and it **overrides the init call in the shape block above**. The generated `MeticaAdService` **does not auto-init**: `__START_HOOK__` was emitted empty for every shape, so init is intentionally deferred until consent resolves. State that plainly, then show the host how to call the consent-gated `Initialize(bool hasUserConsent, bool doNotSell)` overload from the CMP completion callback, **marshalled to the Unity main thread** (the CMP callback — UMP especially — frequently fires off-main; `MeticaSdk.Initialize` must run on the main thread, per the validator's `sdk_calls_on_main_thread` rule).
+
+```
+CMP detected (<CMP_PROVIDER>): init is consent-gated.
+
+MeticaAdService will NOT initialize on its own — __START_HOOK__ is empty, so there is
+no auto-init hook. Instead of the Initialize() call shown in the wiring block above,
+call Initialize(hasUserConsent, doNotSell) from your CMP completion callback, with the
+resolved consent values, on the Unity main thread. The privacy setters
+(SetHasUserConsent / SetDoNotSell) then reflect the real consent, before init.
+
+Capture the main-thread context once, where you construct/attach MeticaAdService
+(that code runs on the Unity main thread):
+    // monobehaviour: in Awake();  static_class/plain_class: in your bootstrap
+    SynchronizationContext _mainCtx = SynchronizationContext.Current;
+    // _ads is your MeticaAdService reference:
+    //   monobehaviour  → GetComponent<MeticaAdService>() (or the attached instance)
+    //   static_class   → call MeticaAdService.Initialize(...) directly (no instance)
+    //   plain_class    → your stored `new MeticaAdService()` instance
+```
+
+Then, per CMP, from the consent callback (swap `_ads.Initialize` for `MeticaAdService.Initialize` under static_class):
+
+```
+google-ump:
+    ConsentForm.LoadAndShowConsentFormIfRequired(formError => {
+        bool consent = ConsentInformation.CanRequestAds();  // your resolved consent
+        _mainCtx.Post(_ => _ads.Initialize(consent, doNotSell: false), null);
+    });
+
+max-cmp (AppLovin):
+    MaxCmpService.ShowCmpForIfNeeded(error => {
+        bool consent = /* your resolved consent from the CMP result */;
+        _mainCtx.Post(_ => _ads.Initialize(consent, doNotSell: false), null);
+    });
+
+custom:
+    OnYourConsentResolved(consent, doNotSell) {   // your existing consent gate
+        _mainCtx.Post(_ => _ads.Initialize(consent, doNotSell), null);
+    }
+```
+
+Notes:
+- Do NOT call Initialize from the auto-init hook or before the CMP returns — that ships a
+  wrong/empty consent state to MeticaSDK and the mediated ad networks (a compliance violation).
+- If your CMP callback already runs on the Unity main thread, the `_mainCtx.Post` wrapper is
+  harmless; keep it unless you've confirmed the callback thread.
+- Map your CMP's consent result to `hasUserConsent` (GDPR) and `doNotSell` (CCPA) per your
+  compliance posture; the overload just forwards them to the privacy setters.
+```
+
+Replace `<CMP_PROVIDER>` with the detected value and keep only the matching per-CMP snippet. When `CMP_PROVIDER == none`, omit this addendum entirely (the shape block's auto-init / explicit `Initialize()` stands).
 
 #### Credential hygiene (now validator-driven)
 
