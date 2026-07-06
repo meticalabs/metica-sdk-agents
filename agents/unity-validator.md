@@ -118,21 +118,40 @@ ones grep gets wrong):
 | `<format>_load_after_init` (every used format) | Is **every** path that reaches `Load<Format>` (and `Create<Format>` for banner/MRec) only reachable **after init has *completed***? In the canonical pattern the initial load is kicked off from `Init<Format>`, which is called **inside** `OnInitialized`; reloads (auto-reload-on-hidden, exponential-backoff retry) are downstream of that first post-init load. Accepted proof: the load originates from the `OnInitialized` path — directly, or via a reload/retry chain rooted in a post-init load. (ADVISORY if a load can run before init completes — e.g. issued from `Awake()` / `Start()` ahead of the init callback — or no such gate can be proven.) |
 | `placement_ids_match` | Is the placement/ad-unit id passed to `Load*` provably the **same value** as the one passed to `Show*`, across all call paths? |
 
-**Smart Floors must stay analytics-only** (project-wide, not per-format — these encode a real
-production regression: group-aware ad logic dropped the trial group's impressions/DAU in two
-shipped games):
+**Ad-unit-id routing is unreliable** (project-wide, not per-format):
 
-- `smartfloors_analytics_only` — **behavioral, FAIL-capable.** The Smart Floors **user group**
-  / **`IsForcedHoldout`** flag is for analytics only; **trial and holdout must drive identical
-  ad behaviour**. FAIL when a read of `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or
-  a stored copy) flows into an ad-control decision — selecting or branching an ad-unit id,
-  gating a `Load*`/`Show*`, or switching ad-lifecycle state. **Also FAIL** a guard that branches
-  on whether a returned `ad.adUnitId` `==` / `!=` a configured id: the SDK owns Smart-Floors
-  ad-unit routing, so app code must pass the configured id through unchanged and never
-  second-guess what comes back. PASS when the group is only logged or synced to an analytics
-  user-property (e.g. a Firebase `SetUserProperty`), or never read. Cite the source read →
-  the branch it gates (≥2 evidence). If the flow can't be resolved (indirection), emit
-  `ADVISORY` with `unresolved` — never a blind FAIL.
+- `adunit_routing_unreliable` — **behavioral, FAIL-capable.** Under SmartFloors the **trial**
+  group is served Metica-dedicated ad units regardless of the id the app requested, and even
+  trial users are sometimes served the **holdout ad unit as a connection-issue fallback** — so a
+  returned `MeticaAd.adUnitId` is **not** a reliable routing signal (see
+  `references/smartfloors-user-groups.md`). **FAIL** when a guard branches on whether a returned
+  `ad.adUnitId` `==` / `!=` a configured id (or a stored copy of it) and that branch **gates an
+  ad-control decision** — selecting/branching an ad-unit id, gating a `Load*`/`Show*`, or
+  switching ad-lifecycle state. App code must pass the configured id through unchanged and
+  attribute by **group**, never second-guess what comes back. **PASS** when the returned id is
+  only logged/attributed (no ad-control branch) or never compared. **Group-aware branching**
+  (`response.SmartFloors.UserGroup` / `IsForcedHoldout` driving load/show strategy) is the
+  sanctioned pattern and is **not** flagged by this rule. Cite the comparison → the ad-control
+  branch it gates (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be traced —
+  never a blind FAIL.
+
+**Group branching must serve every group** (project-wide, not per-format):
+
+- `smartfloors_group_branch_complete` — **behavioral, FAIL-capable.** Group-aware ad control is
+  sanctioned (`references/smartfloors-user-groups.md`), but **both** groups must still reach ads:
+  holdout runs the game's multi-unit waterfall, trial issues its single Metica-optimized call.
+  When a branch on `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or a stored copy)
+  **gates ad loading/showing**, **FAIL** if any group is left with **no reachable
+  `Load*`/`Show*` path** — e.g. `if (IsForcedHoldout) StartAdLoading();` with no `else` starves
+  the trial group of ads (the no-ads-for-trial regression the old analytics-only rule guarded).
+  **PASS** when every group's branch reaches an ad-load path (holdout waterfall + trial single
+  call). This rule checks **branch completeness**, not which strategy each group uses; it does not
+  fire when the group is only logged/attributed (no ad-control branch). Cite the group read →
+  each branch's terminal — the ad-load reached, or the group left with none (≥2 evidence).
+  `ADVISORY` with `unresolved` when the branches can't be traced — never a blind FAIL.
+
+**Ad-state flag hygiene** (project-wide, not per-format):
+
 - `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a self-managed ad state flag
   (`isLoading` / `isShow` / "in progress") that gates `Load<Format>` or `Show<Format>` but isn't
   **cleared on every terminal event** (load fail, show fail, hidden). It is redundant (the SDK
