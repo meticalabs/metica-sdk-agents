@@ -135,6 +135,21 @@ ones grep gets wrong):
   branch it gates (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be traced —
   never a blind FAIL.
 
+**Group branching must serve every group** (project-wide, not per-format):
+
+- `smartfloors_group_branch_complete` — **behavioral, FAIL-capable.** Group-aware ad control is
+  sanctioned (`references/smartfloors-user-groups.md`), but **both** groups must still reach ads:
+  holdout runs the game's multi-unit waterfall, trial issues its single Metica-optimized call.
+  When a branch on `response.SmartFloors.UserGroup` / `.IsForcedHoldout` (or a stored copy)
+  **gates ad loading/showing**, **FAIL** if any group is left with **no reachable
+  `Load*`/`Show*` path** — e.g. `if (IsForcedHoldout) StartAdLoading();` with no `else` starves
+  the trial group of ads (the no-ads-for-trial regression the old analytics-only rule guarded).
+  **PASS** when every group's branch reaches an ad-load path (holdout waterfall + trial single
+  call). This rule checks **branch completeness**, not which strategy each group uses; it does not
+  fire when the group is only logged/attributed (no ad-control branch). Cite the group read →
+  each branch's terminal — the ad-load reached, or the group left with none (≥2 evidence).
+  `ADVISORY` with `unresolved` when the branches can't be traced — never a blind FAIL.
+
 **Ad-state flag hygiene** (project-wide, not per-format):
 
 - `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a self-managed ad state flag
