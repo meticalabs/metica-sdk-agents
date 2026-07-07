@@ -169,7 +169,9 @@ ones grep gets wrong):
   every path** by `CreateBanner` / `CreateMrec` for the **same** `adUnitId`. A setter called
   before `Create` silently no-ops (the wrapper warns `UnityBannersMetica: setExtraParameterForKey
   called but BANNER not found for adUnitId: …` and drops it) — this is the bug that silently
-  disabled `adaptive_banner=true` in a shipped game, costing fill/eCPM. Cite the setter site →
+  disabled `adaptive_banner=true` in a shipped game, costing fill/eCPM. The same applies to a
+  custom banner refresh rate — `SetBannerExtraParameter(adUnitId, "ad_refresh_seconds", …)` set
+  before `CreateBanner` is dropped and the banner refreshes on the default cadence. Cite the setter site →
   the (missing or later) `Create` (≥2 evidence). `ADVISORY` with `unresolved` if the ordering
   can't be traced (e.g. setter and create in different methods with no resolvable call order).
   On **SDK ≥ 2.4.2 (Android)** banner/MRec **creation and display are separate steps**: the client
