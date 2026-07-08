@@ -33,6 +33,13 @@ Because of both, **ad-unit-based routing/analysis is unreliable**. App code must
 configured id through unchanged, never second-guess what comes back, and attribute by the group
 tag it read at init.
 
+The same applies **inside callbacks**: a guard like `if (ad.adUnitId != _loadedAdUnitId) return;`
+at the top of a revenue/reward/lifecycle handler silently drops revenue and events whenever
+Metica serves a different unit than requested. The idiom is usually copied from a MAX
+integration, where a per-ad-unit guard is idiomatic — under Metica it is a bug. When per-format
+routing is needed, key on the ad format / callback source, never on id equality with the
+requested unit.
+
 ## Worked example — the shape of a group-aware integration
 
 A correct group-aware integration wires the pattern like this:

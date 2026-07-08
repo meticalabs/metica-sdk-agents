@@ -18,8 +18,28 @@ handler — and the forwarder inside it — runs synchronously on the native cal
 revenue event survives the app closing mid-ad. The trade-off: the handler is then **off** the Unity
 main thread, so the forwarder calls below must be **thread-safe** — the native provider SDK calls
 (Firebase `LogEvent`, `Adjust.TrackAdRevenue`, `AppMetrica.ReportAdRevenue`, `AppsFlyer.sendEvent`)
-are fine, but do **not** touch Unity APIs (`PlayerPrefs`, `GameObject`, `Time.*`) in the handler.
-Banner/MRec revenue is unaffected (still delivered on the main thread).
+are fine, but do **not** touch Unity APIs (`PlayerPrefs`, `GameObject`, `Time.*`) anywhere in the
+handler's call chain — even a helper that reads `PlayerPrefs` internally throws, and the SDK
+catches handler exceptions, so everything after the throwing line (often the forwarder itself)
+silently never runs. Banner/MRec revenue is unaffected (still delivered on the main thread).
+
+**Do not wrap the forwarder in a main-thread marshal.** Under NativeThread, posting the reporting
+call to the main thread (`UnityMainThreadDispatcher`, `SynchronizationContext.Post`, a custom
+`RunOnMainThread`, a coroutine/action queue) defeats the whole point: the Unity player loop is
+paused while a fullscreen ad shows, so the posted work sits unpumped until the ad closes — and is
+lost entirely if the user kills the app mid-ad. Report **first, directly on the native thread**;
+marshal only genuinely Unity-dependent work to the main thread, **after** the reporting calls:
+
+```csharp
+MeticaAdsCallbacks.Interstitial.OnAdRevenuePaid += ad =>
+{
+    // Thread-safe: report immediately, on the native thread.
+    Adjust.TrackAdRevenue(BuildAdjustRevenue(ad));
+
+    // Unity-dependent work goes to the main thread — after reporting.
+    RunOnMainThread(() => UpdateRevenueUI(ad.revenue));
+};
+```
 
 **Prefer relocation over generation.** When the game already calls these providers (it almost
 always does), move its **existing** calls into the handler — they are version-correct for the
