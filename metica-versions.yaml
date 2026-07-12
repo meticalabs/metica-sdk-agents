@@ -78,7 +78,7 @@ versions:
 #     the process dies first). Keeps impression revenue + any 3PA forwarder from being lost on
 #     app-closed-mid-ad. Trade-off: the handler then runs off the Unity main thread, so it must be
 #     thread-safe (no Unity-main-thread-only APIs).
-#   MAX with InvokeEventsOnUnityMainThread = true → CallbackDelivery.UnityMainThread: the relocated
+#   MAX with MaxSdk.InvokeEventsOnUnityMainThread = true (set in game code) → CallbackDelivery.UnityMainThread: the relocated
 #     forwarder was written for the main thread, so NativeThread would break it; matching keeps it correct
 #     (the app-close-mid-ad loss window remains — the one the game already lived with under MAX).
 # Banner/MRec revenue is unaffected (still main thread). The validator's `threepa_forwarder_in_revenue_paid`

@@ -12,12 +12,13 @@ hook, or any other lifecycle event. Forwarding on dismissal loses every click-th
 placement carries the click-through-no-return / app-closed-mid-ad caveat surfaced in the Step 7
 report.
 
-On **SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery` (once, before `MeticaSdk.Initialize`) to
-**match the MaxSDK callback-threading model the forwarder was written for** — the forwarder that
-lands in `OnAdRevenuePaid` began life as a MAX callback and inherits MAX's thread contract:
+On **SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery` (once, before `MeticaSdk.Initialize`).
+**When MaxSDK is present**, set it to **match the MaxSDK callback-threading model the forwarder was
+written for** — the forwarder that lands in `OnAdRevenuePaid` began life as a MAX callback and
+inherits MAX's thread contract:
 
-- **MAX at its default** (`InvokeEventsOnUnityMainThread` unset/false — MAX invokes callbacks on the
-  **native** thread) → `CallbackDelivery.NativeThread`. The fullscreen (interstitial/rewarded)
+- **MAX at its default** (no `MaxSdk.InvokeEventsOnUnityMainThread = true` — MAX invokes callbacks on
+  the **native** thread) → `CallbackDelivery.NativeThread`. The fullscreen (interstitial/rewarded)
   `OnAdRevenuePaid` handler — and the forwarder inside it — then runs synchronously on the native
   callback thread and the revenue event survives the app closing mid-ad. The trade-off: the handler
   is then **off** the Unity main thread, so the forwarder calls below must be **thread-safe** — the
@@ -27,11 +28,15 @@ lands in `OnAdRevenuePaid` began life as a MAX callback and inherits MAX's threa
   throws, and the SDK catches handler exceptions, so everything after the throwing line (often the
   forwarder itself) silently never runs. This matches a relocated MAX forwarder, which was already
   native-thread code.
-- **MAX with `InvokeEventsOnUnityMainThread = true`** (`MaxSdkBase.InvokeEventsOnUnityMainThread`, or
-  the AppLovin Integration Manager toggle) → `CallbackDelivery.UnityMainThread`. The relocated
+- **MAX with `MaxSdk.InvokeEventsOnUnityMainThread = true`** (the game sets this property in code) →
+  `CallbackDelivery.UnityMainThread`. The relocated
   forwarder was written to run on the Unity main thread and may touch Unity APIs, so `NativeThread`
   would break it; `UnityMainThread` matches MAX and keeps it correct. The app-close-mid-ad loss
   window remains — but it is the one the game already lived with under MAX.
+
+**When MaxSDK is absent** (a Metica-only integration), there is no MAX contract to match:
+`CallbackDelivery.NativeThread` is the loss-resistant default and the forwarder below is generated
+native-safe.
 
 Banner/MRec revenue is unaffected (always delivered on the main thread).
 
