@@ -218,13 +218,25 @@ ones grep gets wrong):
   `OnAdRevenuePaid` — correct placement. On **SDK < 2.4.2** dispatch still rides Unity's main
   thread (`SynchronizationContext.Post`), which is paused during a fullscreen ad, so
   click-through-no-return / app-closed-mid-ad scenarios can still lose events — note it. On
-  **SDK ≥ 2.4.2** the project should additionally set
-  `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread` — once, **before**
-  `MeticaSdk.Initialize` — so the fullscreen (interstitial/rewarded) revenue handler — and the 3PA
-  forwarder inside it — runs synchronously on the native thread and survives the app closing
-  mid-ad; **ADVISORY** when a 2.4.2+ project leaves it at the default `UnityMainThread`, and
-  **ADVISORY** when it is set but only **after** `MeticaSdk.Initialize` (so it isn't in effect when
-  the SDK wires up revenue delivery). In NativeThread mode the handler runs **off** the Unity main
+  **SDK ≥ 2.4.2** the project should set `MeticaAds.RevenueCallbackDelivery` — once, **before**
+  `MeticaSdk.Initialize` — to **match the MaxSDK callback-threading model** the relocated forwarder
+  was written for (a 3PA forwarder that lands in `OnAdRevenuePaid` began life as a MAX callback and
+  inherits MAX's thread contract):
+  - **MAX at its default** — `InvokeEventsOnUnityMainThread` unset/false, so MAX invokes callbacks
+    on the **native** thread → `CallbackDelivery.NativeThread`. The fullscreen (interstitial/rewarded)
+    revenue handler — and the forwarder inside it — then runs synchronously on the native thread and
+    survives the app closing mid-ad; the relocated forwarder was already native-thread code, so it
+    stays thread-safe. **ADVISORY** when such a project leaves it at the default `UnityMainThread`.
+  - **MAX with `InvokeEventsOnUnityMainThread = true`** (`MaxSdkBase.InvokeEventsOnUnityMainThread`,
+    also settable via the AppLovin Integration Manager toggle) → `CallbackDelivery.UnityMainThread`.
+    The relocated forwarder was written to run on the Unity main thread and may touch Unity APIs, so
+    `NativeThread` would break it; `UnityMainThread` matches MAX and keeps it correct. The app-close-
+    mid-ad loss window remains — but it is the one the game already lived with under MAX — so
+    **ADVISORY**, noting the residual loss. **ADVISORY** (recommend switching to `UnityMainThread` to
+    match MAX) when such a project is instead on `NativeThread` — a threading mismatch against the
+    handler's contract (the Unity-API FAIL below applies whenever the handler actually touches one).
+  Regardless of mode, **ADVISORY** when the setting is applied only **after** `MeticaSdk.Initialize`
+  (so it isn't in effect when the SDK wires up revenue delivery). In NativeThread mode the handler runs **off** the Unity main
   thread, so it must be **thread-safe** — **FAIL** a handler that, under NativeThread, calls a
   Unity-main-thread-only API (`PlayerPrefs`, `GameObject`/component access, `Time.*`, `Resources.*`,
   instantiation). Audit the handler's **full call chain**, not just its top-level code — an

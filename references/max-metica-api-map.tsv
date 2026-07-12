@@ -193,7 +193,7 @@ MaxSdkCallbacks.AppOpen.	-	drop	App Open Ads not supported in MeticaSdk 2.4.0.
 # ============================================================================
 # Misc — not in MeticaSdk
 # ============================================================================
-MaxSdkBase.InvokeEventsOnUnityMainThread	-	drop	No MeticaSdk equivalent for main-thread event control.
+MaxSdkBase.InvokeEventsOnUnityMainThread	-	drop	No MeticaSdk equivalent for all-events main-thread control; but on SDK >= 2.4.2 its value selects MeticaAds.RevenueCallbackDelivery for revenue callbacks (true -> UnityMainThread, default/false -> NativeThread). Remove the MAX call and set the matching delivery mode.
 MaxCmpService.HasSupportedCmp	-	drop	No MeticaSdk equivalent for CMP capability check.
 
 # ============================================================================

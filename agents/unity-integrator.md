@@ -126,7 +126,7 @@ Found MeticaSDK <detected>; target is <target>. This is an upgrade, not a fresh 
 
 After a git snapshot I'll swap the package (clean-import the target) and migrate your
 integration code in place — the plan lists the exact deltas (e.g. SmartFloors.IsSuccess →
-IsForcedHoldout). New-optional capabilities (CMP flow, NativeThread revenue delivery) are
+IsForcedHoldout). New-optional capabilities (CMP flow, revenue-callback delivery mode) are
 surfaced as suggestions, not auto-applied.
 ```
 
@@ -501,7 +501,7 @@ bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version
 **(b) Migrate the existing integration code** per `references/metica-sdk-migration.md` (the `<DETECTED_SDK> → <TARGET_SDK>` section is the source of truth for which symbols changed). For each symbol the existing code uses:
 
 - **obsoleted** (e.g. `MeticaSmartFloors.IsSuccess` → `IsForcedHoldout` / `UserGroup`) and **signature-changed** rows → rewrite the call site with an anchor re-check (re-read the file immediately before editing; refuse if it changed on disk — same discipline as the Step 6.5 autofix loop). Edit existing files only; create no net-new files.
-- **new-optional** rows (CMP flow, `InitializeAnalytics`, `MeticaAds.RevenueCallbackDelivery`, `LevelPlay`) → **do not auto-apply**. Collect them as suggestions for the Step 7 report — especially `RevenueCallbackDelivery = CallbackDelivery.NativeThread` (set before `MeticaSdk.Initialize`), the recommended ≥2.4.2 way to keep a fullscreen 3PA revenue forwarder from being lost on app-close-mid-ad (the handler then runs off the main thread, so it must be thread-safe — see `references/metica-sdk-migration.md`).
+- **new-optional** rows (CMP flow, `InitializeAnalytics`, `MeticaAds.RevenueCallbackDelivery`, `LevelPlay`) → **do not auto-apply**. Collect them as suggestions for the Step 7 report — especially `RevenueCallbackDelivery` (set before `MeticaSdk.Initialize`), the recommended ≥2.4.2 way to keep a fullscreen 3PA revenue forwarder from being lost on app-close-mid-ad. **Match the mode to the game's MaxSDK callback-threading model**, which the relocated forwarder inherited: MAX at its default (native-thread callbacks) → `CallbackDelivery.NativeThread` (the handler then runs off the main thread, so it must be thread-safe); MAX with `InvokeEventsOnUnityMainThread = true` (`MaxSdkBase.InvokeEventsOnUnityMainThread`, or the AppLovin Integration Manager toggle) → `CallbackDelivery.UnityMainThread`, which keeps a main-thread-written forwarder correct at the cost of the app-close-mid-ad loss window the game already lived with under MAX. See `references/metica-sdk-migration.md`.
 - **unchanged** / **behavior-changed** rows → no edit; note any behavior change (e.g. idempotent re-init) in the report if it affects the existing code.
 
 Log every migration edit to `.metica-integration.log` next to the adapter folder. If there is **no** existing integration code (upgrade with package-only swap), skip (b) and continue to fresh codegen below. When MaxSDK is present, the Max-callsite rewrite below still applies on top of the migration.
@@ -715,7 +715,7 @@ After rendering the templates, apply a small, fixed set of **deterministic, name
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
 
-When any 3PA forwarder is generated, also emit one ADVISORY line in the Step 7 report: *"3PA forwarders (Adjust / Firebase / AppMetrica / AppsFlyer) generated inside `OnAdRevenuePaid` dispatch through Unity's main thread (`MeticaSdk` binding uses `SynchronizationContext.Post`). Production click-through-no-return scenarios may lose events until Metica provides a Java-side forward path."*
+When any 3PA forwarder is generated, also emit one ADVISORY line in the Step 7 report: *"3PA forwarders (Adjust / Firebase / AppMetrica / AppsFlyer) generated inside `OnAdRevenuePaid`. On SDK ≥ 2.4.2, set `MeticaAds.RevenueCallbackDelivery` before `MeticaSdk.Initialize` to match the game's MaxSDK threading — MAX default (native callbacks) → `CallbackDelivery.NativeThread` (keeps fullscreen revenue from being lost on app-close-mid-ad; the handler then runs off the Unity main thread, so keep it thread-safe and don't wrap the forwarder in a main-thread dispatcher); MAX `InvokeEventsOnUnityMainThread = true` → `CallbackDelivery.UnityMainThread` (keeps a main-thread-written forwarder correct, but click-through-no-return / app-close-mid-ad scenarios can still lose events, as under MAX)."*
 
 ```bash
 mkdir -p "$PROJECT/$ADAPTER_FOLDER"
@@ -888,10 +888,12 @@ Upgraded MeticaSDK <DETECTED_SDK> → <TARGET_SDK>.
   - MET-11632 (IL2CPP + managed stripping → forced HOLDOUT) is fixed at ≥2.4.2; the
     compat-checker managed_stripping WARN no longer applies.
   New capabilities available (not applied — adopt if you want them):
-  - MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread (set before Initialize) —
-    keeps fullscreen revenue + any 3PA forwarder from being lost on app-close-mid-ad; the handler
-    then runs off the Unity main thread, so it must be thread-safe. Report directly in the
-    handler — wrapping the forwarder in a main-thread dispatcher re-introduces the loss.
+  - MeticaAds.RevenueCallbackDelivery (set before Initialize) — keeps fullscreen revenue + any 3PA
+    forwarder from being lost on app-close-mid-ad. Match the mode to the game's MaxSDK threading:
+    MAX default (native callbacks) → CallbackDelivery.NativeThread (handler runs off the Unity main
+    thread, so it must be thread-safe; report directly in the handler — wrapping the forwarder in a
+    main-thread dispatcher re-introduces the loss); MAX InvokeEventsOnUnityMainThread = true →
+    CallbackDelivery.UnityMainThread (keeps a main-thread-written forwarder correct).
   - CMP terms flow (4-arg Initialize + MeticaCmpFlowSettings); InitializeAnalytics (analytics-only).
 ```
 
