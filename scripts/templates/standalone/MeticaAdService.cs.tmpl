@@ -21,8 +21,8 @@
 // __REVENUE_DELIVERY__ (before MeticaSdk.Initialize) carries the revenue-callback delivery
 // setting when a 3PA forwarder is wired and the SDK is >= 2.4.2: NativeThread for no-Max /
 // Max-default, UnityMainThread when the game sets MaxSdk.InvokeEventsOnUnityMainThread = true.
-// It is EMPTY otherwise (no forwarder, or SDK < 2.4.2 where the API does not exist). See
-// integrator.md Step 5 for the substitution rule.
+// Otherwise the whole line is removed (no forwarder, or SDK < 2.4.2 where the API does not
+// exist). See integrator.md Step 5 for the substitution rule.
 using UnityEngine;
 using Metica;
 using Metica.Ads;
