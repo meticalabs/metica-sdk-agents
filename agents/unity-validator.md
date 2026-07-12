@@ -220,8 +220,9 @@ ones grep gets wrong):
   click-through-no-return / app-closed-mid-ad scenarios can still lose events — note it. On
   **SDK ≥ 2.4.2** the project should set `MeticaAds.RevenueCallbackDelivery` — once, **before**
   `MeticaSdk.Initialize`. **When MaxSDK threading is observable** — `MaxSdk.InvokeEventsOnUnityMainThread`
-  appears in the project, or MAX call sites are still present (a hand-rolled / not-yet-integrated
-  project) — **match the mode to the MaxSDK callback-threading model** the relocated forwarder was
+  (or the equivalent `MaxSdkBase.InvokeEventsOnUnityMainThread` spelling — same static member; treat
+  both the same everywhere below) appears in the project, or MAX call sites are still present (a
+  hand-rolled / not-yet-integrated project) — **match the mode to the MaxSDK callback-threading model** the relocated forwarder was
   written for (a 3PA forwarder that lands in `OnAdRevenuePaid` began life as a MAX callback and
   inherits MAX's thread contract):
   - **MAX at its default** — no `MaxSdk.InvokeEventsOnUnityMainThread = true`, so MAX invokes callbacks

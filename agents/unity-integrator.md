@@ -127,7 +127,8 @@ Found MeticaSDK <detected>; target is <target>. This is an upgrade, not a fresh 
 After a git snapshot I'll swap the package (clean-import the target) and migrate your
 integration code in place — the plan lists the exact deltas (e.g. SmartFloors.IsSuccess →
 IsForcedHoldout). New-optional capabilities (CMP flow, revenue-callback delivery mode) are
-surfaced as suggestions, not auto-applied.
+surfaced as suggestions for your existing code, not auto-applied (fresh codegen, when there's no
+existing integration to migrate, does apply the matched revenue-callback delivery mode).
 ```
 
 (All other compat constraints are evaluated against the **target** version, so a non-`metica_sdk` FAIL still BLOCKs — upgrade mode only proceeds past the `metica_sdk`-below-target row.)
