@@ -897,13 +897,14 @@ Upgraded MeticaSDK <DETECTED_SDK> → <TARGET_SDK>.
   Resolved by this upgrade:
   - MET-11632 (IL2CPP + managed stripping → forced HOLDOUT) is fixed at ≥2.4.2; the
     compat-checker managed_stripping WARN no longer applies.
-  New capabilities available (not applied — adopt if you want them):
+  New capabilities available (adopt if you want them — applied automatically only when this upgrade
+  regenerates MeticaAdService via fresh codegen; a suggestion when migrating existing code in place):
   - MeticaAds.RevenueCallbackDelivery (set before Initialize) — keeps fullscreen revenue + any 3PA
     forwarder from being lost on app-close-mid-ad. Match the mode to the game's MaxSDK threading:
     MAX default (native callbacks) → CallbackDelivery.NativeThread (handler runs off the Unity main
     thread, so it must be thread-safe; report directly in the handler — wrapping the forwarder in a
-    main-thread dispatcher re-introduces the loss); MAX MaxSdk.InvokeEventsOnUnityMainThread = true →
-    CallbackDelivery.UnityMainThread (keeps a main-thread-written forwarder correct).
+    main-thread dispatcher re-introduces the loss); MAX with MaxSdk.InvokeEventsOnUnityMainThread = true
+    → CallbackDelivery.UnityMainThread (keeps a main-thread-written forwarder correct).
   - CMP terms flow (4-arg Initialize + MeticaCmpFlowSettings); InitializeAnalytics (analytics-only).
 ```
 
