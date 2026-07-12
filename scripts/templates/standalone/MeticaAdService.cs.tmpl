@@ -17,6 +17,12 @@
 // is EMPTY for every shape — init is deferred until consent resolves, and the host calls
 // the Initialize(bool hasUserConsent, bool doNotSell) overload from its CMP completion
 // callback (marshalled to the Unity main thread). See the Step 7 report for the wiring.
+//
+// __REVENUE_DELIVERY__ (before MeticaSdk.Initialize) carries the revenue-callback delivery
+// setting when a 3PA forwarder is wired and the SDK is >= 2.4.2: NativeThread for no-Max /
+// Max-default, UnityMainThread when the game sets MaxSdk.InvokeEventsOnUnityMainThread = true.
+// It is EMPTY otherwise (no forwarder, or SDK < 2.4.2 where the API does not exist). See
+// integrator.md Step 5 for the substitution rule.
 using UnityEngine;
 using Metica;
 using Metica.Ads;
@@ -50,6 +56,7 @@ public __CLASS_HEADER__
         MeticaSdk.Ads.SetHasUserConsent(hasUserConsent);
         MeticaSdk.Ads.SetDoNotSell(doNotSell);
         MeticaSdk.SetLogEnabled(true);
+        __REVENUE_DELIVERY__
         var config = new MeticaInitConfig("__METICA_API_KEY__", "__METICA_APP_ID__", __USER_ID__);
         MeticaSdk.Initialize(config, __MEDIATION__, OnInitialized);
     }
