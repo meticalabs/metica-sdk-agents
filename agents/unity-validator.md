@@ -27,9 +27,11 @@ message is exactly one fenced ` ```json ` block** (`"schema": "validator"`) and 
 ## Inputs
 
 - `PROJECT` — absolute path to a Unity project root (contains `Assets/`, `ProjectSettings/`).
+- `MAX_MODE` *(optional context)* — `replace` (assumed when unstated) | `switchable`. The integrator passes `switchable` when its run generated `MeticaAdService.UseMetica`-gated call sites. Context only: the max-API rules' switchable exemption is verified by reading the gate in the code, never taken from this hint.
 
 Validation is uniform — the checks apply identically whether or not
-MaxSDK is present.
+MaxSDK is present; `MAX_MODE` only informs the max-API rules' switchable
+exemption below.
 
 ## Setup — establish `PLUGIN_DIR`
 
@@ -289,6 +291,14 @@ ones grep gets wrong):
 - `max_api_unsupported` — for `kind=drop` rows (no Metica equivalent): same FAIL/ADVISORY
   model; `detail` advises removing the call or isolating it behind a Max-only path.
 - `MaxSdkUtils.*` (`kind=exempt`) is never flagged — stateless helpers, mix-safe.
+- **Switchable-coexistence exemption** (both rules): a Max call site reachable **only**
+  under the false branch of a `MeticaAdService.UseMetica` switch (or the cosmetically
+  renamed orchestrator's equivalent) is the sanctioned opt-in/opt-out coexistence path —
+  do **not** flag it; cite the gate (`if (MeticaAdService.UseMetica) … else <the Max call>`)
+  as evidence on the rule's PASS row. Verify the gate by Reading the branch — never exempt
+  on the `MAX_MODE` hint alone. An **ungated** Max call in a file that also references
+  `MeticaSdk.` keeps the FAIL model above (a rewrite that lost its gate, or a stray
+  ungated `MaxSdk.InitializeSdk()`, still surfaces).
 
 Emit a single PASS row for each rule when there are no matches anywhere.
 

@@ -21,6 +21,10 @@
 // __REVENUE_DELIVERY__ (before MeticaSdk.Initialize) carries the revenue-callback delivery
 // setting on SDK >= 2.4.2, matched to the game's MAX callback threading (removed on SDK < 2.4.2
 // where the API does not exist). references/3pa-forwarders.md defines the mode-selection rule.
+//
+// __MAX_SWITCH__ carries the `public static bool UseMetica = true;` switch under
+// MAX_MODE=switchable — false routes every rewritten call site back to its original Max
+// path (the gate lives at the call sites, not in this class). Substituted empty otherwise.
 using UnityEngine;
 using Metica;
 using Metica.Ads;
@@ -31,6 +35,7 @@ namespace Metica.AbTest
 public __CLASS_HEADER__
 {
     private __STATIC__bool _initialized = false;
+    __MAX_SWITCH__
 
     __START_HOOK__
 
