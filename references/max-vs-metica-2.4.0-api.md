@@ -295,7 +295,7 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | **Available mediated networks** | `MaxSdk.GetAvailableMediatedNetworks()` → `List<MediatedNetworkInfo>` | No equivalent to list configured networks and their init status |
 | **Ad value lookup** | `MaxSdk.GetAdValue(string, string)` | No arbitrary ad value retrieval |
 | **Safe area insets** | `MaxSdk.GetSafeAreaInsets()` → `SafeAreaInsets` | Not available |
-| **Main thread event control** | `MaxSdkBase.InvokeEventsOnUnityMainThread` | Not available |
+| **Main thread event control** | `MaxSdk.InvokeEventsOnUnityMainThread` | No all-events equivalent. No SDK-level coupling; on SDK ≥ 2.4.2 the **metica-sdk-agents integrator** reads its value to pick `MeticaAds.RevenueCallbackDelivery` for revenue callbacks per `references/3pa-forwarders.md` — a codegen/migration mapping, not MeticaSdk behavior |
 
 ### Settings
 

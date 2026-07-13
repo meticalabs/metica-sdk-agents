@@ -69,14 +69,12 @@ versions:
     release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.2.7"
     deprecated: false
 
-# Feature MET-11567 (added in 2.4.2): `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.NativeThread`
-# delivers fullscreen (interstitial/rewarded) OnAdRevenuePaid synchronously on the native callback
-# thread instead of posting it to the Unity main thread — which is paused while a fullscreen ad is
-# shown, so a main-thread-posted callback is lost if the process dies first. Recommended for 2.4.2+:
-# it keeps impression revenue (and any 3PA forwarder inside the handler) from being lost on
-# app-closed-mid-ad. Trade-off: the handler then runs off the Unity main thread, so it must be
-# thread-safe (no Unity-main-thread-only APIs). Banner/MRec revenue is unaffected (still main thread).
-# validator's `threepa_forwarder_in_revenue_paid` rule checks for this on 2.4.2+ integrations.
+# Feature MET-11567 (added in 2.4.2): `MeticaAds.RevenueCallbackDelivery` (set before Initialize)
+# selects how fullscreen (interstitial/rewarded) OnAdRevenuePaid is delivered — set to MATCH the
+# game's MaxSDK callback-threading model so revenue (and any 3PA forwarder) survives app-close-mid-ad.
+# The mode-selection rule and its thread-safety trade-offs are the source of truth in
+# references/3pa-forwarders.md (not restated here). The validator's `threepa_forwarder_in_revenue_paid`
+# rule checks the delivery mode matches MAX threading on 2.4.2+ integrations.
 # Known issue MET-11632 (fixed in 2.4.2): on SDK < 2.4.2, IL2CPP + managed stripping
 # (Low/Medium/High) strips an anonymous type in the Android init bridge → JsonConvert emits
 # "{}" → every user forced to HOLDOUT. compat-checker's `managed_stripping` check WARNs on this.
