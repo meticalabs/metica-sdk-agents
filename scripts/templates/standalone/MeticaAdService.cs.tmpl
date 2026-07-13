@@ -19,9 +19,8 @@
 // callback (marshalled to the Unity main thread). See the Step 7 report for the wiring.
 //
 // __REVENUE_DELIVERY__ (before MeticaSdk.Initialize) carries the revenue-callback delivery
-// setting on SDK >= 2.4.2, matched to the game's MAX threading: UnityMainThread when the game
-// sets MaxSdk.InvokeEventsOnUnityMainThread = true, else NativeThread. Removed on SDK < 2.4.2
-// (the API does not exist). See integrator.md Step 5 for the substitution rule.
+// setting on SDK >= 2.4.2, matched to the game's MAX callback threading (removed on SDK < 2.4.2
+// where the API does not exist). references/3pa-forwarders.md defines the mode-selection rule.
 using UnityEngine;
 using Metica;
 using Metica.Ads;

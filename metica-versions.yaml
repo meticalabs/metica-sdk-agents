@@ -70,18 +70,10 @@ versions:
     deprecated: false
 
 # Feature MET-11567 (added in 2.4.2): `MeticaAds.RevenueCallbackDelivery` (set before Initialize)
-# selects how fullscreen (interstitial/rewarded) OnAdRevenuePaid is delivered. Set it to MATCH the
-# game's MaxSDK callback-threading model, which a relocated 3PA forwarder inherited:
-#   MAX default (MaxSdk.InvokeEventsOnUnityMainThread unset/false — native-thread callbacks) → CallbackDelivery.NativeThread:
-#     delivers synchronously on the native callback thread instead of posting to the Unity main thread
-#     (which is paused while a fullscreen ad is shown, so a main-thread-posted callback would be lost if
-#     the process dies first). Keeps impression revenue + any 3PA forwarder from being lost on
-#     app-closed-mid-ad. Trade-off: the handler then runs off the Unity main thread, so it must be
-#     thread-safe (no Unity-main-thread-only APIs).
-#   MAX with MaxSdk.InvokeEventsOnUnityMainThread = true (set in game code) → CallbackDelivery.UnityMainThread: the relocated
-#     forwarder was written for the main thread, so NativeThread would break it; matching keeps it correct
-#     (the app-close-mid-ad loss window remains — the one the game already lived with under MAX).
-# Banner/MRec revenue is unaffected (still main thread). The validator's `threepa_forwarder_in_revenue_paid`
+# selects how fullscreen (interstitial/rewarded) OnAdRevenuePaid is delivered — set to MATCH the
+# game's MaxSDK callback-threading model so revenue (and any 3PA forwarder) survives app-close-mid-ad.
+# The mode-selection rule and its thread-safety trade-offs are the source of truth in
+# references/3pa-forwarders.md (not restated here). The validator's `threepa_forwarder_in_revenue_paid`
 # rule checks the delivery mode matches MAX threading on 2.4.2+ integrations.
 # Known issue MET-11632 (fixed in 2.4.2): on SDK < 2.4.2, IL2CPP + managed stripping
 # (Low/Medium/High) strips an anonymous type in the Android init bridge → JsonConvert emits

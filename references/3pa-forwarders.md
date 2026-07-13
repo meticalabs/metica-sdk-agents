@@ -7,38 +7,36 @@ Step 5) and referenced by the validator's `threepa_forwarder_in_revenue_paid` ru
 **Single rule that governs all of them:** the forwarder call lives **inside the per-format
 `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid` handler** — never `OnAdHidden`, a dismissal
 hook, or any other lifecycle event. Forwarding on dismissal loses every click-through user
-(they never dismiss). On **SDK < 2.4.2** all forwarders dispatch through Unity's main thread
-(`SynchronizationContext.Post`) — which is paused while a fullscreen ad is shown — so even correct
-placement carries the click-through-no-return / app-closed-mid-ad caveat surfaced in the Step 7
-report.
+(they never dismiss).
 
-On **SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery` (once, before `MeticaSdk.Initialize`).
-**When MaxSDK is present**, set it to **match the MaxSDK callback-threading model the forwarder was
-written for** — the forwarder that lands in `OnAdRevenuePaid` began life as a MAX callback and
-inherits MAX's thread contract:
+## Revenue-callback delivery mode — source of truth
 
-- **MAX at its default** (no `MaxSdk.InvokeEventsOnUnityMainThread = true` — MAX invokes callbacks on
-  the **native** thread) → `CallbackDelivery.NativeThread`. The fullscreen (interstitial/rewarded)
-  `OnAdRevenuePaid` handler — and the forwarder inside it — then runs synchronously on the native
-  callback thread and the revenue event survives the app closing mid-ad. The trade-off: the handler
-  is then **off** the Unity main thread, so the forwarder calls below must be **thread-safe** — the
-  native provider SDK calls (Firebase `LogEvent`, `Adjust.TrackAdRevenue`, `AppMetrica.ReportAdRevenue`,
-  `AppsFlyer.sendEvent`) are fine, but do **not** touch Unity APIs (`PlayerPrefs`, `GameObject`,
-  `Time.*`) anywhere in the handler's call chain — even a helper that reads `PlayerPrefs` internally
-  throws, and the SDK catches handler exceptions, so everything after the throwing line (often the
-  forwarder itself) silently never runs. This matches a relocated MAX forwarder, which was already
-  native-thread code.
-- **MAX with `MaxSdk.InvokeEventsOnUnityMainThread = true`** (the game sets this property in code) →
-  `CallbackDelivery.UnityMainThread`. The relocated
-  forwarder was written to run on the Unity main thread and may touch Unity APIs, so `NativeThread`
-  would break it; `UnityMainThread` matches MAX and keeps it correct. The app-close-mid-ad loss
-  window remains — but it is the one the game already lived with under MAX.
+**This section is the single source of truth for choosing `MeticaAds.RevenueCallbackDelivery`; the
+validator, integrator, template, and the other references point here rather than restating it.** On
+**SDK ≥ 2.4.2** set `MeticaAds.RevenueCallbackDelivery` once, **before** `MeticaSdk.Initialize`,
+matched to the game's MAX callback-threading model — the forwarder that lands in `OnAdRevenuePaid`
+began life as a MAX callback and inherits MAX's thread contract. The integrator applies it on every
+≥2.4.2 integration, **whether or not** a 3PA forwarder is wired, so the handler's thread contract
+always matches MAX:
 
-**When MaxSDK is absent** (a Metica-only integration), there is no MAX contract to match:
-`CallbackDelivery.NativeThread` is the loss-resistant default and the forwarder below is generated
-native-safe.
+- **`MaxSdk.InvokeEventsOnUnityMainThread` set to `true`** — either that or the equivalent
+  `MaxSdkBase.InvokeEventsOnUnityMainThread` spelling (same static member); read the **assigned
+  value**, whitespace-tolerant, and treat a non-literal that can't be resolved to `false` as `true`
+  → **`CallbackDelivery.UnityMainThread`**. Matches a main-thread-written forwarder; the
+  app-close-mid-ad loss window remains, but it is the one the game already lived with under MAX.
+- **Otherwise** — MAX at its native-thread default, or no MaxSDK → **`CallbackDelivery.NativeThread`**.
+  The fullscreen (interstitial/rewarded) `OnAdRevenuePaid` handler runs synchronously on the native
+  callback thread and survives the app closing mid-ad. Trade-off: the handler runs **off** the Unity
+  main thread, so it must be **thread-safe** — the native provider SDK calls (Firebase `LogEvent`,
+  `Adjust.TrackAdRevenue`, `AppMetrica.ReportAdRevenue`, `AppsFlyer.sendEvent`) are fine, but do
+  **not** touch Unity APIs (`PlayerPrefs`, `GameObject`, `Time.*`) anywhere in the handler's call
+  chain — even a helper that reads `PlayerPrefs` internally throws, and the SDK catches handler
+  exceptions, so everything after the throwing line (often the forwarder itself) silently never runs.
 
-Banner/MRec revenue is unaffected (always delivered on the main thread).
+On **SDK < 2.4.2** the `CallbackDelivery` API doesn't exist and all forwarders dispatch through
+Unity's main thread (`SynchronizationContext.Post`, paused while a fullscreen ad shows), so even
+correct placement carries the click-through-no-return / app-closed-mid-ad caveat — recommend
+upgrading. Banner/MRec revenue is unaffected (always delivered on the main thread).
 
 **Do not wrap the forwarder in a main-thread marshal.** Under NativeThread, posting the reporting
 call to the main thread (`UnityMainThreadDispatcher`, `SynchronizationContext.Post`, a custom
