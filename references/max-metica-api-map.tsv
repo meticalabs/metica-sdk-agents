@@ -47,7 +47,8 @@ MaxSdk.SetHasUserConsent(	MeticaSdk.Ads.SetHasUserConsent	rename
 MaxSdk.SetDoNotSell(	MeticaSdk.Ads.SetDoNotSell	rename
 MaxSdk.HasUserConsent(	MeticaSdk.Ads.Max.HasUserConsent	rename
 MaxSdk.IsUserConsentSet(	MeticaSdk.Ads.Max.IsUserConsentSet	rename
-MaxSdk.CmpService.ShowCmpForExistingUser(	MeticaSdk.Ads.Max.ShowCmpForExistingUser()	signature-change	MeticaSdk version drops the Action<MaxCmpError> callback parameter.
+MaxSdk.CmpService.ShowCmpForExistingUser(	MeticaSdk.Ads.Max.ShowCmpForExistingUser	signature-change	Callback changes Action<MaxCmpError> → Action<string?> (null on success, AppLovin error message on failure) — callback overload since SDK 2.4.1; on 2.4.0 only the parameterless fire-and-forget overload exists.
+MaxCmpService.HasSupportedCmp	MeticaSdk.Ads.Max.HasSupportedCmp()	signature-change	Since SDK 2.4.1. Property → method (add parens); call only after MeticaSdk.Initialize completes — pre-init it returns false with a warning. On 2.4.0 there is no equivalent.
 
 # ============================================================================
 # Banners
@@ -65,7 +66,7 @@ MaxSdk.SetBannerExtraParameter(	MeticaSdk.Ads.SetBannerExtraParameter	rename
 MaxSdk.SetBannerLocalExtraParameter(	MeticaSdk.Ads.SetBannerLocalExtraParameter	rename	APS bid signals (amazon_ad_response / amazon_ad_error) land here.
 MaxSdk.SetBannerCustomData(	MeticaSdk.Ads.SetBannerCustomData	rename
 MaxSdk.SetBannerWidth(	MeticaSdk.Ads.SetBannerWidth	rename
-MaxSdk.UpdateBannerPosition(	-	drop	No MeticaSdk equivalent. Must destroy and recreate the banner to reposition.
+MaxSdk.UpdateBannerPosition(	MeticaSdk.Ads.UpdateBannerPosition	signature-change	Since SDK 2.4.1. AdViewPosition → MeticaAdViewPosition; the (string, float x, float y) overload becomes UpdateBannerPositionCoordinates(string, double, double). On 2.4.0 there is no equivalent — destroy and recreate.
 MaxSdk.GetBannerLayout(	-	drop	No MeticaSdk equivalent for querying banner Rect.
 
 # ============================================================================
@@ -82,7 +83,7 @@ MaxSdk.StopMRecAutoRefresh(	MeticaSdk.Ads.StopMrecAutoRefresh	rename	Casing chan
 MaxSdk.SetMRecExtraParameter(	MeticaSdk.Ads.SetMrecExtraParameter	rename	Casing change.
 MaxSdk.SetMRecLocalExtraParameter(	MeticaSdk.Ads.SetMrecLocalExtraParameter	rename	Casing change.
 MaxSdk.SetMRecCustomData(	MeticaSdk.Ads.SetMrecCustomData	rename	Casing change.
-MaxSdk.UpdateMRecPosition(	-	drop	No MeticaSdk equivalent.
+MaxSdk.UpdateMRecPosition(	MeticaSdk.Ads.UpdateMrecPosition	signature-change	Since SDK 2.4.1. Casing change (MRec → Mrec); AdViewPosition → MeticaAdViewPosition; the (string, float x, float y) overload becomes UpdateMrecPositionCoordinates(string, double, double). On 2.4.0 there is no equivalent.
 MaxSdk.GetMRecLayout(	-	drop	No MeticaSdk equivalent.
 
 # ============================================================================
@@ -194,7 +195,6 @@ MaxSdkCallbacks.AppOpen.	-	drop	App Open Ads not supported in MeticaSdk 2.4.0.
 # Misc — not in MeticaSdk
 # ============================================================================
 MaxSdk.InvokeEventsOnUnityMainThread	-	drop	Property the game sets in code (MaxSdk.InvokeEventsOnUnityMainThread = true) — also matches the equivalent MaxSdkBase.InvokeEventsOnUnityMainThread spelling (same static member). No MeticaSdk equivalent for all-events main-thread control; but on SDK >= 2.4.2 its value selects MeticaAds.RevenueCallbackDelivery for revenue callbacks per references/3pa-forwarders.md (delivery-mode source of truth). Read it to set the matching delivery mode, then remove the MAX assignment.
-MaxCmpService.HasSupportedCmp	-	drop	No MeticaSdk equivalent for CMP capability check.
 
 # ============================================================================
 # Exempt — never flagged

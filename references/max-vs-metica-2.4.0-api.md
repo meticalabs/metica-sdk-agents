@@ -3,7 +3,7 @@
 | SDK | Version |
 |-----|---------|
 | **AppLovin MAX Unity Plugin** | 8.6.0 |
-| **MeticaSdk Unity Plugin** | 2.4.0 |
+| **MeticaSdk Unity Plugin** | 2.4.0 (2.4.x additions annotated inline with "since 2.4.1"/"≥ 2.4.2") |
 
 > Generated on: 2026-05-05
 > MaxSdk source: `AppLovin SDK builds/AppLovin-MAX-Unity-Plugin-8.6.0-Android-13.6.0-iOS-13.6.0/`
@@ -19,12 +19,12 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 
 | Category | Parity |
 |----------|--------|
-| Banners | ✅ Full — all core methods covered including auto-refresh, placement, extra params, width, background color, custom data |
-| MRECs | ✅ Full — all core methods covered including auto-refresh, placement, extra params, custom data |
+| Banners | ✅ Full — all core methods covered including auto-refresh, placement, extra params, width, background color, custom data, position update (since 2.4.1) |
+| MRECs | ✅ Full — all core methods covered including auto-refresh, placement, extra params, custom data, position update (since 2.4.1) |
 | Interstitials | ✅ Full — load/show/ready/extra params covered, plus new `MeticaAdConfig` bid floor support |
 | Rewarded Ads | ✅ Full — load/show/ready/extra params covered, plus new `MeticaAdConfig` bid floor support |
 | Callbacks / Events | ⚠️ Partial — core callbacks (load/fail/show/hide/click/revenue) covered; missing expanded/collapsed, display failed, expired ad reloaded, ad review creative ID events |
-| Privacy / Consent | ⚠️ Partial — `SetHasUserConsent`/`SetDoNotSell` covered; read-back (`HasUserConsent`, `IsDoNotSell`, consent status checks) available via `MeticaSdk.Ads.Max`; missing `GetSdkConfiguration()` |
+| Privacy / Consent | ⚠️ Partial — `SetHasUserConsent`/`SetDoNotSell` covered; consent read-back (`HasUserConsent`, `IsUserConsentSet`) and CMP flow (`ShowCmpForExistingUser`, `HasSupportedCmp` since 2.4.1) available via `MeticaSdk.Ads.Max`; missing do-not-sell read-back (`IsDoNotSell`, `IsDoNotSellSet`) and `GetSdkConfiguration()` |
 | App Open Ads | ❌ Not supported — no MeticaSdk equivalent for the entire ad format |
 | Debugging / Testing | ⚠️ Partial — `ShowMediationDebugger` available via `MeticaSdk.Ads.Max`; missing `ShowCreativeDebugger`, `SetCreativeDebuggerEnabled`, `SetTestDeviceAdvertisingIdentifiers`, `DisableStubAds` |
 | Segmentation | ❌ Not supported — `MaxSegmentCollection` / `SetSegmentCollection` have no equivalent |
@@ -72,7 +72,8 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetDoNotSell(bool)` | `MeticaSdk.Ads.SetDoNotSell(bool)` | Direct equivalent |
 | `MaxSdk.HasUserConsent()` | `MeticaSdk.Ads.Max.HasUserConsent()` | Available via Max sub-accessor |
 | `MaxSdk.IsUserConsentSet()` | `MeticaSdk.Ads.Max.IsUserConsentSet()` | Available via Max sub-accessor |
-| `MaxSdk.CmpService.ShowCmpForExistingUser(Action<MaxCmpError>)` | `MeticaSdk.Ads.Max.ShowCmpForExistingUser()` | MeticaSdk version takes no callback parameter |
+| `MaxSdk.CmpService.ShowCmpForExistingUser(Action<MaxCmpError>)` | `MeticaSdk.Ads.Max.ShowCmpForExistingUser(Action<string?>)` | Callback overload since MeticaSdk 2.4.1 — invoked once with `null` on success or the AppLovin error message on failure; a parameterless fire-and-forget overload also exists |
+| `MaxCmpService.HasSupportedCmp` | `MeticaSdk.Ads.Max.HasSupportedCmp()` | Since MeticaSdk 2.4.1. Property → method; must be called after `MeticaSdk.Initialize` completes — pre-init it returns `false` with a warning |
 
 ### Banners
 
@@ -91,6 +92,8 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetBannerLocalExtraParameter(string, string, object)` | `MeticaSdk.Ads.SetBannerLocalExtraParameter(string, string, object?)` | Direct equivalent; MeticaSdk also adds `SetBannerLocalExtraParameterJson` |
 | `MaxSdk.SetBannerCustomData(string, string)` | `MeticaSdk.Ads.SetBannerCustomData(string, string?)` | Direct equivalent |
 | `MaxSdk.SetBannerWidth(string, float)` | `MeticaSdk.Ads.SetBannerWidth(string, float)` | Direct equivalent |
+| `MaxSdk.UpdateBannerPosition(string, AdViewPosition)` | `MeticaSdk.Ads.UpdateBannerPosition(string, MeticaAdViewPosition)` | Since MeticaSdk 2.4.1; position enum renamed |
+| `MaxSdk.UpdateBannerPosition(string, float, float)` | `MeticaSdk.Ads.UpdateBannerPositionCoordinates(string, double, double)` | Since MeticaSdk 2.4.1; x/y overload renamed, `float` → `double` |
 
 ### MRECs
 
@@ -107,6 +110,8 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetMRecExtraParameter(string, string, string)` | `MeticaSdk.Ads.SetMrecExtraParameter(string, string, string?)` | Casing difference |
 | `MaxSdk.SetMRecLocalExtraParameter(string, string, object)` | `MeticaSdk.Ads.SetMrecLocalExtraParameter(string, string, object?)` | Casing difference; MeticaSdk also adds `SetMrecLocalExtraParameterJson` |
 | `MaxSdk.SetMRecCustomData(string, string)` | `MeticaSdk.Ads.SetMrecCustomData(string, string?)` | Casing difference |
+| `MaxSdk.UpdateMRecPosition(string, AdViewPosition)` | `MeticaSdk.Ads.UpdateMrecPosition(string, MeticaAdViewPosition)` | Since MeticaSdk 2.4.1; casing difference, position enum renamed |
+| `MaxSdk.UpdateMRecPosition(string, float, float)` | `MeticaSdk.Ads.UpdateMrecPositionCoordinates(string, double, double)` | Since MeticaSdk 2.4.1; x/y overload renamed, `float` → `double` |
 
 ### Interstitials
 
@@ -226,6 +231,7 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MeticaSdk.Ads.Max.GetConsentFlowUserGeography()` | Get user geography for consent |
 | `MeticaSdk.Ads.Max.CountryCode()` | Get country code from MAX |
 | `MeticaSdk.Ads.Max.ConsentDialogState()` | Get consent dialog state |
+| `MeticaSdk.Ads.Max.GetTcfVendorConsentStatus(int)` / `GetAdditionalConsentStatus(int)` / `GetPurposeConsentStatus(int)` / `GetSpecialFeatureOptInStatus(int)` | TCF consent status read-back (`bool?`) — since 2.4.1; MaxSdk has no Unity API for these |
 | `MeticaSdk.Offers.*` | Offer management (not in MaxSdk) |
 | `MeticaSdk.SmartConfig.*` | Remote config (not in MaxSdk) |
 | `MeticaSdk.Events.*` | Event tracking/analytics (not in MaxSdk) |
@@ -246,7 +252,6 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 
 | Missing Feature | MaxSdk API | Details |
 |-----------------|-----------|---------|
-| **Update banner position** | `UpdateBannerPosition(string, AdViewPosition)`, `UpdateBannerPosition(string, float, float)` | Cannot reposition after creation; must destroy and recreate |
 | **Get banner layout** | `GetBannerLayout(string)` → `Rect` | No way to query the banner's on-screen position/size |
 | **Adaptive banner flag** | `AdViewConfiguration.IsAdaptive` | `MeticaAdViewConfiguration` has no `IsAdaptive` property |
 
@@ -254,7 +259,6 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 
 | Missing Feature | MaxSdk API | Details |
 |-----------------|-----------|---------|
-| **Update MREC position** | `UpdateMRecPosition(string, AdViewPosition)`, `UpdateMRecPosition(string, float, float)` | Cannot reposition after creation; must destroy and recreate |
 | **Get MREC layout** | `GetMRecLayout(string)` → `Rect` | No way to query the MREC's on-screen position/size |
 
 ### Interstitial Features
@@ -275,8 +279,6 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 |-----------------|-----------|---------|
 | **Do Not Sell read-back** | `MaxSdk.IsDoNotSell()`, `MaxSdk.IsDoNotSellSet()` | No MeticaSdk equivalent to check do-not-sell state |
 | **SDK configuration object** | `MaxSdk.GetSdkConfiguration()` → `SdkConfiguration` | No single configuration object; individual properties available via `MeticaSdk.Ads.Max` |
-| **CMP completion callback** | `MaxCmpService.ShowCmpForExistingUser(Action<MaxCmpError>)` | `MeticaSdk.Ads.Max.ShowCmpForExistingUser()` takes no callback |
-| **Has Supported CMP** | `MaxCmpService.HasSupportedCmp` | No MeticaSdk equivalent |
 
 ### Debugging / Testing
 

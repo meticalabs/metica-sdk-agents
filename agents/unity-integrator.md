@@ -991,7 +991,7 @@ Pull the migrated symbols and the available-capabilities list from the `<DETECTE
 
 #### Dropped MaxSDK calls (no Metica equivalent)
 
-When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.UpdateBannerPosition`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
+When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.GetBannerLayout`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
 
 ```
 Dropped (no MeticaSdk equivalent in <target_sdk>):
