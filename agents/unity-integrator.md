@@ -1,6 +1,6 @@
 ---
 name: unity-integrator
-description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → replace Max in the game's direct call sites with MeticaSDK, leave any dedicated Max-wrapper file untouched, no A/B router) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
+description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → rewrite the game's direct Max call sites to MeticaSDK, leaving any dedicated Max-wrapper file untouched — replacing them outright by default, or, when the user picks MAX_MODE=switchable at plan time, keeping each original Max call behind a generated MeticaAdService.UseMetica switch) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any cohort/rollout router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
 model: opus
 ---
@@ -20,6 +20,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used when MaxSDK is present, where MeticaSDK mediates through AppLovin MAX). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
+- `MAX_MODE` — `replace` | `switchable`. Only used when MaxSDK is present. `replace` (default) rewrites the game's direct Max call sites to `MeticaAdService` outright; `switchable` applies the same rewrites but keeps each original call as the `else` branch behind `MeticaAdService.UseMetica` (default `true`), so developers flip between the Metica and Max paths without a revert. If omitted, confirmed in the Step 3 plan preview; when passed, the Step 3 question is skipped and the inference list shows `(overridden by env)`.
 - `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` — valid (MeticaSDK then auto-generates a stable per-device userId, which the validator PASSes), but the integrator still recommends wiring the host app's real identity source for correct cross-session attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
 - `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
@@ -80,6 +81,22 @@ fi
 
 Always echo the detected path to the user before proceeding so they can spot a wrong-project mismatch in workspaces with multiple Unity projects. If the user passed `PROJECT=...` explicitly, honor that value verbatim and skip the walk-up.
 
+## Setup — resume check
+
+If `$PROJECT/.metica-integration.log` exists **without** a `RUN COMPLETE` line, a prior run stopped partway (interrupted session, token limit). Print the recorded `DECISION` lines and the last `STEP <n> COMPLETE`, then offer:
+
+```
+A partial Metica integration run was found (.metica-integration.log, stopped after Step <n>).
+  [r] resume — reuse the recorded decisions and continue from where it stopped
+  [f] fresh  — start over (roll back first: git reset --hard pre-metica-integration, then delete the log)
+Choose [r/f]:
+```
+
+- **resume** — skip Steps 1–3's user-facing gates, reusing the recorded `DECISION` values (compat passed before the tag was created, so no compat re-run; no plan re-approval, no re-asking the Step 3 questions). A fresh session no longer holds the Step 2 working inventory, so **re-run the mechanical Step 2 scan** (callsite inventory + per-format behaviour, classified against the recorded `WRAPPER`) silently before re-entering Step 5. In Step 4, skip the dirty-tree check (the dirt *is* the partial run) and instead verify the `pre-metica-integration` tag exists — abort if it doesn't. Re-enter Step 5 using the `WROTE`/`EDITED` lines as the done-list: verify each recorded file exists on disk (redo any that don't), then complete the remaining work. Steps 6–7 run as normal — the end-of-run validator is the backstop against a stale log.
+- **fresh** — the user rolls back and deletes the log themselves (never auto-execute the reset), then the run proceeds normally.
+
+A log **with** `RUN COMPLETE` is ignored here — Step 2's already-integrated detection handles re-runs. When no log exists, continue normally.
+
 ## Sub-agent output parsing
 
 Each sub-agent emits a final fenced ```` ```json ```` block per `agents/contracts.md`. Extract via the contract regex (Python-style PCRE):
@@ -104,6 +121,16 @@ Use `printf '%s' "$SUBAGENT_OUTPUT" | extract_json` then parse the JSON to read 
 ## Invoking sub-agents (name resolution)
 
 The `@agent-unity-*` names below are the **bare** agent names used by the one-line installer (symlinks into `.claude/agents/`). A marketplace install namespaces them under the plugin instead — `metica-sdk-agents:unity-compat-checker`, `metica-sdk-agents:unity-validator`. If a sub-agent invocation fails with `Agent type '...' not found`, retry once with the `metica-sdk-agents:` prefix before treating it as a real error. Do **not** hardcode either form — resolve per install.
+
+## Output economy
+
+Integrations are long; keep every turn lean so the run fits the user's session budget:
+
+- After a `Write`/`Edit`, confirm with the path + one line — never restate the file's contents (the Step 3 plan already showed them).
+- One line of progress per action ("Rewrote 3 call sites in LevelEndController.cs"), not a narration.
+- Never echo a sub-agent's JSON verbatim: summarize the PASS count in one line and detail only the FAIL/WARN/ADVISORY rows (with their evidence).
+- Don't re-print the template or unchanged code.
+- The Step 7 report sticks to its structured sections — no recap of the run.
 
 ## Workflow (in order — do not skip steps)
 
@@ -222,7 +249,7 @@ S_MANIFEST=false; { [ -f "$PROJECT/Assets/Plugins/Android/AndroidManifest.xml" ]
 
 Then judge: if `$MAX_CANDIDATES` is empty, `HAS_MAX=false`. Otherwise **Read each candidate's surrounding lines and set `HAS_MAX=true` only when at least one is live code** — not a `//` comment, a `/* block */`, or a `"string literal"` (e.g. a diagnostics log). If every candidate is a comment/string, treat Max as absent. The corroborating signals (`S_FOLDER`/`S_MANIFEST`) are supporting context for the report, not a substitute for confirming a live call.
 
-`HAS_MAX` affects only two things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` when Max is absent, `MeticaMediationInfo(MAX, …)` when present) and whether the call-site rewrites in Step 6 run. Generated artifacts are otherwise identical. The user may override the detection by saying "treat Max as present/absent" — honor it.
+`HAS_MAX` affects three things downstream: the mediation argument to `MeticaSdk.Initialize` (`null` when Max is absent, `MeticaMediationInfo(MAX, …)` when present), whether the call-site rewrites in Step 6 run, and whether the Step 3 plan preview asks for `MAX_MODE` (replace vs switchable — the user's choice layered on top of this discovered fact). Generated artifacts are otherwise identical. The user may override the detection by saying "treat Max as present/absent" — honor it.
 
 #### Existing MeticaSDK integration? (refines fresh vs upgrade vs finish)
 
@@ -407,6 +434,7 @@ Confirm these inferences:
   - adapter folder = Assets/Scripts/Ads/Metica/        (next to the wrapper)
   - userId         = <ASK NOW — see below>
   - shape          = static_class                      (suggested from host's ad code; see Step 2.5 Signal 4 — ASK NOW)
+  - max mode       = <ASK NOW when MaxSDK is present — see below>
   - CMP            = google-ump → consent-gated init (no auto-init hook; you wire Initialize(bool,bool) from the CMP callback — Step 7)
 ```
 
@@ -450,16 +478,47 @@ Choose [a/b/c] or press Enter to accept the suggestion:
 
 Bake the chosen value into `SHAPE` (one of `monobehaviour`, `static_class`, `plain_class`) before codegen — Step 5 reads it to substitute the template tokens (`__CLASS_HEADER__`, `__START_HOOK__`, `__FOCUS_HOOK__`, `__STATIC__`).
 
+**Collect `MAX_MODE` here (only when `HAS_MAX=true`).** The default is full replacement; some teams want the original Max path kept callable so developers opt in or out of Metica without a git revert:
+
+```
+MaxSDK is present. Pick how the Max call sites are migrated:
+
+  [a] replace (default) — rewrite each call site to MeticaAdService; the
+                          original Max calls are removed (the
+                          pre-metica-integration git tag restores them).
+  [b] switchable        — same rewrites, but each call site keeps its original
+                          Max call as the else-branch behind
+                          MeticaAdService.UseMetica (default true), so
+                          developers flip between the Metica and Max paths
+                          without a revert.
+
+Choose [a/b] or press Enter for replace:
+```
+
+Bake the chosen value into `MAX_MODE` before codegen. Skip the question when the `MAX_MODE` env var was passed (show `(overridden by env)` in the inference list) or when this run is an upgrade-migrate of an existing integration (the existing code's structure wins). When switchable is chosen, name the mode in the Tier 1 summary line.
+
 **Tier 3 — the full plan.** Below the summary + inferences, include the complete detail:
 
 - Files to create (full relative paths + brief purpose).
 - Files to edit (full relative paths + which lines / what kind of edit). The list **must not include any file under `Assets/MaxSdk/`** and **must not include any dedicated Max-wrapper file** (e.g. `AdManager.cs`) — see the wrapper-scoping rule in Step 5.
 - Dependencies to install (SDK version + form factor).
 - Hard constraints reflected in this plan: privacy calls (`SetHasUserConsent`, `SetDoNotSell`) precede `MeticaSdk.Initialize` and live in the same file (`MeticaAdService.cs`); init is called exactly once.
-- Code blocks for each new file. The agent generates files directly via Write; the reference shape is the single `scripts/templates/standalone/MeticaAdService.cs.tmpl` (Read at codegen time).
+- Code blocks for each **net-new** file. The agent generates files directly via Write; the reference shape is the single `scripts/templates/standalone/MeticaAdService.cs.tmpl` (Read at codegen time). Call-site rewrites are shown as one representative before/after per category per file plus a count — not the full inventory (expand on request).
 - Rollback path: `git reset --hard pre-metica-integration` (tag created at step 4).
 
 The user may correct any inference here ("no, the wrapper is `AdsService.cs`") → re-discover and re-present. After approval, call `ExitPlanMode` (if used) and continue.
+
+### Checkpoint log (`$PROJECT/.metica-integration.log`)
+
+The run's audit + resume record lives at the **project root**: `$PROJECT/.metica-integration.log` (dot-prefixed, so Unity's importer ignores it; findable before the adapter folder exists). Start writing it immediately **after** the Step 4 tag — never before, so it can't trip the dirty-tree check on a first run — one plain line per entry:
+
+- `DECISION <key>=<value>` — every plan-time decision, batched right after the tag (all are final at Step 3 approval): `HAS_MAX`, `MAX_MODE`, `INTEGRATION_MODE`, `DETECTED_SDK`, `TARGET_SDK`, `WRAPPER`, `SHAPE`, `NAMESPACE`, `ADAPTER_FOLDER`, `USER_ID_EXPR`, `FORMATS`, `CMP_PROVIDER`, `REMOTE_CONFIG_PROVIDER`. **Never log credentials** (`API_KEY` / `APP_ID` / `MAX_SDK_KEY`) — on a resume they are re-read from env vars or already baked into the generated code; the validator's placeholder check backstops a resumed run that still carries placeholders.
+- `WROTE <project-relative path>` / `EDITED <project-relative path>` — one line per file the run creates / edits (codegen, rewrites, migrations, autofixes). This list also keys the Step 6.5 `compiles_cleanly` autofix (owned files only).
+- `STEP <n> COMPLETE` — at the end of each of Steps 4–6.
+- The Step 6.5 autofix action lines (applied or refused).
+- `RUN COMPLETE` — the last line, written at the end of Step 7.
+
+The "Setup — resume check" section reads this log to continue an interrupted run.
 
 ### Step 4 — Git snapshot
 
@@ -472,7 +531,7 @@ if ! git -C "$PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "$PROJECT is not a git repository. Run 'git init' (or work from inside your repo) so there is a rollback safety net, then re-run." >&2
     exit 1
 fi
-if [ -n "$(git -C "$PROJECT" status --porcelain)" ]; then
+if [ -n "$(git -C "$PROJECT" status --porcelain | grep -v '\.metica-integration\.log$')" ]; then
     echo "Working tree is dirty. Commit or stash your changes first, then re-run." >&2
     exit 1
 fi
@@ -481,7 +540,11 @@ echo "Tagged pre-metica-integration — roll back any time with: git reset --har
 ```
 
 The repo check fires first so a non-git project gets a clear instruction instead of a
-confusing failure from `git tag` later.
+confusing failure from `git tag` later. The dirty check ignores `.metica-integration.log`
+(a completed prior run leaves it untracked; it must not abort future runs). Immediately
+after tagging, initialize the checkpoint log: write the `DECISION` lines (see "Checkpoint
+log" above), then `STEP 4 COMPLETE`. On a resume, this step skips the dirty check and
+instead verifies the tag exists (see "Setup — resume check").
 
 ### Step 5 — Apply code changes
 
@@ -505,13 +568,13 @@ bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version
 - **new-optional** rows (CMP flow, `InitializeAnalytics`, `MeticaAds.RevenueCallbackDelivery`, `LevelPlay`) → **do not auto-apply** to existing hand-rolled code. Collect them as suggestions for the Step 7 report — especially `RevenueCallbackDelivery` (set before `MeticaSdk.Initialize`), the recommended ≥2.4.2 way to keep a fullscreen 3PA revenue forwarder from being lost on app-close-mid-ad; pick the mode per the delivery-mode rule in `references/3pa-forwarders.md`. (Fresh codegen applies it automatically via the `__REVENUE_DELIVERY__` token.)
 - **unchanged** / **behavior-changed** rows → no edit; note any behavior change (e.g. idempotent re-init) in the report if it affects the existing code.
 
-Log every migration edit to `.metica-integration.log` next to the adapter folder. If there is **no** existing integration code (upgrade with package-only swap), skip (b) and continue to fresh codegen below. When MaxSDK is present, the Max-callsite rewrite below still applies on top of the migration.
+Log every migration edit (`EDITED <file>`) to the checkpoint log (`$PROJECT/.metica-integration.log`). If there is **no** existing integration code (upgrade with package-only swap), skip (b) and continue to fresh codegen below. When MaxSDK is present, the Max-callsite rewrite below still applies on top of the migration.
 
 #### When MaxSDK is present: scan + propose Max-callsite refactor
 
 The Max-callsite inventory and the wrapper classification were already produced in **Step 2 (Discovery)** and approved in the Step 3 plan — reuse them rather than re-deriving. The scan below is the **edit-time pass**: it drives the rewrites and re-verifies each file after editing.
 
-Propose rewrites that target the game's single `MeticaAdService` instance directly (no router). Introduce a `MeticaAdService _ads;` field constructed and `Initialize()`-d once in the game's bootstrap; replace each call site with `_ads.ShowInterstitial(…)` etc. **Removing Max from the game's call sites is the whole point when MaxSDK is present**, and the "do not touch Max usage logic" rule is preserved by the wrapper-scoping rule below.
+Propose rewrites that target the game's single `MeticaAdService` instance directly (no router). Introduce a `MeticaAdService _ads;` field constructed and `Initialize()`-d once in the game's bootstrap; replace each call site with `_ads.ShowInterstitial(…)` etc. **Under `MAX_MODE=replace` (the default), removing Max from the game's call sites is the whole point when MaxSDK is present**; under `MAX_MODE=switchable` the same rewrites keep each original call as the `else` branch behind `MeticaAdService.UseMetica` (see the switchable subsection below). Either way the "do not touch Max usage logic" rule is preserved by the wrapper-scoping rule below.
 
 **Wrapper-scoping rule (critical):** rewrite **only scene/game-logic files** that call `MaxSdk.*` **directly** — MonoBehaviours bound to scene objects, UI/gameplay scripts. **Do not replace a dedicated Max-wrapper file's structure** (e.g. `AdManager.cs` / `MaxHelper.cs`) whose primary purpose is wrapping MaxSDK behind a non-Max API. If a wrapper exists and the game routes through it, **leave the wrapper file untouched** (no structural rewrites, no per-call rewrites, no internal-API-knob substitutions — the file is read-only to the integrator) and rewrite the game's call sites to **bypass** it and call `MeticaAdService` directly. The orphaned wrapper is the game owner's to delete later — the integrator does not own that decision. To classify a hit's containing file, use the **flow-based wrapper test from Step 2 (Discovery)**: if the ad-unit id reaching `MaxSdk.*` comes from a field/const inside the class (its public API is non-Max), it's a **wrapper** — leave its structure untouched; if the public method's own parameter is forwarded straight into Max's ad-unit slot, or the file calls `MaxSdk.*` to drive its own UI/gameplay, it's **scene/game logic** — rewrite. This is a prose judgment the user approved in the Step 3 plan — when unsure, surface the file and ask.
 
@@ -582,7 +645,7 @@ When in doubt, surface the drop-vs-preserve choice for that call site in the Ste
 
 Reuse the game's existing Max ad unit IDs for MeticaAdService's per-format `adUnitId`s (per the migration guide; they pass through unchanged).
 
-**Callback subscriptions:** delete the game's `MaxSdkCallbacks.<Format>.*` subscriptions entirely — MeticaAdService's per-format regions own them. Keep any game-side reaction (e.g. granting a reward) by either:
+**Callback subscriptions:** delete the game's `MaxSdkCallbacks.<Format>.*` subscriptions entirely — MeticaAdService's per-format regions own them. (Under `MAX_MODE=switchable` they **move** into the `!UseMetica` branch instead — see the switchable subsection below.) Keep any game-side reaction (e.g. granting a reward) by either:
 
 1. Subscribing the relevant `MeticaAdsCallbacks.<Format>.*` event in the game (analytics pings, UI state updates).
 2. Adding game-side code to the relevant region's named handler in `MeticaAdService` (e.g. `OnRewardedReward`, `OnInterstitialRevenuePaid` — named methods you can extend, not lambdas).
@@ -598,6 +661,28 @@ Event-name table (Max → Metica):
 | `OnAdClickedEvent` | `MeticaAdsCallbacks.<Format>.OnAdClicked` | `MeticaAd` |
 | `OnAdRevenuePaidEvent` | `MeticaAdsCallbacks.<Format>.OnAdRevenuePaid` | `MeticaAd` |
 | `OnAdReceivedRewardEvent` (Rewarded only) | `MeticaAdsCallbacks.Rewarded.OnAdRewarded` | `MeticaAd` (no separate Reward struct) |
+
+#### When `MAX_MODE=switchable`: gate every rewrite, delete nothing
+
+The user chose (Step 3) to keep the original Max path callable. Apply the **same rewrites as replace mode**, but gate each one on `MeticaAdService.UseMetica` — the `__MAX_SWITCH__` token emits `public static bool UseMetica = true;` on the generated class (static under every shape, so call sites always reference `MeticaAdService.UseMetica`). The switch is read at bootstrap/call time: tell the user to set it **once at startup** — flipping it mid-session leaves the previously-initialized chain live (a restart applies the new value cleanly).
+
+- **Bootstrap — gate both ways.** Metica-with-MAX-mediation initializes MAX internally, so an ungated Max bootstrap would double-init MAX and double-fire callbacks:
+
+  ```csharp
+  if (MeticaAdService.UseMetica) {
+      gameObject.AddComponent<MeticaAdService>();   // shape-specific construct/attach, as in replace mode
+  } else {
+      MaxSdk.SetSdkKey(MaxSdkKey);                  // the original Max bootstrap, verbatim
+      MaxSdk.InitializeSdk();
+      MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += OnInterLoaded;   // subscriptions MOVE here, not deleted
+  }
+  ```
+
+  The game's `MaxSdkCallbacks.*` subscriptions **move into the `!UseMetica` branch** instead of being deleted, so game-side reactions (reward grants, analytics) stay wired on the Max chain; the Metica chain gets them via the `MeticaAdsCallbacks` subscriptions / region handlers, exactly as in replace mode.
+- **Method calls** — keep the original call verbatim as the `else`: `if (MeticaAdService.UseMetica) { _ads.ShowInterstitial(p); } else { MaxSdk.ShowInterstitial(id, p); }`. For wrapper-routed call sites the `else` keeps the original wrapper call (e.g. `AdManager.ShowInterstitial(...)`) — the wrapper-scoping rule is unchanged, and the generated adapter itself never references `MaxSdk.` (the template stays Metica-pure; the gate lives at the call sites). The preserve-surrounding-logic rule still applies: the gate wraps only the swapped call — frequency caps, cooldowns, and availability guards around it stay verbatim.
+- **`drop`-kind rows** — keep the original call in the `else` branch (there is nothing to route to on the Metica side); still list it in the Step 7 "Dropped — no Metica equivalent" section, noting it stays live on the Max path.
+- **Redundant `Load*` calls** — the "drop vs. preserve" rule above never fully deletes a call site in this mode: a `MaxSdk.Load*` that replace mode would drop as redundant is instead preserved verbatim as the `else` branch (with an empty/no-op `if` side when the Metica chain needs no game-side load) — the Max chain has no auto-load of its own, so deleting the call would leave `UseMetica=false` with no load trigger at all.
+- **Per-file re-scan** — surviving `MaxSdk.*` matches are expected in this mode: instead of expecting zero matches, confirm each survivor sits inside a `!UseMetica`-reachable branch.
 
 #### Refactor workflow
 
@@ -695,13 +780,15 @@ Then generate:
 
    **(c) Existing tokens** — substitute `__METICA_API_KEY__` / `__METICA_APP_ID__` (escaped as above), `__USER_ID__` (verbatim), and `__MEDIATION__` → `new MeticaMediationInfo(MeticaMediationInfo.MeticaMediationType.MAX, "<escaped MAX SDK key>")` (note: `MeticaMediationType` is a **nested** enum inside `MeticaMediationInfo`, so it **must** be qualified as `MeticaMediationInfo.MeticaMediationType.MAX` — the bare `MeticaMediationType.MAX` from the docs page does not compile; the SDK source and the canonical demo are the source of truth when they diverge from the docs).
 
+   **`__MAX_SWITCH__` (the switchable-mode gate)** — when `MAX_MODE=switchable`, substitute `public static bool UseMetica = true;   // false routes every rewritten call site back to its original Max path` (always `static`, regardless of `$SHAPE`, so call sites reference `MeticaAdService.UseMetica` under every shape). Otherwise (`MAX_MODE=replace`, or no MaxSDK) **delete the whole token line**.
+
    **`__REVENUE_DELIVERY__` (revenue-callback delivery mode)** — the single place the delivery mode is set, filled here at render time (the later "3PA revenue forwarders" pass doesn't touch it). Always fill it when the effective SDK (`$TARGET_SDK`) is **≥ 2.4.2** with `MeticaAds.RevenueCallbackDelivery = CallbackDelivery.<Mode>;` where `<Mode>` is chosen by the delivery-mode rule in `references/3pa-forwarders.md` (the source of truth, including how to detect `MaxSdk.InvokeEventsOnUnityMainThread` and its spellings). Otherwise (`$TARGET_SDK < 2.4.2`, API absent) **delete the whole token line** and recommend upgrading in Step 7. `MeticaAds` / `CallbackDelivery` resolve under the existing `using Metica.Ads;`.
 
    **(d) Compile guarantee** — every shape compiles out of the box. The two retry bodies above are the only place `MonoBehaviour`-specific API (`Invoke(string, float)`) shows up, and the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution keeps `Invoke` strictly inside the `monobehaviour` branch. When `__REVENUE_DELIVERY__` is filled, its `MeticaAds` / `CallbackDelivery` symbols resolve under the already-imported `using Metica.Ads;` (no new `using`), and the API exists because the `__REVENUE_DELIVERY__` rule only fills it on `$TARGET_SDK ≥ 2.4.2`. Under `static_class` / `plain_class`, the SDK's built-in load-failure retry handles re-loading; the Step 7 walkthrough explains how to wire an app-side retry from the host's main loop if the team wants an additional safety net.
 
    The result is a single class that sets privacy + `MeticaSdk.SetLogEnabled(true)` (both **before** `MeticaSdk.Initialize`, same file) and calls `MeticaSdk.Initialize(config, <mediation>, OnInitialized)` with the **named `OnInitialized` method** (not a lambda) that logs `SmartFloors` and wires up each used format; it exposes `LoadInterstitial`/`ShowInterstitial`, `LoadRewarded`/`ShowRewarded`, `ShowBanner`/`HideBanner`, `ShowMrec`/`HideMrec` — these (and `Initialize` — same for the `InitializeAsync` form, where an `await` before the call can also move execution off-main) must be **called on the Unity main thread** (the SDK captures the `SynchronizationContext` at the call site); when rewriting call sites that fire from a CMP/consent or other off-main callback, marshal them to the main thread. Reuse the **game's existing Max ad unit IDs** for the format `adUnitId`s (per the migration guide they pass through unchanged). **File layout:** by default write one `$ADAPTER_FOLDER/MeticaAdService.cs`; for a larger project you may split each `@fmt` region into a `$ADAPTER_FOLDER/MeticaAdService.<Format>.cs` `partial class MeticaAdService` to match the game's conventions (the validator is content-based and passes either way).
 
-2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them).
+2. **Rewrite the game's Max call sites** to use the `MeticaAdService` instance directly — see the "Rewrite patterns" subsection above and obey the wrapper-scoping rule. Delete the game's `MaxSdkCallbacks.*` subscriptions (MeticaAdService's per-format regions own them); under `MAX_MODE=switchable`, gate each rewrite and move the subscriptions into the `!UseMetica` branch instead (see the switchable subsection).
 
 #### Post-template patch passes (conform codegen to the host)
 
@@ -713,7 +800,7 @@ After rendering the templates, apply a small, fixed set of **deterministic, name
 | **Default placement** | placement strings observed | Where the delegator would otherwise pass `null`, pass the **most-frequent observed placement** (from the Step 2 placement counts; ties broken by first-seen) instead — e.g. `_interstitial?.Show("level_complete")`. The per-format `Show(string placement = null, …)` already accepts it — no template change. |
 | **Adapter folder next to wrapper** | a wrapper was detected | Place the adapter folder in the **user-confirmed** wrapper's parent directory — resolved in Step 2.5's adapter-folder pick — so the new files sit beside the code they replace. (A write-location decision, not a content edit; listed here for completeness.) |
 | **Rename orchestrator next to a neutral wrapper** | wrapper detected whose class name does **not** already start with `Metica` (e.g. `AdsManager`, `AdManager`, `AdService`) | Cosmetic: rename the orchestrator to `Metica<WrapperName>` (e.g. `AdsManager` → `MeticaAdsManager`) and update every reference in the generated files so it reads as a sibling. **Before renaming, grep the project for an existing `class <Target>`** (same check as the Step 2.5 collision-rename); if the target name is already taken, **skip the cosmetic rename and keep `MeticaAdService`**. Runs after the Step 2.5 collision-rename; if both would fire, the collision rename wins. |
-| **3PA revenue forwarders** | a 3PA provider detected (Step 2.5 Signal 3) | Populate each used format's named `On<Format>RevenuePaid` handler with the matching forwarder call, **one per detected provider**. **Prefer relocating the game's own existing forwarder calls** (found during the Max-callsite scan / callback-subscription rewrite) — they are already version-correct for the game's installed 3PA SDK versions — into the handler; only fall back to a fresh call (canonical shapes in `references/3pa-forwarders.md`) when the game had none. Forward from `OnAdRevenuePaid` **only** — never `OnAdHidden` or a dismissal hook (that loses click-through revenue; the validator FAILs it). No App-Open handler (App Open is `drop` per the TSV). The matched `MeticaAds.RevenueCallbackDelivery` for these forwarders is set once via the `__REVENUE_DELIVERY__` token at render time (its own render rule above), **not** in this pass. |
+| **3PA revenue forwarders** | a 3PA provider detected (Step 2.5 Signal 3) | Populate each used format's named `On<Format>RevenuePaid` handler with the matching forwarder call, **one per detected provider**. **Prefer relocating the game's own existing forwarder calls** (found during the Max-callsite scan / callback-subscription rewrite) — they are already version-correct for the game's installed 3PA SDK versions — into the handler; only fall back to a fresh call (canonical shapes in `references/3pa-forwarders.md`) when the game had none. Under `MAX_MODE=switchable`, **copy** the existing forwarder call instead of relocating it — the original stays in its `MaxSdkCallbacks` subscription inside the `!UseMetica` branch, so analytics keep firing on the Max chain. Forward from `OnAdRevenuePaid` **only** — never `OnAdHidden` or a dismissal hook (that loses click-through revenue; the validator FAILs it). No App-Open handler (App Open is `drop` per the TSV). The matched `MeticaAds.RevenueCallbackDelivery` for these forwarders is set once via the `__REVENUE_DELIVERY__` token at render time (its own render rule above), **not** in this pass. |
 | **Banner/MRec setter ordering** | `SetBanner*` / `SetMrec*` calls migrated from the game (or generated) | Emit setters **after** the matching `Create*` call, never before — a setter on a not-yet-created `adUnitId` silently no-ops (including a custom banner refresh rate, `SetBannerExtraParameter(adUnitId, "ad_refresh_seconds", …)`, which must follow `CreateBanner` or the refresh rate is dropped). Order is: subscribe callbacks → `CreateBanner`/`CreateMrec` → `SetBanner*`/`SetMrec*` → `ShowBanner`/`ShowMrec`. On **SDK ≥ 2.4.2 (Android)** banner/MRec creation and display are separate steps, so a `Show` must follow a `Create` for the same id — never collapse them or emit a show before the create (the template's `Init<Format>` does `Create` → `Show`; the SDK loads/auto-refreshes, so an explicit `Load*` is only for manual refresh). For interstitial/rewarded `SetInterstitial*` / `SetRewardedAd*`, re-apply after each load (pre-creation calls are dropped per the TSV). Keeps the validator's `*_setter_after_create` rules green. |
 
 Each pass is idempotent and inspectable: re-running discovery + codegen on the same project produces the same edits. Record each applied pass in the Step 7 report so the user can see how the output was conformed to their project.
@@ -758,7 +845,7 @@ CMP_PROVIDER="<resolved cmp provider>"        # google-ump | max-cmp | custom | 
 
 **File to generate** (under `$ADAPTER_FOLDER`):
 
-1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__` / `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__`, **including the CMP override that empties `__START_HOOK__` for every shape when `CMP_PROVIDER != none`**), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), substitute `__REVENUE_DELIVERY__` per its render rule above (no MaxSDK → `CallbackDelivery.NativeThread` when `$TARGET_SDK ≥ 2.4.2`, else delete the token line), and — with no MaxSDK present — set the mediation arg to `null`. Every shape compiles out of the box (the `Invoke(...)` retry call is scoped strictly to the `monobehaviour` branch via the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution). The result mirrors the docs.metica.com example under `monobehaviour`: with no CMP, `Start()` auto-inits by calling an idempotent `Initialize()` that delegates to `Initialize(true, false)`; with a CMP, `__START_HOOK__` is empty and the host calls `Initialize(bool hasUserConsent, bool doNotSell)` from its consent callback. Either way the consent-gated overload sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, and `OnAdShowFailed`-recovery; under **`monobehaviour`** they additionally carry docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`), while under **`static_class` / `plain_class`** the load-failure handlers are log-only and MeticaSDK's built-in retry handles re-loading (Step 7's walkthrough shows how to add an app-side retry from a host scheduler if desired). Banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag under `monobehaviour`, and no app-side focus dispatch under `static_class` / `plain_class` (the host wires its own focus handler and calls `MeticaAdService.BannerOnFocus(...)` / `MrecOnFocus(...)`, both `public` for that purpose); no app-side retry under any shape. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
+1. **`MeticaAdService.cs`** — render `$PLUGIN_DIR/scripts/templates/standalone/MeticaAdService.cs.tmpl`: apply the namespace transform (rule above), substitute the **shape tokens** per `$SHAPE` (same per-shape table as the Max-present codegen above — `__CLASS_HEADER__` / `__START_HOOK__` / `__FOCUS_HOOK__` / `__STATIC__` / `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__`, **including the CMP override that empties `__START_HOOK__` for every shape when `CMP_PROVIDER != none`**), then **drop the `// @fmt-begin:<fmt>`…`// @fmt-end:<fmt>` region for every format NOT in `$FORMATS`** (after shape substitution, since the MonoBehaviour `__FOCUS_HOOK__` value carries its own `@fmt` markers), substitute `<API_KEY_ESCAPED>` / `<APP_ID_ESCAPED>` (escaped as above) and `<USER_ID_EXPR>` (verbatim), substitute `__REVENUE_DELIVERY__` per its render rule above (no MaxSDK → `CallbackDelivery.NativeThread` when `$TARGET_SDK ≥ 2.4.2`, else delete the token line), delete the `__MAX_SWITCH__` token line (no MaxSDK — nothing to switch to), and — with no MaxSDK present — set the mediation arg to `null`. Every shape compiles out of the box (the `Invoke(...)` retry call is scoped strictly to the `monobehaviour` branch via the `__INTERSTITIAL_LOAD_FAILED_BODY__` / `__REWARDED_LOAD_FAILED_BODY__` substitution). The result mirrors the docs.metica.com example under `monobehaviour`: with no CMP, `Start()` auto-inits by calling an idempotent `Initialize()` that delegates to `Initialize(true, false)`; with a CMP, `__START_HOOK__` is empty and the host calls `Initialize(bool hasUserConsent, bool doNotSell)` from its consent callback. Either way the consent-gated overload sets privacy + `MeticaSdk.SetLogEnabled(true)` (**before** `MeticaSdk.Initialize`, same file) and runs `MeticaSdk.Initialize(config, null, OnInitialized)` with a **named `OnInitialized(MeticaInitResponse)` method (not a lambda)** that logs `SmartFloors` group / forced-holdout / userId and wires up each used format's region (subscribe callbacks + initial load). It exposes game-facing delegators per format: `LoadInterstitial()`/`ShowInterstitial(placement, customData)`, `LoadRewarded()`/`ShowRewarded(...)`, `ShowBanner()`/`HideBanner()`, `ShowMrec()`/`HideMrec()`. Per-format retry/refresh shape: interstitial + rewarded carry `IsReady`-guarded `Show`, auto-reload on `OnAdHidden`, and `OnAdShowFailed`-recovery; under **`monobehaviour`** they additionally carry docs-verbatim exponential-backoff retry on `OnAdLoadFailed` (`Math.Pow(2, Math.Min(6, attempt))`), while under **`static_class` / `plain_class`** the load-failure handlers are log-only and MeticaSDK's built-in retry handles re-loading (Step 7's walkthrough shows how to add an app-side retry from a host scheduler if desired). Banner + MRec carry `OnApplicationFocus` pause/resume + an `_…Showing` flag under `monobehaviour`, and no app-side focus dispatch under `static_class` / `plain_class` (the host wires its own focus handler and calls `MeticaAdService.BannerOnFocus(...)` / `MrecOnFocus(...)`, both `public` for that purpose); no app-side retry under any shape. Reference shape (the actual template lives at `scripts/templates/standalone/MeticaAdService.cs.tmpl`):
 
    ```csharp
    namespace <NAMESPACE> {                         // omit wrapper per the namespace rule
@@ -806,10 +893,12 @@ Gradle / manifest edits scoped to MeticaSDK additions only are also TODO; Unity-
 ### Step 6 — Validator (fresh subagent context, always)
 
 Invoke `@agent-unity-validator` with the project path (a fresh subagent context — never
-share your reasoning with it). Validation is uniform — it does not take or depend on any
-mode. The validator reasons over the code and returns one `validator` JSON block.
+share your reasoning with it). When this run used `MAX_MODE=switchable`, state that in the
+Task prompt as context — the validator verifies the `UseMetica` gate by reading the code,
+never from the hint alone. The validator reasons over the code and returns one `validator`
+JSON block.
 
-Extract the JSON and read `.status`. The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
+Extract the JSON and read `.status`. Do not echo the JSON verbatim — summarize per the output-economy rules (PASS count in one line; detail only the FAIL/WARN/ADVISORY rows with their evidence). The validator enforces credential hygiene (placeholder keys + test userIds) directly — Step 7's report mirrors what it found rather than running its own grep. On `status: PASS` (ADVISORY/WARN rows do not affect status) → go straight to Step 7. On `status: FAIL` → run the autofix loop (Step 6.5) **before** any rollback hint.
 
 ### Step 6.5 — Validate + autofix loop (integrator-owned)
 
@@ -831,7 +920,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `init_count` (count > 1) | surface | Cannot infer which duplicate `MeticaSdk.Initialize` to delete — surface `file:line` and stop. |
 | `init_count` (count 0) | surface | The adapter's `Initialize` is missing — a codegen bug, not a user fix (surfaced with no location). |
 | `<fmt>_load_show_parity` | surface | Cannot infer the missing call site — surface `file:line`. |
-| `compiles_cleanly` | surface | A real Unity compile error (`CS####`). Print the `file:line` + the `CS####: message` from the check's `detail` verbatim and stop — compile errors are not safely fixable by line-anchored edits (a wrong guess can cascade). One row is emitted per error; surface them all. |
+| `compiles_cleanly` | autofix \| surface | A real Unity compile error (`CS####`), one row per error. **autofix** when the cited file is one this run created or edited (per the checkpoint log's `WROTE`/`EDITED` lines): Read the error site and surrounding code, apply a minimal fix with the standard anchor re-check, and fix every owned-file error in the iteration — the re-validate re-runs the Unity compile, so a wrong fix is caught within the 3-iteration cap. **surface** when the cited file was not touched by this run: print the `file:line` + the `CS####: message` from the check's `detail` verbatim. |
 | `banner_setter_after_create` / `mrec_setter_after_create` | autofix \| surface | If the setter and its `Create*` sit in the **same method**, reorder so `Create*` precedes the setter (autofix). If they're in different methods / call paths, surface the setter `file:line` + the `Create*` it must follow and stop — cross-method reordering isn't a safe line edit. The integrator's own setter-ordering patch pass keeps generated code green, so a FAIL is hand-rolled. |
 | `threepa_forwarder_in_revenue_paid` | surface | A 3PA revenue forwarder wired outside `OnAdRevenuePaid` (e.g. in `OnAdHidden`) loses click-through revenue; under `CallbackDelivery.NativeThread`, a forwarder wrapped in a main-thread dispatcher (or a handler whose call chain touches a Unity-main-thread-only API) loses it on app-death-mid-ad. Restructuring an analytics handler is game logic, not a line edit — surface the forwarder `file:line` + its enclosing handler (and the dispatcher wrap / Unity-API call when that's the finding), and stop. |
 | `adunit_routing_unreliable` | surface | A guard routes on a returned `ad.adUnitId ==/!= <configured>` to gate an ad-control decision or drop callback processing (an early return that skips revenue/reward/lifecycle handling on id mismatch — a MAX idiom) — unreliable under SmartFloors (trial serves dedicated units; a holdout unit can appear as a fallback). Removing the id-based branch and attributing by group is a **redesign**, not a line edit; the integrator's own codegen never emits this (it passes the configured id through and only logs the group), so a FAIL means hand-rolled code. Surface the cited comparison (`file:line`) → the branch it gates, and stop. |
@@ -852,7 +941,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 
 3. **No autofix produces a net-new file** — autofixes only edit existing files. A missing file (e.g. `init_count` count 0) is always `surface`, never `autofix`.
 
-4. **Log every action** (applied or refused) to `.metica-integration.log` next to the adapter folder, one line each, so the user can audit the loop afterward.
+4. **Log every action** (applied or refused) to the checkpoint log (`$PROJECT/.metica-integration.log`), one line each, so the user can audit the loop afterward.
 
 5. Re-invoke `@agent-unity-validator` (fresh subagent context) and repeat. **Stop and fall back to the Step 7 rollback hint** when any `surface`-class FAIL remains, or after 3 iterations still produce FAILs (prevents an infinite loop if a fix introduces a new failure).
 
@@ -902,7 +991,7 @@ Pull the migrated symbols and the available-capabilities list from the `<DETECTE
 
 #### Dropped MaxSDK calls (no Metica equivalent)
 
-When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.UpdateBannerPosition`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
+When Step 5 removed `MaxSdk.*` calls that have **no** Metica equivalent (rows in `references/max-metica-api-map.tsv` with `kind=drop` — App Open Ads, `MaxSdk.GetBannerLayout`, `MaxSdk.SetSegmentCollection`, the various debugger / segmentation entries, the unsupported expanded/collapsed callbacks, etc.), surface them so the user sees what was lost:
 
 ```
 Dropped (no MeticaSdk equivalent in <target_sdk>):
@@ -1072,7 +1161,7 @@ When validator returned **PASS**, the credential checks passed too — no extra 
 
 When **MaxSDK was present**, the report must also include:
 
-1. **Max-callsite outcome** — the files rewritten to call `MeticaAdService` directly (or, if the user declined, the inventory as an action checklist).
+1. **Max-callsite outcome** — the integration mode (`replace` or `switchable`) and the files rewritten to call `MeticaAdService` directly (or, if the user declined, the inventory as an action checklist). Under `switchable`, also state where the switch lives (`MeticaAdService.UseMetica`, default `true`) and that it is set once at startup — flipping mid-session requires a restart.
 2. **Orphaned Max** — if a dedicated Max-wrapper file (e.g. `AdManager.cs`) was left untouched per the wrapper-scoping rule, note that it is now unused by the rewritten call sites and is the user's to delete when ready. Also note that `Assets/MaxSdk/` and the AppLovin dependency can be removed once they confirm the swap works (the integrator does not remove them).
 3. **Wrapper `MaxSdkCallbacks` subscription sites** — the wrapper-scoping rule leaves wrapper files read-only, including their `MaxSdkCallbacks.<Format>.On*Event +=` subscriptions. Those subscriptions stay live: when MeticaSDK runs MAX under the hood (`MeticaMediationInfo(MAX, …)`), the underlying `AppLovinSdk` instance fires events on every loaded ad, **including Metica-driven loads under a trial-routed user**, so each wrapper subscription's handler fires too. List every site found during Step 2 discovery (one bullet per `MaxSdkCallbacks.*Event +=` match in a wrapper file). Then add this guidance verbatim:
 
@@ -1132,6 +1221,15 @@ Notes:
 
 Replace `<PROVIDER>` and the read-expression with the detected value. When the provider is `none`, omit this section entirely (no rollout recipe makes sense without a remote-config provider).
 
+When the run used `MAX_MODE=switchable`, replace the recipe's pattern with driving the generated switch — the false branch is already live code, so no git-restore is needed:
+
+```
+  // Read once at startup, before the first ad call:
+  MeticaAdService.UseMetica = <provider-read-expression>;
+```
+
+The rest of the recipe (provider read expressions, the don't-hard-code note) applies unchanged.
+
 #### Standing caveats (every run)
 
 End the report with the threading reminder on **every** run.
@@ -1143,10 +1241,12 @@ End the report with the threading reminder on **every** run.
    without marshalling first.
 ```
 
+Then append `RUN COMPLETE` to the checkpoint log and recommend (one line) adding `.metica-integration.log` to the project's `.gitignore`.
+
 ## Hard rules
 
 - Never modify any file under `Assets/MaxSdk/`. When MaxSDK is present, rewrite only the game's direct `MaxSdk.*` call sites (scene/game logic) — never a dedicated Max-wrapper file (see the wrapper-scoping rule in Step 5).
-- The generated design is the single standalone `MeticaAdService` MonoBehaviour (per-format `@fmt` regions) — the integrator does not generate an A/B router or rollout-binding. If the user wants gradual rollout, point them to the Step 7 cohort-gating recipe (they gate the rewritten call sites behind their own remote-config flag).
+- The generated design is the single standalone `MeticaAdService` MonoBehaviour (per-format `@fmt` regions) — the integrator does not generate a cohort/rollout router or rollout-binding code. The user-chosen `MAX_MODE=switchable` gate (`MeticaAdService.UseMetica` + gated call sites) is a supported mode, not a router. If the user wants gradual rollout, point them to the Step 7 cohort-gating recipe (under switchable the recipe drives the switch; otherwise they gate the rewritten call sites behind their own remote-config flag).
 - Privacy calls (`SetHasUserConsent`, `SetDoNotSell`) **must** precede `MeticaSdk.Initialize` and live in the **same file** (the `MeticaAdService` orchestrator).
 - Reuse the existing Max ad unit IDs for MeticaSDK (per migration guide).
 - Sub-agent invocations (compat-checker, validator) **must** be in fresh subagent contexts — never share your reasoning context with them.
