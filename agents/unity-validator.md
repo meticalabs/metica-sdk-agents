@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, load-callback payload fields treated as authoritative (eCPM show gates, callback-derived ad-unit reuse), leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash, Read, Grep
 model: opus
 ---
@@ -153,6 +153,30 @@ ones grep gets wrong):
   sanctioned pattern and is **not** flagged by this rule. Cite the comparison → the ad-control
   branch it gates (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be traced —
   never a blind FAIL.
+
+**Load-callback payload fields are analytics-only** (project-wide, not per-format):
+
+- `load_callback_fields_unreliable` — **behavioral, FAIL-capable.** Under SmartFloors **trial**,
+  loading is decoupled from the game: the load callback (`OnAdLoadSuccess` / equivalent) reports
+  whichever internal instance resolved first — usually the zero-floor fallback — and the SDK
+  afterwards rotates inventory silently with no further game events. The callback's `MeticaAd`
+  payload fields — `revenue`, `adUnitId`, `networkName` — are therefore biased/stale/substituted
+  on trial (see `references/smartfloors-user-groups.md`) and must never drive ad-control
+  decisions; a gate built on them misbehaves **only for trial users** while holdout passes — an
+  eCPM show-gate on stored load-callback revenue suppressed trial shows in a shipped game.
+  **FAIL** when a load-callback payload field is persisted (or used inline) in a **conditional
+  that gates showing or loading** — e.g. an eCPM threshold on stored load-callback revenue
+  (`_lastLoadedAdRevenue * 1000 < minimumEcpm` gating a `Show*` path), or a `networkName` branch
+  selecting load/show behavior. An `adUnitId`-equality guard against a configured id (or a
+  stored copy) stays under `adunit_routing_unreliable` — emit it there, not under both rules.
+  **ADVISORY** when the payload `adUnitId` is persisted and fed back into subsequent MeticaSdk
+  calls (a stored callback-derived id passed to `Load*` / `Show*` / `Is<Format>Ready` rather
+  than the configured publisher id) — currently neutralized by the SDK on trial but semantically
+  wrong and version-fragile; recommend passing the configured id through unchanged. **PASS**
+  when payload fields are only logged/attributed/forwarded to revenue trackers (the intended
+  use) or never read. Cite the callback read/store site → the gating conditional (or the SDK
+  call re-using the stored id) (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't
+  be traced — never a blind FAIL.
 
 **Group branching must serve every group** (project-wide, not per-format):
 

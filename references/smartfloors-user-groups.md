@@ -40,6 +40,30 @@ integration, where a per-ad-unit guard is idiomatic — under Metica it is a bug
 routing is needed, key on the ad format / callback source, never on id equality with the
 requested unit.
 
+## Load-callback payload fields are not decision inputs
+
+Trial mode also **decouples loading from the game**: the SDK runs internal loading loops, the
+load callback (`OnAdLoadSuccess`) reports whichever internal instance resolved first — usually
+the zero-floor fallback — and the SDK afterwards rotates inventory silently, firing no further
+game events. So on trial the load callback's `MeticaAd` payload fields carry different semantics
+than under holdout or a direct-MAX integration:
+
+- `revenue` is **biased low** (it reflects the fallback ad that completed the awaited load, not
+  the best available ad) and **stale** (the internal loop's reloads fire no game events).
+- `adUnitId` is a **substituted Metica-dedicated unit** (see above).
+- `networkName` attributes the fallback instance, not what will actually show.
+
+The payload fields are therefore **analytics-only**: log them, forward them to revenue trackers,
+attribute by group — but never gate showing or loading on them. An eCPM show-gate built on
+stored load-callback revenue (`storedRevenue * 1000 < minimumEcpm`) suppressed shows **only for
+trial users** in a shipped game while holdout passed — the trial-only-deficit class of bug.
+
+Likewise, never feed the callback's `adUnitId` back into subsequent SDK calls (a stored
+callback-derived id passed to `Load*` / `Show*` / `Is<Format>Ready`): pass the **configured
+publisher ad-unit id** through unchanged. The native SDK currently neutralizes a
+callback-derived id on trial, but that is an implementation detail — relying on it is
+version-fragile and drifts the publisher-ad-unit-id parameter.
+
 ## Worked example — the shape of a group-aware integration
 
 A correct group-aware integration wires the pattern like this:
