@@ -3,6 +3,11 @@
 // Mirrors the docs.metica.com Unity SDK example: privacy + SetLogEnabled, then the
 // SDK init call wired to a NAMED OnInitialized callback (not an inline lambda).
 //
+// Ad-callback payload fields (ad.revenue / adUnitId / networkName) are analytics-only —
+// never gate show/load on them or feed the callback's adUnitId back into SDK calls:
+// on SmartFloors trial, load-callback payloads reflect internal fallback loading, not
+// what will actually show.
+//
 // Codegen picks one of three shapes (MonoBehaviour / static class / plain class) to
 // match the host project's ad-code style — substituted via the __CLASS_HEADER__ /
 // __START_HOOK__ / __FOCUS_HOOK__ / __STATIC__ tokens below. Per-format code lives
