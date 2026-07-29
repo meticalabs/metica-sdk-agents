@@ -1,8 +1,8 @@
 # metica-sdk-agents
 
-Claude Code subagents and a skill that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
+Claude Code and Codex agents plus a skill that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
 
-## Install
+## Install for Claude Code
 
 **Via Claude Code marketplace (recommended):**
 
@@ -14,6 +14,30 @@ Claude Code subagents and a skill that integrate [MeticaSDK](https://github.com/
 That's it. Claude Code clones the repo, registers three agents and one skill, and sets `$CLAUDE_PLUGIN_ROOT` for you.
 
 **Verify:** launch Claude Code in your project and type `/agents` — you should see the three Unity agents under the `metica-sdk-agents` plugin. The `ad-log-monitor` skill shows up via `/` autocomplete (`/metica-sdk-agents:ad-log-monitor`) and via natural-language triggers (see "Use the ad-log-monitor skill" below).
+
+## Install for Codex
+
+Clone the repository, then run the Codex installer from the checkout:
+
+```bash
+git clone https://github.com/meticalabs/metica-sdk-agents.git
+cd metica-sdk-agents
+bash install-codex.sh
+```
+
+The installer registers three user-wide Codex custom agents and the `ad-log-monitor` skill by linking this checkout into `~/.codex/agents/` and `~/.codex/skills/`. It also creates `~/.metica-sdk-agents` as the shared root link that the agents and skill use to resolve prompts, scripts, references, and templates.
+
+To uninstall the Codex integration, remove the three `metica_unity_*.toml` links from `~/.codex/agents/`, `~/.codex/skills/ad-log-monitor`, and `~/.metica-sdk-agents`.
+
+Start a new Codex task after installation, then refer to the agents by name:
+
+```text
+Use metica_unity_integrator to integrate MeticaSDK into this Unity project.
+Use metica_unity_compat_checker to check this project before integration.
+Use metica_unity_validator to validate the existing MeticaSDK integration.
+```
+
+The Codex adapters reuse the same agent prompts, contracts, references, scripts, and templates as the Claude Code plugin, so both installations stay in sync.
 
 ## Use the integrator
 
@@ -49,6 +73,8 @@ Use this when you have a build on a device and want to QA the runtime ad behavio
 (A skill is **not** invoked with the `@`-mention syntax used for agents — use the `/` slash form or just a trigger phrase.)
 
 The skill will pick the right phase from your prompt: a bare invocation starts a new capture (Phase 1); "done playing" stops and analyses (Phase 2); "compare" produces the trial-vs-holdout verdict (Phase 3).
+
+In Codex, invoke the installed skill by name or with a natural-language trigger such as "start ad-log monitoring."
 
 **Two-route protocol.** Plan to run it twice on the same device, same build, same network — once for each route — so the comparison is apples-to-apples. Target **~5 interstitials and ~5 rewarded ads** per route.
 
@@ -127,10 +153,13 @@ The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-
 
 ```
 metica-sdk-agents/
+├── codex/
+│   └── agents/                         # Codex custom-agent adapters
 ├── .claude-plugin/
 │   ├── marketplace.json               # Claude Code marketplace manifest
 │   └── plugin.json                    # plugin manifest
 ├── install.sh                         # one-line installer
+├── install-codex.sh                   # Codex custom-agent + skill installer
 ├── metica-versions.yaml               # compat matrix
 ├── hooks/
 │   └── hooks.json                     # SessionStart update-notify hook

@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is **not application code** — it's a Claude Code *plugin* shipping three Metica sub-agents (compat-checker, integrator, validator) for Unity integration plus an `ad-log-monitor` skill for on-device runtime verification. No build step, no compiled artifact: changing an agent or skill = editing its `.md`; scripts change only when the system tooling does. The source:
+This is **not application code** — it ships three Metica sub-agents (compat-checker, integrator, validator) for Unity integration plus an `ad-log-monitor` skill for on-device runtime verification. Claude Code loads them as a plugin; Codex loads thin custom-agent adapters under `codex/agents/` that reuse the same prompt sources. No build step, no compiled artifact: changing an agent or skill = editing its `.md`; scripts change only when the system tooling does. The source:
 
 - **Agents** — markdown-with-frontmatter directly under `agents/` (`unity-{integrator,validator,compat-checker}.md`); frontmatter is the contract, body is the prompt. They live flat in `agents/`, **not** a subfolder — a subfolder becomes a scope segment in the mention token (`agents/unity/…` → `@agent-metica-sdk-agents:unity:unity-integrator`), breaking the documented `@agent-metica-sdk-agents:unity-integrator`.
+- **Codex adapters** — standalone TOML files under `codex/agents/`. They resolve this plugin root, read the corresponding canonical prompt under `agents/`, and translate Claude-specific orchestration/tool references to Codex. Keep them thin; agent behavior belongs in the canonical `.md` prompts.
 - **Skills** — `skills/<name>/SKILL.md` (auto-discovered; frontmatter is just `name:` + `description:`). Invoked via the `/` slash form or a description-matched phrase — **not** `@`-mention (agents only).
 - **Scripts** — `scripts/*.sh` hold only what an agent can't do in prose: locate the plugin root, download/import the SDK, capture device logs, launch the Unity compiler, the SessionStart update check. All verification/checking logic lives in agent prose.
 - **Hooks** — `hooks/hooks.json` (auto-discovered). One `SessionStart` hook → `check-for-update.sh`, which notifies only on a strictly-newer version. **Fail-open** (any uncertainty exits 0 silently). Opt out with `METICA_SKIP_UPDATE_CHECK=1`.
