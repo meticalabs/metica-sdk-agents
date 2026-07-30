@@ -62,10 +62,16 @@ ordering (`2020.3.24f1 < 2021.3`, `8.0.0 < 8.2.0`). When a value can't be found,
 
 The `metica_sdk` FAIL is the integrator's only auto-resolvable failure: its `hint` must give
 the exact download URL from the matched YAML row. Word it by whether the SDK is **missing** vs
-**outdated** (the integrator reads `detected` to choose a fresh install vs an upgrade):
+**outdated** (the integrator reads `detected` to choose a fresh install vs an upgrade). The
+templates use three tokens the checker **must** substitute before emitting the hint (an
+emitted `<latest>` in the report is a bug): `<latest>` → the yaml's top-level `latest:` field;
+`<detected>` → the detected SDK version from the project; `<download_url>` → the
+`download_url` from the yaml row matched to `latest:`. If any token can't be resolved (yaml
+unreadable, `latest:` missing), emit a top-level `error` and `status: "BLOCK"` rather than
+shipping a hint with unresolved tokens.
 
-- `detected: null` (missing) — *"Install MeticaSDK 2.4.3: download <download_url> and double-click in Unity to import."*
-- `detected` is a real version below target — *"Upgrade MeticaSDK <detected> → 2.4.3: download <download_url> and import (the integrator can clean-swap and migrate the integration code)."*
+- `detected: null` (missing) — *"Install MeticaSDK <latest>: download <download_url> and double-click in Unity to import."*
+- `detected` is a real version below target — *"Upgrade MeticaSDK <detected> → <latest>: download <download_url> and import (the integrator can clean-swap and migrate the integration code)."*
 
 The `managed_stripping` WARN `hint` must name the bug and the fix (substitute the detected SDK version for `{detected}`):
 

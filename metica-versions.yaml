@@ -5,9 +5,24 @@
 schema: "metica-versions/1.0.0"
 
 # The version selected when no explicit --version is passed.
-latest: "2.4.3"
+latest: "2.45.0"
 
 versions:
+  "2.45.0":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.2.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.0/MeticaSdk-2.45.0.unitypackage"
+    sha256: "8dd2a65dcc1ed7245ce0ff4c2da1f5a89109220fa902909b1b585b4a04c376fc"
+    released_at: "2026-07-29"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.0"
+    deprecated: false
+
   "2.4.3":
     platforms: ["android"]
     unity_min: "2021.3"
@@ -84,6 +99,12 @@ versions:
 # Canonical lifecycle: Create → Show (the SDK loads the ad and auto-refreshes; an explicit `Load` is
 # only for manual refresh after StopAutoRefresh). The integrator's template generates Create → Show
 # in Init<Format>; the validator's banner/MRec rules expect it.
+
+# Behavior change (2.45.0, Android): pre-create banner/MRec setters
+# (SetBannerExtraParameter / SetLocalExtraParameter / SetCustomData and MRec
+# equivalents) are now buffered by the native bridge and applied when Create* runs,
+# instead of the pre-2.45.0 silent no-op. The validator's banner_setter_after_create
+# and mrec_setter_after_create rules FAIL on < 2.45.0 and PASS on >= 2.45.0.
 
 # Type discipline:
 #   *_min / *_max version fields are strings. Empty string = no bound.

@@ -224,6 +224,7 @@ ones grep gets wrong):
   same id displays nothing. Apply the same create-precedence here: **FAIL** a banner/MRec
   `Show`/`Load` not preceded on every path by a `Create` for the same `adUnitId`; `ADVISORY` with
   `unresolved` when the ordering can't be traced.
+  **Version gate:** on target SDK `≥ 2.45.0` the native bridge buffers pre-create setter values per `adUnitId` and applies them when `Create*` runs, so setter-before-create is no longer a bug — emit `PASS` for both rules on `≥ 2.45.0` with `detail: "buffered pre-create — 2.45.0+ native (see references/metica-sdk-migration.md)"`. FAIL semantics above apply only to target SDK `< 2.45.0`.
 - `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral.**
   Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters. **Read the
   vendored SDK** (`Assets/MeticaSdk/Runtime/...`) to confirm whether a param set before the
