@@ -224,7 +224,19 @@ ones grep gets wrong):
   same id displays nothing. Apply the same create-precedence here: **FAIL** a banner/MRec
   `Show`/`Load` not preceded on every path by a `Create` for the same `adUnitId`; `ADVISORY` with
   `unresolved` when the ordering can't be traced.
-  **Version gate:** on target SDK `≥ 2.45.0` the native bridge buffers pre-create setter values per `adUnitId` and applies them when `Create*` runs, so setter-before-create is no longer a bug — emit `PASS` for both rules on `≥ 2.45.0` with `detail: "buffered pre-create — 2.45.0+ native (see references/metica-sdk-migration.md)"`. FAIL semantics above apply only to target SDK `< 2.45.0`.
+  **Version gate — buffered value setters only:** on the **installed** SDK `≥ 2.45.0` (read
+  from `Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs` → `Version`, same source
+  `metica_deprecated_api` uses) the native bridge buffers pre-create **value setters** —
+  `SetBannerExtraParameter` / `SetBannerLocalExtraParameter` / `SetBannerCustomData` and their
+  `SetMrec*` equivalents — per `adUnitId` and applies them when `Create*` runs, so a pre-create
+  call to those six is no longer a bug: **PASS** with
+  `detail: "buffered pre-create — 2.45.0+ native (see references/metica-sdk-migration.md)"`.
+  Everything else stays FAIL on every version: pre-create `SetBannerPlacement` /
+  `SetMrecPlacement`, `SetBannerBackgroundColor`, and `SetBannerWidth` are **not** buffered
+  (still `warn + return` in `UnityBanners.kt` @ v2.5.0), and the `Show`/`Load`-without-`Create`
+  requirement from the ≥ 2.4.2 paragraph above is unaffected (`show()` / `load()` still
+  warn-and-drop with no `Create` on 2.45.0). Cite the vendored SDK when the verdict turns on
+  which setter is buffered.
 - `interstitial_setter_after_create` / `rewarded_setter_after_create` — **behavioral.**
   Same shape for `SetInterstitial*` / `SetRewardedAd*` extra-parameter setters. **Read the
   vendored SDK** (`Assets/MeticaSdk/Runtime/...`) to confirm whether a param set before the

@@ -100,11 +100,15 @@ versions:
 # only for manual refresh after StopAutoRefresh). The integrator's template generates Create → Show
 # in Init<Format>; the validator's banner/MRec rules expect it.
 
-# Behavior change (2.45.0, Android): pre-create banner/MRec setters
-# (SetBannerExtraParameter / SetLocalExtraParameter / SetCustomData and MRec
-# equivalents) are now buffered by the native bridge and applied when Create* runs,
-# instead of the pre-2.45.0 silent no-op. The validator's banner_setter_after_create
-# and mrec_setter_after_create rules FAIL on < 2.45.0 and PASS on >= 2.45.0.
+# Behavior change (2.45.0, Android): pre-create banner/MRec VALUE-setters only
+# (SetBannerExtraParameter / SetBannerLocalExtraParameter / SetBannerCustomData and
+# SetMrec* equivalents) are now buffered by the native bridge and applied when
+# Create* runs, instead of the pre-2.45.0 silent no-op. Other pre-create setters
+# (SetBanner/MrecPlacement, SetBannerBackgroundColor, SetBannerWidth) still
+# warn-and-drop, and Show/Load without a preceding Create still no-ops. The
+# validator's banner_setter_after_create / mrec_setter_after_create rules PASS the
+# three buffered families on >= 2.45.0; other setter-ordering FAILs (and the
+# Show/Load-without-Create FAIL) stand on every version.
 
 # Type discipline:
 #   *_min / *_max version fields are strings. Empty string = no bound.
