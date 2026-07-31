@@ -9,3 +9,7 @@ CLAUDE.local.md
 # Plans belong in the PR description or the originating conversation, not the repo (see CLAUDE.md).
 docs/superpowers/
 docs/plans/
+
+# Superpowers Subagent-Driven Development scratch (ledger, briefs, review packages).
+# Skill-produced planning artifacts — never committed (see CLAUDE.md).
+.superpowers/

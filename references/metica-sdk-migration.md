@@ -28,6 +28,22 @@ When verifying a verdict that turns on SDK behavior, read the vendored SDK sourc
 
 ---
 
+## 2.4.x → 2.45.0
+
+Source-of-truth diff: `metica-unity` `v2.4.3 → v2.45.0` (Android native `2.4.x → 2.5.0`).
+Additive at the Unity API surface; one native behavior change lifts a former integration bug.
+
+| Symbol | Class | Question / detail | Migration action |
+|--------|-------|-------------------|------------------|
+| `MeticaSdk.Ads.GetBannerLayout(adUnitId)` / `MeticaSdk.Ads.GetMrecLayout(adUnitId)` | new-optional | Returns the native banner/MRec on-screen layout (screen-space position + size) so the game can lay out surrounding UI around the ad view. | Adopt only when the game needs to reserve/adapt UI space around a banner or MRec. |
+| `MeticaSdk.Ads.Max.TrackEvent(event)` | new-optional | Forwards a game event to Metica's MAX integration for tracking. | Adopt only if the game already emits events to MAX and wants Metica to receive them. |
+| `MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener(listener)` | new-optional | Subscribes to AppLovin's Ad Review Creative-ID pushes; the listener receives the creative ID for each shown ad. | Adopt if the game already consumes MAX's Ad Review Creative-ID stream. |
+| `MeticaAdConfig.OverrideBidFloor` | new-optional | Per-request bid floor override on the config passed to `Load*` calls. | Adopt only if the game wants to override the server-side bid floor per request. |
+| Additional `MeticaAd.AdInfo` / `MeticaAd.ErrorInfo` fields | new-optional | Newly-exposed diagnostic fields on the ad response and error objects (additional network / waterfall metadata). | Read as needed for diagnostics; no existing reads break. |
+| Banner/MRec pre-create **value-setter** buffering (Android) | behavior-changed | `SetBannerExtraParameter` / `SetBannerLocalExtraParameter` / `SetBannerCustomData` (and `SetMrec*` equivalents) called **before** `CreateBanner`/`CreateMrec` were previously dropped by the native bridge (wrapper logged `BANNER not found for adUnitId`); they are now buffered per `adUnitId` and applied when `Create*` runs (`UnityBanners.kt` @ v2.5.0 → `applyBufferedConfiguration`). No C# API change. **Scope:** only the three value-setter families above buffer; `SetBanner/MrecPlacement`, `SetBannerBackgroundColor`, and `SetBannerWidth` still `warn + return` pre-create, and `Show` / `Load` without a preceding `Create` still no-ops. | Pre-create use of the three buffered value-setter families that was a silent bug on `< 2.45.0` is now correct on `≥ 2.45.0`. The validator's `banner_setter_after_create` / `mrec_setter_after_create` rules PASS those specific calls on `≥ 2.45.0`; the same rules still FAIL pre-create `SetBanner/MrecPlacement`, `SetBannerBackgroundColor`, `SetBannerWidth`, and any `Show`/`Load` without a `Create`. |
+
+---
+
 ## 2.2.x → 2.4.x
 
 Source-of-truth diff: `metica-unity` `v2.2.7 → v2.4.3`. The upgrade is **mostly additive**; an
