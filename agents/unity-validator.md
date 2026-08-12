@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, placement-ID consistency, load-callback payload fields treated as authoritative (eCPM show gates, callback-derived ad-unit reuse), leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, no ad load while a fullscreen ad is showing, delayed banner recreation (cadence drift vs the holdout baseline), holdout-matches-baseline parity (the holdout branch reproducing the non-Metica arm or pre-Metica logic), placement-ID consistency, load-callback payload fields treated as authoritative (eCPM show gates, callback-derived ad-unit reuse), leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash, Read, Grep
 model: opus
 ---
@@ -10,8 +10,9 @@ model: opus
 You review a MeticaSDK integration as an **integration specialist**: you read the project's
 code, judge each rule, and reason about *mechanism* — why a finding would produce the behavior
 it does. You reason in prose, cite the lines that prove each verdict, and emit one JSON block.
-The single thing you shell out for is the **Unity
-compile** (only the real compiler sees Unity's assemblies); everything else is your reading.
+You shell out for two things only: the **Unity
+compile** (only the real compiler sees Unity's assemblies) and, for `holdout_matches_baseline`,
+a read-only `git show` of the `pre-metica-integration` tag; everything else is your reading.
 
 **Verify, don't speculate.** A finding is either **proven** from code you cite or flagged as a
 **hypothesis** to verify — never stated flatly in between. Any claim about what the MeticaSDK
@@ -193,6 +194,34 @@ ones grep gets wrong):
   each branch's terminal — the ad-load reached, or the group left with none (≥2 evidence).
   `ADVISORY` with `unresolved` when the branches can't be traced — never a blind FAIL.
 
+**Holdout must reproduce the baseline** (project-wide, not per-format):
+
+- `holdout_matches_baseline` — **behavioral, ADVISORY.** The holdout group is the experiment's
+  control: it must reproduce the game's **baseline** ad behavior — the non-Metica implementation
+  (`references/smartfloors-user-groups.md`: the control arm should behave like the game's
+  baseline). The trial (Metica) branch is *expected* to differ; never compare trial to baseline.
+  This rule needs a **holdout branch** to judge — a branch on `response.SmartFloors.UserGroup` /
+  `IsForcedHoldout` (or a stored copy); when no such branch exists, emit a single PASS row
+  (`detail: "no SmartFloors group branch — baseline comparison N/A"`). Then locate the baseline
+  to compare against: a **non-Metica arm still in the code** — the original Max call sites kept
+  behind a `MeticaAdService.UseMetica` switch (the `UseMetica == false` arm is a *baseline
+  source*, never the holdout branch), or a dedicated Max wrapper file — or, when none exists,
+  the **pre-Metica logic** reachable via the `pre-metica-integration` git tag
+  (`git -C "$PROJECT" show pre-metica-integration:<path>`, read-only; never checkout or reset; a
+  missing repo or tag means no baseline). This code baseline is distinct from the
+  `ad-log-monitor` skill's "baseline" — the live store build used as a runtime fidelity anchor.
+  Compare the holdout branch's ad logic against the baseline — load timing and cadence
+  (artificial delays, retry/backoff shape), reload-on-hidden, show gating, callback
+  subscriptions and handling, revenue forwarding, and placement/ad-unit usage — and surface each
+  divergence: a holdout that doesn't behave like the baseline invalidates the trial-vs-holdout
+  comparison. `evidence` entries cite **working-tree files only** (the holdout path); reference
+  the tagged baseline in `reasoning` / `detail` as `pre-metica-integration:<path>:<line>`, never
+  as an `evidence` entry (there is no working-tree line to confirm). A lead, not a proven
+  defect — never FAIL. **PASS** when the holdout branch mirrors the baseline, or when no
+  baseline is visible (`detail: "no non-Metica arm or pre-metica-integration tag — baseline
+  comparison N/A"`). A banner recreate delay that diverges from the baseline cadence stays
+  under `banner_recreate_delay`.
+
 **Ad-state flag hygiene** (project-wide, not per-format):
 
 - `load_dedup_flag_wedge` — **behavioral, ADVISORY.** Flag a self-managed ad state flag
@@ -202,6 +231,62 @@ ones grep gets wrong):
   flag stays set and silently blocks every later load/show, reload-on-hide, retry, and prepare.
   Recommend removing it, or — if kept — clearing it in every terminal handler. Cite the flag's
   set site + a terminal path that doesn't clear it. Never FAIL — a recommendation, not a gate.
+  **Exempt:** a show-window guard set on show and cleared in both `OnAdHidden` and
+  `OnAdShowFailed` is the sanctioned `no_load_during_show` shape — load fail is not one of its
+  terminals; don't flag it.
+
+**No ad load during a fullscreen show** (project-wide, not per-format):
+
+- `no_load_during_show` — **behavioral, FAIL-capable.** MeticaSDK mishandles a `Load*` issued
+  while a fullscreen ad (interstitial, rewarded) is displaying — it disrupted the in-flight show
+  in a shipped game — so every integration must keep loads out of the show window (from
+  `Show<Format>` / `OnAdShowSuccess` until that ad's `OnAdHidden` / `OnAdShowFailed` fires).
+  **Version gate:** when `references/metica-sdk-migration.md` records the SDK release that fixes
+  load-during-show and the **installed** version (`Assets/MeticaSdk/Runtime/Sdk/MeticaSdk.cs` →
+  `Version`) is at/above it, emit a single PASS row citing that entry instead of applying this
+  rule. **FAIL** when a `Load*` (any format) is provably reachable during a fullscreen show —
+  inside a mid-show handler **of an interstitial or rewarded ad** (`OnAdShowSuccess`,
+  `OnAdClicked`, `OnAdRevenuePaid`, `OnAdRewarded` — or a leftover MAX
+  `OnAdDisplayedEvent` handler) or a call chain rooted in one. Banner/MRec lifecycle handlers
+  fire with no fullscreen ad up — they are never mid-show entries. **ADVISORY** when a load path
+  *can* coincide with a show but overlap isn't provable — a periodic/scheduled loader (`Update`,
+  `InvokeRepeating`, a coroutine timer) or a user/game-event-driven load with no is-showing
+  guard — recommend gating it (`if (_isShowing) return;`, set on show, cleared in **both**
+  `OnAdHidden` and `OnAdShowFailed`). **Exempt:** the canonical same-format backoff retry rooted
+  in `OnAdLoadFailed` (the integrator's monobehaviour shape emits one) — a load-fail retry for a
+  format means that format has no ad to show, so it cannot overlap its own show window;
+  cross-format overlap (the retry firing while the *other* fullscreen format is showing) is
+  accepted as unprovable noise, not flagged. **PASS** when every load path either runs outside
+  the show window (the canonical shape: initial loads from `OnInitialized`, reloads from
+  `OnAdHidden` / `OnAdShowFailed`, the exempt backoff retry) or sits behind an is-showing guard.
+  Evidence shape: when no load is reachable from any show window, a single PASS row
+  (`detail: "no load reachable from a show window — N/A"`); when the PASS rests on an is-showing
+  guard, cite the guard chain (≥2 evidence). On FAIL, cite the load site → the mid-show entry
+  it's reachable from (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be
+  traced — never a blind FAIL.
+
+**Banner recreation cadence** (banner only):
+
+- `banner_recreate_delay` — **behavioral, FAIL-capable.** A timed delay between tearing a banner
+  down and recreating it (`DestroyBanner` / `HideBanner` → `WaitForSeconds` coroutine / `Invoke`
+  / `Task.Delay` / a timer → `CreateBanner` / `LoadBanner` / `ShowBanner`) changes the banner's
+  effective refresh cadence. That is harmless in itself, but it skews the trial-vs-holdout
+  revenue comparison (see `references/smartfloors-user-groups.md`) when the cadence differs
+  between the compared arms — a shipped game delayed banner recreation by several seconds on its
+  Metica route only. The branch axes to compare: a SmartFloors group branch
+  (`response.SmartFloors.UserGroup` / `IsForcedHoldout`, or a stored copy) and/or the
+  `MeticaAdService.UseMetica` arms. **FAIL** when both arms of such a branch are visible in the
+  code and the delay **differs between them** — present in only one arm, or a different duration
+  per arm (cite the branch → the delayed recreate vs the other arm's recreate). **ADVISORY**
+  when a timed delay precedes banner (re)creation and no in-code comparison arm exists — surface
+  it with "confirm the delay matches the pre-Metica/holdout banner cadence". **PASS** when
+  banner create/show paths carry no artificial delay or the delay is provably identical across
+  arms; when the project never tears down and recreates a banner (the canonical shape: `Create`
+  once → `Show`, the SDK auto-refreshes), a single PASS row (`detail: "no banner
+  teardown/recreate — N/A"`) suffices. A frame-boundary yield (`yield return null`,
+  `WaitForEndOfFrame`) is not a cadence delay — don't flag it. Otherwise cite the teardown → the
+  delay → the recreate (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't be
+  traced — never a blind FAIL.
 
 **Setter ordering & 3PA analytics forwarders:**
 
@@ -352,7 +437,7 @@ or **signature-changed** at or below that version:
   post-upgrade confirmation that no stale obsoleted usage remains. Emit a single PASS row when
   there are no matches.
 
-## Compile check (the one thing you shell out for)
+## Compile check
 
 Run the Unity batch build and turn its output into `compiles_cleanly` findings:
 
