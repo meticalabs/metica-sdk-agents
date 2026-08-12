@@ -26,6 +26,12 @@ new `<from> → <to>` section) rather than rewriting it.
 When verifying a verdict that turns on SDK behavior, read the vendored SDK source under
 `Assets/MeticaSdk/Runtime/...` to confirm rather than guess.
 
+## Known issues (open at 2.45.0)
+
+| Issue | Affected | Detail | Validator rule |
+|-------|----------|--------|----------------|
+| Load during fullscreen show | all versions through 2.45.0 | A `Load*` issued while an interstitial/rewarded ad is displaying disrupts the in-flight show. Integrations must keep loads out of the show window. When a release fixes this, record the fixing version here — the validator's `no_load_during_show` gate reads this row and PASSes at/above it. | `no_load_during_show` |
+
 ---
 
 ## 2.4.x → 2.45.0
