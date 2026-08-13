@@ -1,6 +1,6 @@
 ---
 name: unity-validator
-description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, no ad load while a fullscreen ad is showing, delayed banner recreation (cadence drift vs the holdout baseline), holdout-matches-baseline parity (the holdout branch reproducing the non-Metica arm or pre-Metica logic), placement-ID consistency, load-callback payload fields treated as authoritative (eCPM show gates, callback-derived ad-unit reuse), leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
+description: Validate any MeticaSDK integration in a Unity project. Reads the project's code and reasons about each integration rule — privacy-before-init ordering, single init (callback or InitializeAsync form), init re-entry/duplicate-subscription guarding, per-format callback parity, load/show parity, show-failed subscription, auto-reload-on-hidden (through indirection), IsReady-guarded show, no ad load while a fullscreen ad is showing, delayed banner recreation (cadence drift vs the holdout baseline), holdout-matches-baseline parity (the holdout branch reproducing the non-Metica arm or pre-Metica logic), placement-ID consistency, load-callback payload fields treated as authoritative (eCPM show gates, callback-derived ad-unit reuse), Metica-dedicated ad units configured as the app's default/requested id (must always be the game's AppLovin unit), leftover placeholder credentials, test-value userIds, MaxSDK-API misuse, and deprecated MeticaSDK-API usage (obsoleted/signature-changed symbols after an SDK upgrade) — plus a compiles-cleanly Unity batch build. Every behavioral verdict is backed by line-cited evidence. Reports per-rule PASS/FAIL/ADVISORY/WARN. Can be invoked by the integrator or run standalone against hand-rolled integrations.
 tools: Bash, Read, Grep
 model: opus
 ---
@@ -178,6 +178,29 @@ ones grep gets wrong):
   use) or never read. Cite the callback read/store site → the gating conditional (or the SDK
   call re-using the stored id) (≥2 evidence). `ADVISORY` with `unresolved` when the flow can't
   be traced — never a blind FAIL.
+
+**The configured ad unit is always the game's AppLovin unit** (project-wide, not per-format):
+
+- `default_adunit_is_applovin` — **behavioral, FAIL-capable.** The ad-unit ids the app configures
+  and passes to `Load*` / `Show*` / `Create*` — including the default arm of any id-selection
+  fallback — must be the game's own **AppLovin MAX ad units** (the units the pre-Metica
+  integration requested). Metica-dedicated ad units are provisioned for the SDK's internal trial
+  routing and are never configured app-side: the requested id passes through for **holdout**
+  users (see `references/smartfloors-user-groups.md`), so a Metica-dedicated default puts the
+  control arm on the wrong ad unit and invalidates the trial-vs-holdout comparison. Ad-unit ids
+  are opaque strings — judge **provenance**, not the value: a constant/field/config key whose
+  name or nearby comment marks it as Metica's (`meticaInterstitialAdUnitId`, `metica_ad_unit`,
+  `// Metica ad unit`), or an id branch that selects a **different** id for the Metica arm (a
+  `MeticaAdService.UseMetica` switch or SmartFloors group branch feeding per-arm ids into the
+  same format's calls — every arm must request the same publisher unit). **FAIL** when a
+  Metica-marked id is the id an SDK call requests — the sole configured id for a format, the
+  default/fallback of an id-selection expression (`?? meticaAdUnitId`), or the id selected for
+  any arm of such a branch. Cite the id's definition → the SDK call it reaches (≥2 evidence).
+  **PASS** when every configured id is the game's own MAX unit with no Metica-marked alternative
+  wired into an SDK call. A stored **callback-derived** id (`MeticaAd.adUnitId` fed back into
+  SDK calls) stays under `load_callback_fields_unreliable` — never emitted under both.
+  **ADVISORY** with `unresolved` when provenance can't be judged (bare id literals with no
+  naming/comment/branch signal) — never a blind FAIL.
 
 **Group branching must serve every group** (project-wide, not per-format):
 

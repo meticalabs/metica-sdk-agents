@@ -33,6 +33,12 @@ Because of both, **ad-unit-based routing/analysis is unreliable**. App code must
 configured id through unchanged, never second-guess what comes back, and attribute by the group
 tag it read at init.
 
+The configured id is always the game's **own AppLovin MAX ad unit** — the unit the pre-Metica
+integration requested. Metica-dedicated ad units exist for the SDK's internal trial routing and
+are never configured app-side as a default/requested id: the requested id passes through for
+holdout users, so a Metica-dedicated default puts the control arm on the wrong unit and
+invalidates the trial-vs-holdout comparison.
+
 The same applies **inside callbacks**: a guard like `if (ad.adUnitId != _loadedAdUnitId) return;`
 at the top of a revenue/reward/lifecycle handler silently drops revenue and events whenever
 Metica serves a different unit than requested. The idiom is usually copied from a MAX
