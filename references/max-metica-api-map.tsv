@@ -129,6 +129,11 @@ MaxSdk.IsVerboseLoggingEnabled(	-	drop	No MeticaSdk read-back for log state.
 MaxSdk.SetExceptionHandlerEnabled(	-	drop	No MeticaSdk equivalent.
 
 # ============================================================================
+# Event tracking
+# ============================================================================
+MaxSdk.TrackEvent(	MeticaSdk.Ads.Max.TrackEvent	rename	Since SDK 2.45.0. Passthrough to AppLovin's event service, same as MaxSdk.TrackEvent. On iOS it works only from SDK 2.45.2: on 2.45.0/2.45.1 the iOS call logs a warning and drops the event (Android forwards it from 2.45.0). parameters has no default: pass null when the MAX call omits it.
+
+# ============================================================================
 # Privacy read-back (not in MeticaSdk)
 # ============================================================================
 MaxSdk.IsDoNotSell(	-	drop	No MeticaSdk equivalent for read-back.
@@ -141,7 +146,6 @@ MaxSdk.GetSdkConfiguration(	-	drop	No unified MeticaSdk config object; individua
 MaxSdk.GetAvailableMediatedNetworks(	-	drop	No MeticaSdk equivalent.
 MaxSdk.GetAdValue(	-	drop	No MeticaSdk equivalent for arbitrary ad-value lookup.
 MaxSdk.GetSafeAreaInsets(	-	drop	No MeticaSdk equivalent.
-MaxSdk.TrackEvent(	-	drop	MeticaSdk has its own event system (MeticaSdk.Events.*). Migrate or drop.
 MaxSdk.SetSegmentCollection(	-	drop	MaxSegmentCollection not supported in MeticaSdk; remove targeting via MAX segments.
 
 # ============================================================================

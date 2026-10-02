@@ -175,6 +175,12 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetVerboseLogging(bool)` | `MeticaSdk.SetLogEnabled(bool)` | Different name; MeticaSdk controls its own logging level |
 | `MaxSdk.ShowMediationDebugger()` | `MeticaSdk.Ads.Max.ShowMediationDebugger()` | Available via Max sub-accessor |
 
+### Event Tracking
+
+| MaxSdk | MeticaSdk | Notes |
+|--------|-----------|-------|
+| `MaxSdk.TrackEvent(string, IDictionary<string, string> = null)` | `MeticaSdk.Ads.Max.TrackEvent(string, IDictionary<string, string>?)` | Since MeticaSdk 2.45.0. Passthrough to AppLovin's event service, same as `MaxSdk.TrackEvent` (not Metica analytics). On iOS it works only from 2.45.2 — on 2.45.0/2.45.1 the iOS call logs a warning and drops the event; Android forwards it from 2.45.0. `parameters` has no default: pass `null` when the MAX call omits it |
+
 ### Ad Info Models
 
 | MaxSdk (`MaxSdkBase.AdInfo`) | MeticaSdk (`MeticaAd`) | Notes |
@@ -304,12 +310,6 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | Missing Feature | MaxSdk API | Details |
 |-----------------|-----------|---------|
 | **Exception handler toggle** | `MaxSdk.SetExceptionHandlerEnabled(bool)` | Not available |
-
-### Event Tracking
-
-| Missing Feature | MaxSdk API | Details |
-|-----------------|-----------|---------|
-| **AppLovin event tracking** | `MaxSdk.TrackEvent(string, IDictionary<string, string>)` | Not available (MeticaSdk has its own event system via `MeticaSdk.Events.*`) |
 
 ### Segmentation
 
