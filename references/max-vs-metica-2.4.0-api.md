@@ -19,11 +19,11 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 
 | Category | Parity |
 |----------|--------|
-| Banners | ✅ Full — all core methods covered including auto-refresh, placement, extra params, width, background color, custom data, position update (since 2.4.1) |
-| MRECs | ✅ Full — all core methods covered including auto-refresh, placement, extra params, custom data, position update (since 2.4.1) |
+| Banners | ✅ Full — all core methods covered including auto-refresh, placement, extra params, width, background color, custom data, position update (since 2.4.1), layout read-back (since 2.45.0) |
+| MRECs | ✅ Full — all core methods covered including auto-refresh, placement, extra params, custom data, position update (since 2.4.1), layout read-back (since 2.45.0) |
 | Interstitials | ✅ Full — load/show/ready/extra params covered, plus new `MeticaAdConfig` bid floor support |
 | Rewarded Ads | ✅ Full — load/show/ready/extra params covered, plus new `MeticaAdConfig` bid floor support |
-| Callbacks / Events | ⚠️ Partial — core callbacks (load/fail/show/hide/click/revenue) covered; missing expanded/collapsed, display failed, expired ad reloaded, ad review creative ID events |
+| Callbacks / Events | ⚠️ Partial — core callbacks (load/fail/show/hide/click/revenue) covered, plus ad review creative ID through one listener for all formats (since 2.45.0); missing expanded/collapsed, display failed, expired ad reloaded |
 | Privacy / Consent | ⚠️ Partial — `SetHasUserConsent`/`SetDoNotSell` covered; consent read-back (`HasUserConsent`, `IsUserConsentSet`) and CMP flow (`ShowCmpForExistingUser`, `HasSupportedCmp` since 2.4.1) available via `MeticaSdk.Ads.Max`; missing do-not-sell read-back (`IsDoNotSell`, `IsDoNotSellSet`) and `GetSdkConfiguration()` |
 | App Open Ads | ❌ Not supported — no MeticaSdk equivalent for the entire ad format |
 | Debugging / Testing | ⚠️ Partial — `ShowMediationDebugger` available via `MeticaSdk.Ads.Max`; missing `ShowCreativeDebugger`, `SetCreativeDebuggerEnabled`, `SetTestDeviceAdvertisingIdentifiers`, `DisableStubAds` |
@@ -94,6 +94,7 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetBannerWidth(string, float)` | `MeticaSdk.Ads.SetBannerWidth(string, float)` | Direct equivalent |
 | `MaxSdk.UpdateBannerPosition(string, AdViewPosition)` | `MeticaSdk.Ads.UpdateBannerPosition(string, MeticaAdViewPosition)` | Since MeticaSdk 2.4.1; position enum renamed |
 | `MaxSdk.UpdateBannerPosition(string, float, float)` | `MeticaSdk.Ads.UpdateBannerPositionCoordinates(string, double, double)` | Since MeticaSdk 2.4.1; x/y overload renamed, `float` → `double` |
+| `MaxSdk.GetBannerLayout(string)` → `Rect` | `MeticaSdk.Ads.GetBannerLayout(string)` → `MeticaAdViewLayout` | Since MeticaSdk 2.45.0. `MeticaAdViewLayout` has `double` `OriginX`/`OriginY`/`Width`/`Height` in the same units as MAX (dp on Android, points on iOS); build a `Rect` from them at the call site. On iOS it works only from 2.45.2 — on 2.45.0/2.45.1 it returns a zero layout |
 
 ### MRECs
 
@@ -112,6 +113,7 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdk.SetMRecCustomData(string, string)` | `MeticaSdk.Ads.SetMrecCustomData(string, string?)` | Casing difference |
 | `MaxSdk.UpdateMRecPosition(string, AdViewPosition)` | `MeticaSdk.Ads.UpdateMrecPosition(string, MeticaAdViewPosition)` | Since MeticaSdk 2.4.1; casing difference, position enum renamed |
 | `MaxSdk.UpdateMRecPosition(string, float, float)` | `MeticaSdk.Ads.UpdateMrecPositionCoordinates(string, double, double)` | Since MeticaSdk 2.4.1; x/y overload renamed, `float` → `double` |
+| `MaxSdk.GetMRecLayout(string)` → `Rect` | `MeticaSdk.Ads.GetMrecLayout(string)` → `MeticaAdViewLayout` | Since MeticaSdk 2.45.0; casing difference; same `MeticaAdViewLayout` as `GetBannerLayout`. On iOS it works only from 2.45.2 — on 2.45.0/2.45.1 it returns a zero layout |
 
 ### Interstitials
 
@@ -164,6 +166,8 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | `MaxSdkCallbacks.Rewarded.OnAdClickedEvent` `Action<string, AdInfo>` | `MeticaAdsCallbacks.Rewarded.OnAdClicked` `Action<MeticaAd>` | Renamed |
 | `MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent` `Action<string, AdInfo>` | `MeticaAdsCallbacks.Rewarded.OnAdRevenuePaid` `Action<MeticaAd>` | Renamed |
 | `MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent` `Action<string, Reward, AdInfo>` | `MeticaAdsCallbacks.Rewarded.OnAdRewarded` `Action<MeticaAd>` | Simplified: no separate `Reward` struct with label/amount |
+| **Ad Review Creative ID** | | |
+| `MaxSdkCallbacks.Banner/MRec/Interstitial/Rewarded.OnAdReviewCreativeIdGeneratedEvent` `Action<string, string, AdInfo>` | `MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener(Action<string, MeticaAd>?)` | Since MeticaSdk 2.45.0. One listener for all formats instead of a per-format event: each call replaces the previous listener (`null` clears it), so merge the per-format handlers. The listener gets `(creativeId, ad)`; the ad unit id is on the `MeticaAd`. Invoked on the Unity main thread. On iOS it fires only from 2.45.2 — on 2.45.0/2.45.1 the iOS listener never fires |
 
 ### Settings / Configuration
 
@@ -258,14 +262,13 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 
 | Missing Feature | MaxSdk API | Details |
 |-----------------|-----------|---------|
-| **Get banner layout** | `GetBannerLayout(string)` → `Rect` | No way to query the banner's on-screen position/size |
 | **Adaptive banner flag** | `AdViewConfiguration.IsAdaptive` | `MeticaAdViewConfiguration` has no `IsAdaptive` property |
 
 ### MREC Features
 
 | Missing Feature | MaxSdk API | Details |
 |-----------------|-----------|---------|
-| **Get MREC layout** | `GetMRecLayout(string)` → `Rect` | No way to query the MREC's on-screen position/size |
+| — | — | Core functionality fully covered |
 
 ### Interstitial Features
 
@@ -324,7 +327,6 @@ MeticaSdk 2.4.0 covers the core ad lifecycle (load/show/destroy) for banners, MR
 | **Banner expanded/collapsed** | `MaxSdkCallbacks.Banner.OnAdExpandedEvent`, `OnAdCollapsedEvent` | Not available |
 | **MREC expanded/collapsed** | `MaxSdkCallbacks.MRec.OnAdExpandedEvent`, `OnAdCollapsedEvent` | Not available |
 | **Expired ad reloaded** | `MaxSdkCallbacks.Interstitial.OnExpiredAdReloadedEvent`, `MaxSdkCallbacks.Rewarded.OnExpiredAdReloadedEvent`, `MaxSdkCallbacks.AppOpen.OnExpiredAdReloadedEvent` | Not available |
-| **Ad Review Creative ID** | `MaxSdkCallbacks.*.OnAdReviewCreativeIdGeneratedEvent` (all formats) | Not available |
 | **Application state changed** | `MaxSdkCallbacks.OnApplicationStateChangedEvent` | Not available |
 
 ### Data Models
