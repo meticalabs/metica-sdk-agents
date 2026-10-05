@@ -67,7 +67,7 @@ MaxSdk.SetBannerLocalExtraParameter(	MeticaSdk.Ads.SetBannerLocalExtraParameter	
 MaxSdk.SetBannerCustomData(	MeticaSdk.Ads.SetBannerCustomData	rename
 MaxSdk.SetBannerWidth(	MeticaSdk.Ads.SetBannerWidth	rename
 MaxSdk.UpdateBannerPosition(	MeticaSdk.Ads.UpdateBannerPosition	signature-change	Since SDK 2.4.1. AdViewPosition → MeticaAdViewPosition; the (string, float x, float y) overload becomes UpdateBannerPositionCoordinates(string, double, double). On 2.4.0 there is no equivalent — destroy and recreate.
-MaxSdk.GetBannerLayout(	-	drop	No MeticaSdk equivalent for querying banner Rect.
+MaxSdk.GetBannerLayout(	MeticaSdk.Ads.GetBannerLayout	signature-change	Since SDK 2.45.0. Returns MeticaAdViewLayout (double OriginX/OriginY/Width/Height, same units as MAX: dp on Android, points on iOS) instead of Rect; convert at the call site with new Rect((float)layout.OriginX, (float)layout.OriginY, (float)layout.Width, (float)layout.Height). On iOS it works only from SDK 2.45.2: on 2.45.0/2.45.1 it returns a zero layout.
 
 # ============================================================================
 # MRECs (note casing change: MRec → Mrec)
@@ -84,7 +84,7 @@ MaxSdk.SetMRecExtraParameter(	MeticaSdk.Ads.SetMrecExtraParameter	rename	Casing 
 MaxSdk.SetMRecLocalExtraParameter(	MeticaSdk.Ads.SetMrecLocalExtraParameter	rename	Casing change.
 MaxSdk.SetMRecCustomData(	MeticaSdk.Ads.SetMrecCustomData	rename	Casing change.
 MaxSdk.UpdateMRecPosition(	MeticaSdk.Ads.UpdateMrecPosition	signature-change	Since SDK 2.4.1. Casing change (MRec → Mrec); AdViewPosition → MeticaAdViewPosition; the (string, float x, float y) overload becomes UpdateMrecPositionCoordinates(string, double, double). On 2.4.0 there is no equivalent.
-MaxSdk.GetMRecLayout(	-	drop	No MeticaSdk equivalent.
+MaxSdk.GetMRecLayout(	MeticaSdk.Ads.GetMrecLayout	signature-change	Since SDK 2.45.0. Casing change (MRec → Mrec). Returns MeticaAdViewLayout (double OriginX/OriginY/Width/Height, same units as MAX: dp on Android, points on iOS) instead of Rect; convert at the call site with new Rect((float)layout.OriginX, (float)layout.OriginY, (float)layout.Width, (float)layout.Height). On iOS it works only from SDK 2.45.2: on 2.45.0/2.45.1 it returns a zero layout.
 
 # ============================================================================
 # Interstitials
@@ -129,6 +129,11 @@ MaxSdk.IsVerboseLoggingEnabled(	-	drop	No MeticaSdk read-back for log state.
 MaxSdk.SetExceptionHandlerEnabled(	-	drop	No MeticaSdk equivalent.
 
 # ============================================================================
+# Event tracking
+# ============================================================================
+MaxSdk.TrackEvent(	MeticaSdk.Ads.Max.TrackEvent	rename	Since SDK 2.45.0. Passthrough to AppLovin's event service, same as MaxSdk.TrackEvent. On iOS it works only from SDK 2.45.2: on 2.45.0/2.45.1 the iOS call logs a warning and drops the event (Android forwards it from 2.45.0). parameters has no default: pass null when the MAX call omits it.
+
+# ============================================================================
 # Privacy read-back (not in MeticaSdk)
 # ============================================================================
 MaxSdk.IsDoNotSell(	-	drop	No MeticaSdk equivalent for read-back.
@@ -141,7 +146,6 @@ MaxSdk.GetSdkConfiguration(	-	drop	No unified MeticaSdk config object; individua
 MaxSdk.GetAvailableMediatedNetworks(	-	drop	No MeticaSdk equivalent.
 MaxSdk.GetAdValue(	-	drop	No MeticaSdk equivalent for arbitrary ad-value lookup.
 MaxSdk.GetSafeAreaInsets(	-	drop	No MeticaSdk equivalent.
-MaxSdk.TrackEvent(	-	drop	MeticaSdk has its own event system (MeticaSdk.Events.*). Migrate or drop.
 MaxSdk.SetSegmentCollection(	-	drop	MaxSegmentCollection not supported in MeticaSdk; remove targeting via MAX segments.
 
 # ============================================================================
@@ -170,6 +174,10 @@ MaxSdkCallbacks.Rewarded.OnAdHiddenEvent	MeticaAdsCallbacks.Rewarded.OnAdHidden	
 MaxSdkCallbacks.Rewarded.OnAdClickedEvent	MeticaAdsCallbacks.Rewarded.OnAdClicked	signature-change
 MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent	MeticaAdsCallbacks.Rewarded.OnAdRevenuePaid	signature-change
 MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent	MeticaAdsCallbacks.Rewarded.OnAdRewarded	signature-change	Simplified: Action<string,Reward,AdInfo> → Action<MeticaAd>; no Reward.Label / Reward.Amount.
+MaxSdkCallbacks.Banner.OnAdReviewCreativeIdGeneratedEvent	MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener	signature-change	Since SDK 2.45.0. One listener for all formats: each SetAdReviewCreativeIdListener call replaces the previous one (null clears it), so merge the per-format handlers into one. Action<string,string,AdInfo> (adUnitId, creativeId, info) → Action<string,MeticaAd> (creativeId, ad; adUnitId is on the ad). On iOS it fires only from SDK 2.45.2; on 2.45.0/2.45.1 the iOS listener never fires.
+MaxSdkCallbacks.MRec.OnAdReviewCreativeIdGeneratedEvent	MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener	signature-change	Since SDK 2.45.0. One listener for all formats: each SetAdReviewCreativeIdListener call replaces the previous one (null clears it), so merge the per-format handlers into one. Action<string,string,AdInfo> (adUnitId, creativeId, info) → Action<string,MeticaAd> (creativeId, ad; adUnitId is on the ad). On iOS it fires only from SDK 2.45.2; on 2.45.0/2.45.1 the iOS listener never fires.
+MaxSdkCallbacks.Interstitial.OnAdReviewCreativeIdGeneratedEvent	MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener	signature-change	Since SDK 2.45.0. One listener for all formats: each SetAdReviewCreativeIdListener call replaces the previous one (null clears it), so merge the per-format handlers into one. Action<string,string,AdInfo> (adUnitId, creativeId, info) → Action<string,MeticaAd> (creativeId, ad; adUnitId is on the ad). On iOS it fires only from SDK 2.45.2; on 2.45.0/2.45.1 the iOS listener never fires.
+MaxSdkCallbacks.Rewarded.OnAdReviewCreativeIdGeneratedEvent	MeticaSdk.Ads.Max.SetAdReviewCreativeIdListener	signature-change	Since SDK 2.45.0. One listener for all formats: each SetAdReviewCreativeIdListener call replaces the previous one (null clears it), so merge the per-format handlers into one. Action<string,string,AdInfo> (adUnitId, creativeId, info) → Action<string,MeticaAd> (creativeId, ad; adUnitId is on the ad). On iOS it fires only from SDK 2.45.2; on 2.45.0/2.45.1 the iOS listener never fires.
 
 # ============================================================================
 # Callbacks / events — not in MeticaSdk
@@ -182,10 +190,6 @@ MaxSdkCallbacks.Interstitial.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equiva
 MaxSdkCallbacks.Rewarded.OnExpiredAdReloadedEvent	-	drop	No MeticaSdk equivalent.
 MaxSdkCallbacks.AppOpen.OnExpiredAdReloadedEvent	-	drop	App Open Ads not supported at all.
 MaxSdkCallbacks.OnApplicationStateChangedEvent	-	drop	No MeticaSdk equivalent.
-MaxSdkCallbacks.Banner.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent (ad review creative ID surfacing).
-MaxSdkCallbacks.MRec.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
-MaxSdkCallbacks.Interstitial.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
-MaxSdkCallbacks.Rewarded.OnAdReviewCreativeIdGeneratedEvent	-	drop	No MeticaSdk equivalent.
 MaxSdkCallbacks.AppOpen.OnAdReviewCreativeIdGeneratedEvent	-	drop	App Open Ads not supported at all.
 
 # All App Open callbacks are unsupported (App Open Ads not in MeticaSdk).
