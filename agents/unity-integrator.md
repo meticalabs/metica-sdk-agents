@@ -7,7 +7,7 @@ model: opus
 
 # Metica Unity Integrator
 
-Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version comes from `metica-versions.yaml` (`latest:` by default; override via `--version`).
+Orchestrates MeticaSDK integration. Calls sub-agents for preflight and validation, and discovers the project's existing ad setup inline (Step 2). Target SDK version is the latest published MeticaSDK release, resolved live from GitHub (override via `VERSION`); `metica-versions.yaml` supplies the compatibility minimums.
 
 See `agents/contracts.md` for the sub-agent JSON schemas and extraction regex. MaxSDK presence is derived inline during Step 2 discovery.
 
@@ -22,7 +22,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
 - `MAX_MODE` — `replace` | `switchable`. Only used when MaxSDK is present. `replace` (default) rewrites the game's direct Max call sites to `MeticaAdService` outright; `switchable` applies the same rewrites but keeps each original call as the `else` branch behind `MeticaAdService.UseMetica` (default `true`), so developers flip between the Metica and Max paths without a revert. If omitted, confirmed in the Step 3 plan preview; when passed, the Step 3 question is skipped and the inference list shows `(overridden by env)`.
 - `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` — valid (MeticaSDK then auto-generates a stable per-device userId, which the validator PASSes), but the integrator still recommends wiring the host app's real identity source for correct cross-session attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
-- `VERSION` — target MeticaSDK version. Defaults to `latest:` in `metica-versions.yaml`.
+- `VERSION` — target MeticaSDK version. Defaults to the latest published release, resolved live (see "Setup — resolve the target SDK version").
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
 - `REMOTE_CONFIG_KEY` — the boolean-typed key name suggested in the cohort-gating recipe. Default: `metica_rollout`.
 - `NAMESPACE` — explicit namespace string for all generated files. If omitted, auto-detected from the project's dominant namespace (Step 2.5). Pass an empty string to force bare/no-namespace.
@@ -48,6 +48,26 @@ done
 ```
 
 The loop searches known install locations for `resolve-plugin-dir.sh`, then runs it. The marketplace cache lives at `~/.claude/plugins/cache/*/metica-sdk-agents/<version>`, so the loop first tries the **version-sorted newest** cached copy (`ls … | sort -V | tail -1`) and keeps the raw cache glob as a fallback for hosts whose `sort` lacks `-V`. `$CLAUDE_PLUGIN_ROOT` is **not** reliably exported into an agent's bash environment, so it is only the first candidate, not the sole path. Once found, `resolve-plugin-dir.sh` self-verifies the root (it self-locates from its own script path, then falls back to `$METICA_SDK_AGENTS_DIR`, symlink targets, and known install paths). If the loop fails, abort — do not run scripts with relative paths.
+
+## Setup — resolve the target SDK version
+
+The target is the latest **published** MeticaSDK release, read live from GitHub. When
+`VERSION` is not passed, run:
+
+```bash
+bash "$PLUGIN_DIR/scripts/resolve-sdk-release.sh"
+```
+
+It prints `version=`, `download_url=`, `sha256=`, `released_at=`, and `release_notes_url=`.
+Set `VERSION` to the printed `version`. When `VERSION` is passed but has no row in
+`metica-versions.yaml`, run the script with `--version="$VERSION"` to get that release's
+fields. Never take the target from the `latest:` field of `metica-versions.yaml`, from
+memory, or from a version named elsewhere in this plugin.
+
+If the script exits non-zero, stop: report its error line and ask the user to retry with
+network access or to pass an explicit `VERSION`. Do not continue with a guessed version.
+
+Pass the resolved `VERSION` explicitly to every `@agent-unity-compat-checker` invocation and to `download-metica-sdk.sh --version`, and name it in the Step 3 plan preview.
 
 ## Setup — resolve `PROJECT`
 
@@ -168,7 +188,7 @@ If `checks[]` contains exactly one `level == "FAIL"` row and that row's `id == "
 MeticaSDK is not installed in this project.
 
 I can download MeticaSDK <target_sdk> (about ~3 MB) from
-<download_url from metica-versions.yaml> and import it into your project.
+<download_url from the compat-checker hint> and import it into your project.
 
   [y] download and import (recommended)
   [n] cancel; I'll install it manually
@@ -182,7 +202,7 @@ On `y`, run:
 bash "$PLUGIN_DIR/scripts/download-metica-sdk.sh" --project="$PROJECT" --version="$VERSION" --import
 ```
 
-The script verifies the SHA-256 checksum from `metica-versions.yaml`, places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
+The script verifies the SHA-256 checksum (from `metica-versions.yaml`, or from the GitHub release when the version has no row), places the `.unitypackage` at `$PROJECT/Assets/MeticaSDK-<version>.unitypackage`, and (with `--import`) launches Unity headless to import it. After it succeeds, re-invoke `@agent-unity-compat-checker` from a fresh subagent context. If compat-check is now PASS, continue with step 2. If it still BLOCKs, render the remediation block (auto-install isn't infinite-retry; the second failure is real).
 
 If Unity headless is not available (no `UNITY_PATH` set, no Hub-installed Unity matching the project version), the download script will fall back to placing the `.unitypackage` in `Assets/` and printing "double-click to import in the Editor". Surface that to the user with one extra step: "Unity isn't on PATH for headless import — open the project and double-click `Assets/MeticaSDK-<version>.unitypackage`, then re-run me."
 

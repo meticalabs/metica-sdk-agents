@@ -1,6 +1,6 @@
 ---
 name: unity-compat-checker
-description: Detect Unity, Java, MaxSDK, Android API, Gradle, and scripting backend (IL2CPP/Mono) versions in a Unity project. Report PASS/WARN/FAIL/UNKNOWN per check against the matrix in metica-versions.yaml. Use before any MeticaSDK integration.
+description: Detect Unity, Java, MaxSDK, Android API, Gradle, and scripting backend (IL2CPP/Mono) versions in a Unity project. Report PASS/WARN/FAIL/UNKNOWN per check against the matrix in metica-versions.yaml, targeting the latest published MeticaSDK release (resolved live from GitHub). Use before any MeticaSDK integration.
 tools: Bash, Read, Grep
 model: haiku
 ---
@@ -14,11 +14,11 @@ simple: read the few marker files, compare, write the summary, emit one JSON blo
 ## Inputs
 
 - `PROJECT` — absolute path to the Unity project root (the directory containing `ProjectSettings/`).
-- `VERSION` — target SDK version. Default: the `latest:` value in `metica-versions.yaml`.
+- `VERSION` — target SDK version. Default: the latest published release, resolved live (see "Resolve the target SDK version").
 
 ## Setup — establish `PLUGIN_DIR`
 
-You need `PLUGIN_DIR` only to read `metica-versions.yaml`. Resolve it automatically; do not
+You need `PLUGIN_DIR` to read `metica-versions.yaml` and run `resolve-sdk-release.sh`. Resolve it automatically; do not
 ask the user. `$CLAUDE_PLUGIN_ROOT` is **not** reliably present in an agent's bash
 environment, so the loop searches known install locations (including the **newest** cached
 marketplace version) for the resolver, then lets it self-verify the root.
@@ -37,11 +37,34 @@ done
 [ -n "$PLUGIN_DIR" ] || { echo "Could not locate metica-sdk-agents plugin root. Set METICA_SDK_AGENTS_DIR to the plugin path and retry." >&2; exit 1; }
 ```
 
+## Setup — resolve the target SDK version
+
+The target is the latest **published** MeticaSDK release, read live from GitHub. When
+`VERSION` is not passed, run:
+
+```bash
+bash "$PLUGIN_DIR/scripts/resolve-sdk-release.sh"
+```
+
+It prints `version=`, `download_url=`, `sha256=`, `released_at=`, and `release_notes_url=`.
+Set `VERSION` to the printed `version`. When `VERSION` is passed but has no row in
+`metica-versions.yaml`, run the script with `--version="$VERSION"` to get that release's
+fields. Never take the target from the `latest:` field of `metica-versions.yaml`, from
+memory, or from a version named elsewhere in this plugin.
+
+If the script exits non-zero, stop: report its error line and ask the user to retry with
+network access or to pass an explicit `VERSION`. Do not continue with a guessed version.
+
 ## What to detect, and where
 
-Read `$PLUGIN_DIR/metica-versions.yaml` and find the row for the target `VERSION` (or the
-`latest:` version). That row carries the minimums: `unity_min`, `java_min`, `max_min`,
-`android_api_min`. **Never hardcode minimums here — the YAML is the source of truth.**
+Read `$PLUGIN_DIR/metica-versions.yaml` and find the row for the target `VERSION`. That row
+carries the minimums: `unity_min`, `java_min`, `max_min`, `android_api_min`. **Never hardcode
+minimums here — the YAML is the source of truth.**
+
+When the target `VERSION` has no row (a release newer than the matrix), take the minimums from
+the highest-versioned row and add one entry to the top-level `warnings`:
+*"Compatibility minimums for <target> are taken from the <row> row; check <release_notes_url>
+for changed requirements."* The `download_url` then comes from `resolve-sdk-release.sh`.
 
 Then detect each value in the project and compare it to the matrix:
 
@@ -65,11 +88,11 @@ the exact download URL from the matched YAML row. Word it by whether the SDK is 
 **outdated** (the integrator reads `detected` to choose a fresh install vs an upgrade). The
 templates use three tokens the checker **must** substitute before emitting the hint (an
 emitted `<target>` in the report is a bug): `<target>` → the **target `VERSION`** the check is
-running against (the same row already selected at the top of this section — an explicit
-`VERSION` when set, otherwise the yaml's `latest:` field), so the hint names the version the
-user actually needs to install/upgrade to; `<detected>` → the detected SDK version from the
+running against (an explicit `VERSION` when set, otherwise the live-resolved latest release),
+so the hint names the version the user actually needs to install/upgrade to; `<detected>` → the detected SDK version from the
 project; `<download_url>` → the `download_url` from the yaml row matched to the target
-`VERSION`. If any token can't be resolved (yaml unreadable, target row missing), emit a
+`VERSION`, or from `resolve-sdk-release.sh` when the target has no row. If any token can't be
+resolved (yaml unreadable, release not resolvable), emit a
 top-level `error` and `status: "BLOCK"` rather than shipping a hint with unresolved tokens.
 
 - `detected: null` (missing) — *"Install MeticaSDK <target>: download <download_url> and double-click in Unity to import."*
@@ -79,7 +102,7 @@ The `managed_stripping` WARN `hint` must name the bug and the fix (substitute th
 
 > IL2CPP + managed stripping on Metica SDK {detected} hits the forced-HOLDOUT init-serialization bug (MET-11632): the SDK reports every user as HOLDOUT even when the backend assigns TRIAL, with no error. Fixed in 2.4.2 — upgrade the Metica Unity package + native AAR to ≥2.4.2, or set Managed Stripping Level to Disabled as a stopgap (a link.xml does not fix it — the stripped member is an anonymous type).
 
-Keep `managed_stripping` at **WARN**, never FAIL — don't BLOCK on a stripping setting (the generic `metica_sdk` FAIL already blocks once the matrix's `latest` reaches ≥ 2.4.2). The check retires itself once pre-2.4.2 versions leave `metica-versions.yaml`.
+Keep `managed_stripping` at **WARN**, never FAIL — don't BLOCK on a stripping setting (the generic `metica_sdk` FAIL already blocks, since the target is ≥ 2.4.2). The check retires itself once pre-2.4.2 versions leave `metica-versions.yaml`.
 
 ## Output contract — `compat-checker`
 

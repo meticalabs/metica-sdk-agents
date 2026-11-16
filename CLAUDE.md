@@ -17,14 +17,14 @@ This is **not application code** — it ships three Metica sub-agents (compat-ch
 
 ```bash
 bash tests/run-all.sh                      # full suite; prints "ALL GREEN" or "FAILURES"
-bash tests/run-<suite>-tests.sh            # a single suite: resolver, download,
+bash tests/run-<suite>-tests.sh            # a single suite: resolver, download, release,
                                            # compile, update-check, log-monitor
 ```
 
-Tests cover the **scripts** (system-tooling plumbing) — five suites of plain bash assertions
+Tests cover the **scripts** (system-tooling plumbing) — six suites of plain bash assertions
 against `tests/fixtures/`, no framework. The verification logic lives in agent prose (reviewed at
 run time), not tests. The `download` suite skips silently when its local SDK build is absent; the
-other four always run, and `update-check` drives `check-for-update.sh` through a fake `curl` (no
+other five always run, and `update-check` drives `check-for-update.sh` through a fake `curl` (no
 network).
 
 ## Architecture
@@ -61,6 +61,7 @@ Two principles drive most decisions here — preserve both when extending the pl
 
 - **Instructions describe what the code does — not what it doesn't do or used to do.** These `.md` files are prompts and contributor docs; keep them lean. Don't narrate removed features, prior versions, or absent capabilities ("there is no X anymore", "the old Y", "replaces the old Z", "was an agent through vN"). State current behavior positively. (Imperative do/don't *rules* that govern agent behavior — e.g. "never edit `Assets/MaxSdk/`", "never emit `Metica.AbTest`" — are instructions, not history; keep those.)
 - **`metica-versions.yaml` is the single source of truth** for the compatibility matrix. The compat-checker reads it. Add a new SDK by adding an entry and bumping `latest:`. `metica-versions.dev.yaml` is a gitignored local override.
+- **The target SDK version is resolved live, not from the matrix.** `scripts/resolve-sdk-release.sh` reads the latest published release (version, download URL, sha256 digest) from the `meticalabs/metica-unity-package` GitHub releases; the integrator, compat-checker, and `download-metica-sdk.sh` default to it and stop when it is unreachable. A release with no matrix row takes its minimums from the highest row with a warning. `latest:` in the yaml is the default only under `METICA_SDK_DEV=1`. Covered by `tests/run-release-tests.sh`.
 - **Avoid comment/string false positives when scanning `.cs`.** The agents grep to locate a candidate, then Read the surrounding lines to confirm it's live code (not a `//` comment or a `"string literal"`) before acting on it — the agent sees the context.
 - **The integrator git-tags `pre-metica-integration`** before any file write (inline `git tag`, after a `git status --porcelain` dirty-tree check — no `git-snapshot.sh` script). On a validator FAIL the integrator runs an **autofix loop** (integrator.md Step 6.5: classify each FAIL autofix/prompt/surface, edit with an anchor re-check, re-validate, max 3 iterations); `git reset --hard pre-metica-integration` is the last-resort rollback **hint** the integrator prints (never auto-executes) only when the loop can't clear all FAILs.
 - **Don't mention Linear tickets in repo prose.** Agent prompts, contributor docs, and other committed `.md`/`.tmpl`/agent-facing content describe *what the code does*, not *which ticket motivated it*. A reference like "the MET-XXXXX issue #1 regression" inside an agent's runtime instructions ties this repo to an internal tracker the agent and outside readers can't see, and clutters prose that should read positively. Put the ticket reference in the PR description / commit message / Linear comment instead — those are the right venues for "why we changed this." Existing references in `metica-versions.yaml` / `references/metica-sdk-migration.md` / `agents/unity-compat-checker.md` describe **SDK release artifacts** (which Metica SDK release fixed which issue) — that's a different concern (SDK history, user-facing in upgrade reports) and is grandfathered.

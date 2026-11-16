@@ -9,8 +9,13 @@
 #            package (for version upgrades — Unity's importPackage overlays files,
 #            so removed files would otherwise orphan). Implies --force.
 #
+# Version: without --version the target is the latest published GitHub release
+#   (resolve-sdk-release.sh). A version with no metica-versions.yaml row takes its
+#   download URL and sha256 from that release.
+#
 # Env:
-#   METICA_SDK_DEV=1  use local_path from metica-versions.dev.yaml (no network).
+#   METICA_SDK_DEV=1  use local_path from metica-versions.dev.yaml (no network);
+#                     the default version is then `latest:` in metica-versions.yaml.
 #                     Also gates --skip-checksum (refused outside dev mode).
 #   UNITY_PATH=<path> absolute path to a specific Unity binary (for --import).
 #
@@ -44,7 +49,7 @@ for arg in "$@"; do
         --clean)         CLEAN=1 ;;
         --dry-run)       DRY_RUN=1 ;;
         -h|--help)
-            sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) echo "Unknown arg: $arg" >&2; exit 1 ;;
     esac
@@ -115,11 +120,29 @@ dev_yaml_local_path() {
 
 # ---- resolve target ---------------------------------------------------------
 
-[ -z "$VERSION" ] && VERSION="$(yaml_top latest)"
+RELEASE=""
+load_release() {
+    RELEASE="$(bash "$SCRIPT_DIR/resolve-sdk-release.sh" ${1:+--version="$1"})" || exit 1
+}
+release_field() { printf '%s\n' "$RELEASE" | sed -n "s/^$1=//p"; }
+
+if [ -z "$VERSION" ]; then
+    if [ "${METICA_SDK_DEV:-0}" = "1" ]; then
+        VERSION="$(yaml_top latest)"
+    else
+        load_release ""
+        VERSION="$(release_field version)"
+    fi
+fi
 [ -n "$VERSION" ] || { echo "Could not resolve version" >&2; exit 1; }
 
 URL="$(yaml_version_field "$VERSION" download_url)"
 SHA="$(yaml_version_field "$VERSION" sha256)"
+if [ -z "$URL" ] && [ "${METICA_SDK_DEV:-0}" != "1" ]; then
+    [ -n "$RELEASE" ] || load_release "$VERSION"
+    URL="$(release_field download_url)"
+    SHA="$(release_field sha256)"
+fi
 [ -n "$URL" ] || { echo "No download_url for version $VERSION" >&2; exit 1; }
 [ -n "$SHA" ] || { echo "No sha256 for version $VERSION" >&2; exit 1; }
 
