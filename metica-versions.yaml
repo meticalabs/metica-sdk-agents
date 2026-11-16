@@ -1,13 +1,104 @@
 # Single source of truth for MeticaSDK version compatibility.
-# Auto-updated by a workflow in the SDK source repo on every release.
+# Add a new SDK release by adding an entry below and bumping `latest:`.
 # Read by: unity-compat-checker, unity-integrator, download-metica-sdk.sh.
 
 schema: "metica-versions/1.0.0"
 
 # The version selected when no explicit --version is passed.
-latest: "2.45.0"
+latest: "2.45.6"
 
 versions:
+  # max_min follows the release notes: 2.45.2 added support for MAX plugin 8.1.0, 2.45.5 lowered the minimum to 8.0.1.
+  "2.45.6":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.0.1"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.6/MeticaSdk-2.45.6.unitypackage"
+    sha256: "b7db19ebfd353dcea45dac13f3ce738b31f80e506ce92c831ffb2aec66bc476f"
+    released_at: "2026-10-09"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.6"
+    deprecated: false
+
+  "2.45.5":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.0.1"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.5/MeticaSdk-2.45.5.unitypackage"
+    sha256: "f5865ad9007df6ae4ab66a5300d52a35cf05179b02cb27ca6b32466656729413"
+    released_at: "2026-10-07"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.5"
+    deprecated: false
+
+  "2.45.4":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.1.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.4/MeticaSDK-2.45.4.unitypackage"
+    sha256: "ceefd0621603669f4f49f6ce50de9b25f2f17e296e1ffdeb02440f2fcf4da9f4"
+    released_at: "2026-09-15"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.4"
+    deprecated: false
+
+  "2.45.3":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.1.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.3/MeticaSDK-2.45.3.unitypackage"
+    sha256: "1ce1bc68a4689478e3556bc7302e161928436116ddcf96b7ef44170ec6bc4e58"
+    released_at: "2026-09-08"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.3"
+    deprecated: false
+
+  "2.45.2":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.1.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.2/MeticaSdk-2.45.2.unitypackage"
+    sha256: "00850460fa8480a7dd530c512e76ed678e5f28097c8a8eeb8697a970b2d010b2"
+    released_at: "2026-08-17"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.2"
+    deprecated: false
+
+  "2.45.1":
+    platforms: ["android"]
+    unity_min: "2021.3"
+    unity_max: ""
+    java_min: 11
+    java_max: ""
+    max_min: "8.2.0"
+    max_max: ""
+    android_api_min: 23
+    download_url: "https://github.com/meticalabs/metica-unity-package/releases/download/v2.45.1/MeticaSdk-2.45.1.unitypackage"
+    sha256: "9d7e7bbf3f6359d499662915ac004e66eee91fa37cc6f54d7a6d07e5354a9992"
+    released_at: "2026-08-06"
+    release_notes_url: "https://github.com/meticalabs/metica-unity-package/releases/tag/v2.45.1"
+    deprecated: false
+
   "2.45.0":
     platforms: ["android"]
     unity_min: "2021.3"

@@ -133,11 +133,12 @@ Defined in `metica-versions.yaml` (single source of truth):
 
 | MeticaSDK      | Unity    | Java | MAX     | Android API |
 | -------------- | -------- | ---- | ------- | ----------- |
-| 2.45.0 (latest) | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23        |
+| 2.45.6 (latest) | ≥ 2021.3 | ≥ 11 | ≥ 8.0.1 | ≥ 23        |
+| 2.45.0          | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23        |
 | 2.4.3           | ≥ 2021.3 | ≥ 11 | ≥ 8.2.0 | ≥ 23        |
 | 2.2.7           | ≥ 2021.3 | ≥ 11 | ≥ 8.0.0 | ≥ 23        |
 
-The compat-checker reads this file. To add a new SDK version, add an entry and bump `latest:`.
+The compat-checker reads this file for the minimums. The target version itself is the latest published release, read live from GitHub by `scripts/resolve-sdk-release.sh`, so a new SDK release is targeted as soon as it is published. To add a new SDK version to the matrix, add an entry and bump `latest:`.
 
 ## Running the tests
 
@@ -146,7 +147,7 @@ cd ~/.metica-sdk-agents   # or wherever you cloned
 bash tests/run-all.sh
 ```
 
-The five test suites — `resolver`, `download`, `compile`, `update-check`, `log-monitor` — cover the scripts under `scripts/` (`resolve-plugin-dir.sh`, `download-metica-sdk.sh`, `compile-check.sh`, `check-for-update.sh`, `log-monitor-start.sh` / `log-monitor-stop.sh`). The verification logic lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
+The six test suites — `resolver`, `download`, `release`, `compile`, `update-check`, `log-monitor` — cover the scripts under `scripts/` (`resolve-plugin-dir.sh`, `download-metica-sdk.sh`, `resolve-sdk-release.sh`, `compile-check.sh`, `check-for-update.sh`, `log-monitor-start.sh` / `log-monitor-stop.sh`). The verification logic lives in agent prose (reviewed by the user at run time), so it is not golden-tested.
 
 The `download` suite needs a local SDK build at `../Metica SDK builds/MeticaSdk-2.4.0.unitypackage` and silently skips when it's absent; the other four run on any clean clone.
 
@@ -176,6 +177,7 @@ metica-sdk-agents/
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for agents + skill
 │   ├── check-for-update.sh            # SessionStart update-notify check
 │   ├── compile-check.sh               # batch-mode Unity build behind the validator's compiles_cleanly rule
+│   ├── resolve-sdk-release.sh         # reads the latest published SDK release from GitHub
 │   ├── download-metica-sdk.sh         # offered by integrator when compat-check finds MeticaSDK missing
 │   ├── log-monitor-start.sh           # ad-log-monitor Phase 1: background capture + health checks
 │   ├── log-monitor-stop.sh            # ad-log-monitor Phase 2a: stop capture + summary (analysis is the skill's job, Phase 2b)

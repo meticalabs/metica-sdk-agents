@@ -28,7 +28,8 @@ shape below is unchanged, so the orchestrator's parsing is unaffected.
 - `status`: `PASS`, `BLOCK`
 - `checks[].id`: `unity`, `java`, `max`, `android_api`, `gradle`, `scripting_backend`, `metica_sdk`
 - `checks[].level`: `PASS`, `WARN`, `FAIL`, `UNKNOWN`
-- `target_sdk`: SDK version string from `metica-versions.yaml`
+- `target_sdk`: target SDK version string — an explicit `VERSION`, otherwise the latest published release from `scripts/resolve-sdk-release.sh`
+- `warnings`: strings; carries the carried-minimums notice when `target_sdk` has no `metica-versions.yaml` row
 - `detected`: detected version/value string, or `null` if detection failed (then `level: UNKNOWN`).
 - `required`: human-readable constraint, e.g. `>=2021.3`.
 - `hint`: required when `level` is `WARN` or `FAIL`; one-line remediation. Empty otherwise.
