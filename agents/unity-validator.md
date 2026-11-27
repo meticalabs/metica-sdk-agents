@@ -444,6 +444,9 @@ ones grep gets wrong):
   on the `MAX_MODE` hint alone. An **ungated** Max call in a file that also references
   `MeticaSdk.` keeps the FAIL model above (a rewrite that lost its gate, or a stray
   ungated `MaxSdk.InitializeSdk()`, still surfaces).
+  The false branch of the AB Assignment decision (`ABAssignment.Current.RunMetica` or a stored
+  `AssignmentResult.RunMetica`, see `references/ab-assignment.md`) is the same sanctioned path:
+  it is the Baseline route, and its Max calls are exempt on the same terms.
 
 Emit a single PASS row for each rule when there are no matches anywhere.
 
@@ -459,6 +462,23 @@ or **signature-changed** at or below that version:
   `MeticaSmartFloors.IsSuccess` → `IsForcedHoldout` / `UserGroup`). This is the validator's
   post-upgrade confirmation that no stale obsoleted usage remains. Emit a single PASS row when
   there are no matches.
+
+**AB Assignment rules** - apply only when the AB Assignment package is present (`references/ab-assignment.md`, "Detecting the package").
+Read that file first: it holds each rule's reason and the accepted code shapes.
+When the package is absent, emit none of these rows.
+When the package is installed but the game code never references `ABAssignment`, emit a single `ab_assignment_initialized` ADVISORY row: the package is not wired yet, and the `ab-assignment` skill wires it.
+When only the legacy package id is present, emit a single `ab_assignment_initialized` ADVISORY row that names the upgrade.
+In client-managed mode, `ab_assignment_remote_config_reported` is a single N/A PASS row, and "the decision" below is the game's own split as reported with `ReportClientAssignment`.
+
+- `ab_assignment_initialized` - `ABAssignment.Initialize(` is called once at app start (a `RuntimeInitializeOnLoadMethod`, or the first bootstrap) with the same app id and API key as `MeticaInitConfig`. **FAIL** when the package's API is used but `Initialize` is never called (events stay queued on the device), or when its app id differs from the one given to MeticaSDK.
+- `ab_assignment_decision_timing` - **behavioral, FAIL-capable**. The first read of `ABAssignment.Current`, the first `TagPlacement` and the first `ReportAdsInit` are reachable only from the game's ads start, after the Remote Config result was reported. **PASS** when the first read is rooted in the game's ads start (a user action, the end of the consent flow, a later scene): the package then leaves at most that one session unassigned if Firebase answers late, which is its designed behaviour, so no explicit wait on the report is required. **FAIL** when one of them provably runs at app start (`Awake` / `Start` of the first scene, a `RuntimeInitializeOnLoadMethod`, a static initializer); **ADVISORY** when the entry point cannot be traced.
+- `ab_assignment_remote_config_reported` - **behavioral, FAIL-capable** (automatic mode). `ReportRemoteConfig` is reached on the three Remote Config outcomes - fetch failed (the fetch task faulted, was cancelled, or `LastFetchStatus` is not `Success`), activation failed (the activate task faulted or was cancelled) and success - the value is passed only when its source is the server, and no in-app default sets `metica_assignment`. Paths before the fetch starts (for example a failed Firebase dependency check) are outside this rule: the package records a timeout for them itself. **FAIL** when no `ReportRemoteConfig` call exists (no device is ever assigned), when a success path passes a value that is not from the server, or when `SetDefaultsAsync` data includes `metica_assignment`; **ADVISORY** when the fetch-failed or activation-failed outcome is unreported.
+- `ab_assignment_single_route` - **behavioral, FAIL-capable**. MeticaSDK init and the game's own MAX init sit on opposite branches of the decision (`RunMetica`, or a `MeticaAdService.UseMetica` switch assigned from it), in one build. **FAIL** when MeticaSDK init is reachable without the decision, when `MaxSdk.InitializeSdk` is reachable on the Metica route, when the route is picked by a compile-time `#if`, or when the switch is never assigned from the decision.
+- `ab_assignment_user_id_known` - **behavioral, FAIL-capable**. Every user id reaching `MeticaInitConfig` or `MaxSdk.SetUserId` is one the package knows ("The user id rule"). **FAIL** a `null` / empty `MeticaInitConfig` user id whose `MeticaInitResponse.UserId` is not reported back, a MAX route that reaches `MaxSdk.InitializeSdk` with no `MaxSdk.SetUserId`, an id that is neither `ABAssignment.UserId` nor reported with `ReportCustomId` / `ReportClientAssignment`, and different ids on the two routes. **ADVISORY** when the id expression cannot be traced to its source. Under this rule a `null` user id is not a valid setting, even though `user_id_not_test_value` passes it.
+- `ab_assignment_ads_init_reported` - **behavioral, FAIL-capable**. Each route calls `ReportAdsInit(AdsInitStage.Started)` before it starts its ad SDK and exactly one outcome after; the Metica route's `Succeeded` carries the SmartFloors group and forced-holdout flag. **FAIL** when a route starts its ad SDK with no `Started` report, or with no outcome on a reachable path; **ADVISORY** when the outcome is reported from a callback that can run off the main thread.
+- `ab_assignment_placements_tagged` - **behavioral, FAIL-capable**. Every placement string passed to a `Show*` call or to a banner / MRec placement setter, on both routes, comes from `ABAssignment.TagPlacement`. **FAIL** an untagged placement on either route (that route's revenue cannot be split by group); **ADVISORY** when a placement variable cannot be traced.
+
+Cite the decision read, both init sites and each id expression as evidence. Emit one PASS row per rule that holds.
 
 ## Compile check
 

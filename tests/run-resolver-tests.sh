@@ -99,7 +99,7 @@ rm -rf "$T"
 
 # Bootstrap loop end-to-end. run_bootstrap mirrors verbatim the snippet that
 # lives in all three agent files (unity-{integrator,validator,compat-checker}.md);
-# keep all four copies in sync. Runs with env unset and a fake HOME so only the
+# keep every copy in sync (the two skills carry it too). Runs with env unset and a fake HOME so only the
 # cache path can match.
 run_bootstrap() {  # $1 = HOME
     env -u CLAUDE_PLUGIN_ROOT -u METICA_SDK_AGENTS_DIR HOME="$1" bash -c '

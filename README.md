@@ -11,7 +11,7 @@ Claude Code and Codex agents plus a skill that integrate [MeticaSDK](https://git
 /plugin install metica-sdk-agents@metica-sdk-agents
 ```
 
-That's it. Claude Code clones the repo, registers three agents and one skill, and sets `$CLAUDE_PLUGIN_ROOT` for you.
+That's it. Claude Code clones the repo, registers three agents and two skills, and sets `$CLAUDE_PLUGIN_ROOT` for you.
 
 **Verify:** launch Claude Code in your project and type `/agents` — you should see the three Unity agents under the `metica-sdk-agents` plugin. The `ad-log-monitor` skill shows up via `/` autocomplete (`/metica-sdk-agents:ad-log-monitor`) and via natural-language triggers (see "Use the ad-log-monitor skill" below).
 
@@ -25,9 +25,9 @@ cd metica-sdk-agents
 bash install-codex.sh
 ```
 
-The installer registers three user-wide Codex custom agents and the `ad-log-monitor` skill by linking this checkout into `~/.codex/agents/` and `~/.codex/skills/`. It also creates `~/.metica-sdk-agents` as the shared root link that the agents and skill use to resolve prompts, scripts, references, and templates.
+The installer registers three user-wide Codex custom agents and the `ad-log-monitor` and `ab-assignment` skills by linking this checkout into `~/.codex/agents/` and `~/.codex/skills/`. It also creates `~/.metica-sdk-agents` as the shared root link that the agents and skill use to resolve prompts, scripts, references, and templates.
 
-To uninstall the Codex integration, remove the three `metica_unity_*.toml` links from `~/.codex/agents/`, `~/.codex/skills/ad-log-monitor`, and `~/.metica-sdk-agents`.
+To uninstall the Codex integration, remove the three `metica_unity_*.toml` links from `~/.codex/agents/`, `~/.codex/skills/ad-log-monitor`, `~/.codex/skills/ab-assignment`, and `~/.metica-sdk-agents`.
 
 Start a new Codex task after installation, then refer to the agents by name:
 
@@ -68,6 +68,7 @@ Use this when you have a build on a device and want to QA the runtime ad behavio
 | Form | Example |
 |---|---|
 | Slash (explicit) | `/metica-sdk-agents:ad-log-monitor` |
+| `/metica-sdk-agents:ab-assignment`          | Skill | Wires the AB Assignment package (`com.abassignment.unity`) into a project that has both a MeticaSDK route and its own MAX route, or checks an existing wiring. |
 | Natural language (auto-loads the skill from its description) | "start ad-log monitoring", "capture logcat for ads", "analyse this logcat at `./trial-user-android-….log`", "compare trial vs holdout" |
 
 (A skill is **not** invoked with the `@`-mention syntax used for agents — use the `/` slash form or just a trigger phrase.)
@@ -116,7 +117,28 @@ you  >  /metica-sdk-agents:ad-log-monitor analyse the 2 existing logs at
 
 The Phase 1 script clears the device's main `logcat` buffer for a clean capture — that wipes existing log history for every app on the device, not just the target. The skill warns the user before it runs the script.
 
-## The four components
+## Use the ab-assignment skill
+
+Use this when your project has Metica's [AB Assignment package](https://github.com/meticalabs/ab-assignment-unity) (`com.abassignment.unity`) and you want players split between MeticaSDK and your own MAX code. It works on an integration the integrator generated and on one you wrote yourself.
+
+```
+/metica-sdk-agents:ab-assignment
+```
+
+Or just ask: "wire AB Assignment", "check my AB Assignment integration".
+
+The skill needs both routes in the code: the MeticaSDK integration and your original MAX path. If you have not integrated MeticaSDK yet, run the integrator first; with the package installed it keeps your MAX path.
+
+What it does, after showing you a plan and taking one approval:
+
+- sets the route from `ABAssignment.Current.RunMetica` when ads start;
+- gives MeticaSDK and MAX the same user id (`ABAssignment.UserId`, or your own player id reported with `ReportCustomId`);
+- adds `ReportRemoteConfig` to your existing Remote Config fetch, and `ReportAdsInit` and `TagPlacement` on both routes;
+- runs the validator and reports its `ab_assignment_*` rules.
+
+Ask it to "check" and it only reads the code and reports. Publishing the `metica_assignment` Remote Config parameter stays with you. The rules it applies are in [`references/ab-assignment.md`](references/ab-assignment.md).
+
+## The five components
 
 | Name                                        | Type  | Role                                                                                                                                |
 | ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -171,8 +193,10 @@ metica-sdk-agents/
 │   ├── unity-integrator.md
 │   └── unity-validator.md
 ├── skills/
-│   └── ad-log-monitor/
-│       └── SKILL.md                   # runtime ad-lifecycle verification + trial-vs-holdout comparison
+│   ├── ad-log-monitor/
+│   │   └── SKILL.md                   # runtime ad-lifecycle verification + trial-vs-holdout comparison
+│   └── ab-assignment/
+│       └── SKILL.md                   # wires the AB Assignment package into a project with both routes
 ├── scripts/                           # only what an agent can't do in prose
 │   ├── resolve-plugin-dir.sh          # auto-detects plugin root for agents + skill
 │   ├── check-for-update.sh            # SessionStart update-notify check
@@ -185,6 +209,7 @@ metica-sdk-agents/
 ├── references/
 │   ├── max-metica-api-map.tsv         # machine-readable MaxSdk → MeticaSdk map; read by both validator + integrator
 │   ├── max-vs-metica-2.4.0-api.md     # narrative parity doc (keep in sync with the TSV)
+│   ├── ab-assignment.md               # AB Assignment package wiring: rules, user id rule, code shapes
 │   └── 3pa-forwarders.md              # canonical 3PA revenue-forwarder shapes
 └── tests/                             # 5 suite scripts (+ run-all.sh) + log-monitor fixture
 ```

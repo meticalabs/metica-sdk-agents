@@ -7,14 +7,14 @@
     "url": "https://www.metica.com"
   },
   "metadata": {
-    "description": "Subagents that integrate MeticaSDK into Unity projects in one pass — including projects that already use AppLovin MAX — plus an ad-log-monitor skill for verifying integrations on device.",
-    "version": "2.18.0"
+    "description": "Subagents that integrate MeticaSDK into Unity projects in one pass — including projects that already use AppLovin MAX — plus an ad-log-monitor skill for verifying integrations on device and an ab-assignment skill for wiring the AB Assignment package.",
+    "version": "2.19.0"
   },
   "plugins": [
     {
       "name": "metica-sdk-agents",
       "source": "./",
-      "description": "Three Claude Code subagents (compat-checker, integrator, validator) for MeticaSDK Unity integration, plus an ad-log-monitor skill for runtime verification.",
+      "description": "Three Claude Code subagents (compat-checker, integrator, validator) for MeticaSDK Unity integration, plus an ad-log-monitor skill for runtime verification and an ab-assignment skill for the AB Assignment package.",
       "homepage": "https://github.com/meticalabs/metica-sdk-agents",
       "license": "Apache-2.0",
       "category": "unity",

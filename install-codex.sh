@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Metica custom agents and ad-log-monitor skill for Codex.
+# Install the Metica custom agents and skills (ad-log-monitor, ab-assignment) for Codex.
 #
 # Usage:
 #   bash install-codex.sh
@@ -47,7 +47,8 @@ for name in \
 done
 
 if [ ! -f "${PLUGIN_DIR}/agents/unity-integrator.md" ] \
-    || [ ! -f "${PLUGIN_DIR}/skills/ad-log-monitor/SKILL.md" ]; then
+    || [ ! -f "${PLUGIN_DIR}/skills/ad-log-monitor/SKILL.md" ] \
+    || [ ! -f "${PLUGIN_DIR}/skills/ab-assignment/SKILL.md" ]; then
     echo "Error: run this installer from a complete metica-sdk-agents checkout." >&2
     exit 1
 fi
@@ -64,9 +65,10 @@ for src in "${PLUGIN_DIR}"/codex/agents/*.toml; do
 done
 
 link_component "${PLUGIN_DIR}/skills/ad-log-monitor" "${SKILLS_DEST}/ad-log-monitor"
+link_component "${PLUGIN_DIR}/skills/ab-assignment" "${SKILLS_DEST}/ab-assignment"
 
 echo "Linked $linked Metica custom agents into $AGENTS_DEST"
-echo "Linked ad-log-monitor into $SKILLS_DEST"
+echo "Linked ad-log-monitor and ab-assignment into $SKILLS_DEST"
 echo ""
 echo "Done. Start a new Codex task, then ask for:"
 echo "    metica_unity_integrator"
