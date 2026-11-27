@@ -103,7 +103,7 @@ With uncommitted changes or no repository, tell the user and wait for a go-ahead
 
 Make each edit with the shapes from the reference, skip what Step 2 found already in place, and keep the game logic around every call you touch (frequency caps, cooldowns, availability guards).
 
-1. **App start.** Add the `ABAssignment.Initialize` startup method to the class that owns the MeticaSDK init (the generated `MeticaAdService` when there is one). Reuse the app id and API key constants that `MeticaInitConfig` already reads.
+1. **App start.** Add the `ABAssignment.Initialize` startup method to the class that owns the MeticaSDK init (the generated `MeticaAdService` when there is one). Give it the same app id and API key that `MeticaInitConfig` gets: reuse the constants when the code has them, and repeat the same literals when it does not (the integrator's generated `MeticaAdService` holds literals). Mind the argument order, which the reference spells out.
 2. **Remote Config.** Add the three `ReportRemoteConfig` calls to the game's existing fetch, ahead of its other handlers.
 3. **Ads start.** Make the package's decision drive the route, read once where ads start.
    - With a `MeticaAdService.UseMetica` switch: assign `ABAssignment.Current.RunMetica` to it immediately before the bootstrap reads it.

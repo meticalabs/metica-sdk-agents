@@ -529,7 +529,7 @@ MaxSDK is present. Pick how the Max call sites are migrated:
 Choose [a/b] or press Enter for replace:
 ```
 
-Bake the chosen value into `MAX_MODE` before codegen. Skip the question when the `MAX_MODE` env var was passed (show `(overridden by env)` in the inference list) or when this run is an upgrade-migrate of an existing integration (the existing code's structure wins). Also skip it when the AB Assignment package is present (Signal 6): the mode is `switchable`, shown as `(required by AB Assignment)`, and a `MAX_MODE=replace` input is rejected with that reason. When switchable is chosen, name the mode in the Tier 1 summary line.
+Bake the chosen value into `MAX_MODE` before codegen. Skip the question when the `MAX_MODE` env var was passed (show `(overridden by env)` in the inference list) or when this run is an upgrade-migrate of an existing integration (the existing code's structure wins). Also skip it when the AB Assignment package is present (Signal 6): the mode is `switchable`, shown as `(required by AB Assignment)`, and a `MAX_MODE=replace` input is rejected with that reason. When both skip conditions apply (an upgrade-migrate of a `replace`-mode integration in a project that has the package), the existing structure wins and the upgrade goes ahead: say in this plan that the package has no Baseline route until the original Max path is restored. When switchable is chosen, name the mode in the Tier 1 summary line.
 
 **Tier 3 — the full plan.** Below the summary + inferences, include the complete detail:
 
@@ -1242,7 +1242,7 @@ It sets the route from ABAssignment.Current.RunMetica, gives MeticaSDK and MAX t
 and adds ReportRemoteConfig, ReportAdsInit and TagPlacement on both routes.
 ```
 
-List any `ab_assignment_*` validator rows under it. With a legacy package id, tell the user to move to `com.abassignment.unity` first.
+List any `ab_assignment_*` validator rows under it. With a legacy package id, tell the user to move to `com.abassignment.unity` first. When an earlier `replace`-mode integration already removed the Max path, replace the second line with: the package has no Baseline route until the original Max path is restored (the `pre-metica-integration` tag holds it), and the skill stops until then.
 
 #### Cohort-gating recipe (MaxSDK present + remote-config provider detected)
 

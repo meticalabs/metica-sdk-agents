@@ -62,6 +62,8 @@ private static void InitializeAbAssignment()
 }
 ```
 
+The two constructors take their arguments in opposite order: `ABAssignmentOptions(appId, apiKey)` and `MeticaInitConfig(apiKey, appId, userId)`.
+
 Remote Config (automatic mode), added to the game's existing fetch; report before the game's other handlers:
 
 ```csharp

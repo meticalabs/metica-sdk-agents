@@ -1,6 +1,6 @@
 # metica-sdk-agents
 
-Claude Code and Codex agents plus a skill that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
+Claude Code and Codex agents plus two skills that integrate [MeticaSDK](https://github.com/meticalabs/metica-unity-package) into Unity projects in one pass — including projects that already use AppLovin MAX — and verify integrations at runtime by analysing device logs (Android logcat / iOS idevicesyslog).
 
 ## Install for Claude Code
 
@@ -68,7 +68,6 @@ Use this when you have a build on a device and want to QA the runtime ad behavio
 | Form | Example |
 |---|---|
 | Slash (explicit) | `/metica-sdk-agents:ad-log-monitor` |
-| `/metica-sdk-agents:ab-assignment`          | Skill | Wires the AB Assignment package (`com.abassignment.unity`) into a project that has both a MeticaSDK route and its own MAX route, or checks an existing wiring. |
 | Natural language (auto-loads the skill from its description) | "start ad-log monitoring", "capture logcat for ads", "analyse this logcat at `./trial-user-android-….log`", "compare trial vs holdout" |
 
 (A skill is **not** invoked with the `@`-mention syntax used for agents — use the `/` slash form or just a trigger phrase.)
@@ -146,6 +145,7 @@ Ask it to "check" and it only reads the code and reports. Publishing the `metica
 | `@metica-sdk-agents:unity-integrator`       | Agent | Orchestrator. Discovers whether MaxSDK is present, presents a plan, snapshots git, generates code, invokes the validator.           |
 | `@metica-sdk-agents:unity-validator`        | Agent | Independent verification of any integration. Reads the project's code and reasons about every rule (structural + behavioral); behavioral verdicts carry line-cited evidence. Plus a Unity batch compile. |
 | `/metica-sdk-agents:ad-log-monitor`         | Skill | Runtime QA on a connected device. Captures Android logcat / iOS idevicesyslog while QA plays, extracts ad unit IDs / network / revenue / lifecycle / Metica→MAX floor handoff, and compares holdout vs trial. |
+| `/metica-sdk-agents:ab-assignment`          | Skill | Wires the AB Assignment package (`com.abassignment.unity`) into a project that has both a MeticaSDK route and its own MAX route, or checks an existing wiring. |
 
 Most users only ever invoke the integrator. The compat-checker and validator are called by the integrator automatically (and are available standalone if you want to spot-check an existing integration). The `ad-log-monitor` skill is a separate runtime-QA workflow — invoke it directly when you have a build on a device.
 
