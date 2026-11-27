@@ -1,6 +1,6 @@
 ---
 name: unity-integrator
-description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → rewrite the game's direct Max call sites to MeticaSDK, leaving any dedicated Max-wrapper file untouched — replacing them outright by default, or, when the user picks MAX_MODE=switchable at plan time, keeping each original Max call behind a generated MeticaAdService.UseMetica switch) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any cohort/rollout router or rollout-binding code. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
+description: Integrate MeticaSDK into a Unity project via discover → adapt → validate → autofix. Discovers whether MaxSDK is present (when absent → standalone install; when present → rewrite the game's direct Max call sites to MeticaSDK, leaving any dedicated Max-wrapper file untouched — replacing them outright by default, or, when the user picks MAX_MODE=switchable at plan time, keeping each original Max call behind a generated MeticaAdService.UseMetica switch) along with the project's wrapper, ad formats, placement strings, and remote-config provider, then conforms the generated code to the host. When a remote-config provider is detected, the final report includes a recipe for cohort-gating behind that provider — the integrator does not generate any cohort/rollout router or rollout-binding code. When the AB Assignment package (com.abassignment.unity) is installed, it keeps the original Max path (MAX_MODE=switchable) and leaves the package wiring to the ab-assignment skill. Always runs compat-checker first; after codegen it validates and, on failure, runs an autofix loop in place (rollback is only a last-resort hint, never auto-executed). Uses Claude Code plan mode before any file change. Detects an existing MeticaSDK install via the compat-checker's `metica_sdk` row: when missing it's a fresh install (the user imports the `.unitypackage` after the BLOCK message, then re-runs); when present but below target it's an upgrade — after the git snapshot the integrator clean-swaps the package to the target version and migrates the existing integration code for the version deltas (per references/metica-sdk-migration.md), then validates.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task
 model: opus
 ---
@@ -20,7 +20,7 @@ Optional (all auto-detected or placeholdered when omitted):
 - `APP_ID` — Metica App ID. If absent, use placeholder `YOUR_METICA_APP_ID`.
 - `MAX_SDK_KEY` — AppLovin MAX SDK key (only used when MaxSDK is present, where MeticaSDK mediates through AppLovin MAX). If absent, use placeholder `YOUR_MAX_SDK_KEY` and remind the user at the end.
 - `FORMATS` — comma-separated ad formats used by the project (`banner`, `interstitial`, `rewarded`, `mrec`). Default: `interstitial`. Controls which per-format files are generated; when MaxSDK is present, default to the formats detected in the game's Max call sites.
-- `MAX_MODE` — `replace` | `switchable`. Only used when MaxSDK is present. `replace` (default) rewrites the game's direct Max call sites to `MeticaAdService` outright; `switchable` applies the same rewrites but keeps each original call as the `else` branch behind `MeticaAdService.UseMetica` (default `true`), so developers flip between the Metica and Max paths without a revert. If omitted, confirmed in the Step 3 plan preview; when passed, the Step 3 question is skipped and the inference list shows `(overridden by env)`.
+- `MAX_MODE` — `replace` | `switchable`. Only used when MaxSDK is present. `replace` (default) rewrites the game's direct Max call sites to `MeticaAdService` outright; `switchable` applies the same rewrites but keeps each original call as the `else` branch behind `MeticaAdService.UseMetica` (default `true`), so developers flip between the Metica and Max paths without a revert. If omitted, confirmed in the Step 3 plan preview; when passed, the Step 3 question is skipped and the inference list shows `(overridden by env)`. Always `switchable` when the AB Assignment package is present (Step 2.5 Signal 6), because the Baseline group runs the original Max path.
 - `USER_ID_EXPR` — C# expression for the userId arg of `MeticaInitConfig(...)`. Default: `null` — valid (MeticaSDK then auto-generates a stable per-device userId, which the validator PASSes), but the integrator still recommends wiring the host app's real identity source for correct cross-session attribution. Common substitutions: `SystemInfo.deviceUniqueIdentifier`, `PlayerProfile.PlayerId`, etc.
 - `VERSION` — target MeticaSDK version. Defaults to the latest published release, resolved live (see "Setup — resolve the target SDK version").
 - `REMOTE_CONFIG_PROVIDER` — `firebase` | `appmetrica` | `unity-remote-config` | `none`. If omitted, auto-detected in Step 2.5. **Report-only** — when a real provider is detected, Step 7's final report includes a cohort-gating recipe. The integrator does not generate any rollout binding or router code; the user wires their own gate.
@@ -326,7 +326,7 @@ Assemble findings into a Markdown block with the anchors above. This block is **
 
 The rest of discovery: which remote-config provider already exists (drives Step 7's cohort-gating recipe — does NOT change generated artifacts), and which namespace the generated files should live in. These run **whether or not MaxSDK is present** and feed the **same** structured discovery block (under `Remote-config provider` and the codegen-plan's `Namespace` line). All detection is done via Bash + Grep + Read — no script.
 
-Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER` + `CMP_PROVIDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing.
+Skip this step entirely if every overrideable input is already set via env var (`REMOTE_CONFIG_PROVIDER` + `NAMESPACE` + `ADAPTER_FOLDER` + `CMP_PROVIDER`, all non-null). Otherwise, run the detection below for whichever inputs are missing. Signal 6 (the AB Assignment package) always runs: no env var supplies its finding.
 
 #### Signal 1 — `remote_config_provider`
 
@@ -406,6 +406,15 @@ Runs whether or not MaxSDK is present. Detect whether the host uses a **consent 
 
 If more than one is present (e.g. both UMP and `MaxCmpService`), report the one that actually gates privacy/init; list the others in the detection report. Record under `CMP provider` in the structured block. This feeds the Step 5 `__START_HOOK__` substitution (empty for all shapes when a CMP is present) and the Step 7 consent-gated-init walkthrough.
 
+#### Signal 6 - `ab_assignment` (the AB Assignment package)
+
+Check whether the AB Assignment package is installed, using "Detecting the package" in `references/ab-assignment.md`, and record `present` (with the version pinned in `Packages/manifest.json`), `legacy` or `absent`.
+
+The package splits players between MeticaSDK and the game's own MAX code, so the Baseline group needs the original Max path.
+When the package is present and `HAS_MAX=true`, `MAX_MODE` is `switchable`: a rewrite that removes the Max calls breaks the test.
+
+The integrator wires nothing for the package. The `ab-assignment` skill owns that work (the route decision, the shared user id, `ReportRemoteConfig`, `ReportAdsInit`, `TagPlacement`), and Step 7 tells the user to run it next.
+
 #### Secondary checks (inline at generation time)
 
 These do not need a detection-report row; they are applied during codegen:
@@ -424,11 +433,15 @@ Detected remote-config provider: firebase (3 of 71 .cs files import Firebase.Rem
 Detected dominant namespace: MyGame.Services (38 of 71 .cs files)
 Detected CMP: google-ump (UserMessagingPlatform — ConsentForm.LoadAndShowConsentFormIfRequired)
   → init will be consent-gated: no auto-init hook; wire Initialize(bool, bool) from the CMP callback (Step 7)
+Detected AB Assignment: com.abassignment.unity 2.2.1
+  -> the original Max path is kept (max mode switchable); run the ab-assignment skill after this run
 Resolved adapter folder: Assets/Scripts/Ads/Metica   (next to wrapper AdManager.cs)
 Resolved namespace wrap: MyGame.Services.Metica
 ```
 
 When MaxSDK is absent, omit the provider line. The CMP line always shows (Signal 5 runs whether or not MaxSDK is present); when no CMP is detected show `Detected CMP: none (shape default auto-init preserved)`. When no namespace dominates and the project has no namespaces at all, show `Resolved namespace wrap: (none — emit without wrapper)`. When a wrapper was detected, the adapter-folder line shows the wrapper-adjacent resolution `(next to wrapper <file>)`; otherwise it shows the default pick (`Assets/_Project/Scripts/Metica`, `Assets/Game/Scripts/Metica`, or `Assets/Scripts/Metica`).
+
+Omit the AB Assignment lines when the package is absent.
 
 Any of these values may be overridden by env vars (`REMOTE_CONFIG_PROVIDER`, `NAMESPACE`, `ADAPTER_FOLDER`, `CMP_PROVIDER`). When an env var is set, show `(overridden by env)` next to the value and skip the corresponding detection. The user may also override during plan-mode review — bake the final values into Step 3's plan content before approval.
 
@@ -456,6 +469,7 @@ Confirm these inferences:
   - shape          = static_class                      (suggested from host's ad code; see Step 2.5 Signal 4 — ASK NOW)
   - max mode       = <ASK NOW when MaxSDK is present — see below>
   - CMP            = google-ump → consent-gated init (no auto-init hook; you wire Initialize(bool,bool) from the CMP callback — Step 7)
+  - ab assignment = com.abassignment.unity 2.2.1 -> Max path kept (max mode switchable); wiring is the ab-assignment skill's job
 ```
 
 If discovery found **more than one** wrapper candidate, list them here and require the user to pick one — never default silently.
@@ -515,7 +529,7 @@ MaxSDK is present. Pick how the Max call sites are migrated:
 Choose [a/b] or press Enter for replace:
 ```
 
-Bake the chosen value into `MAX_MODE` before codegen. Skip the question when the `MAX_MODE` env var was passed (show `(overridden by env)` in the inference list) or when this run is an upgrade-migrate of an existing integration (the existing code's structure wins). When switchable is chosen, name the mode in the Tier 1 summary line.
+Bake the chosen value into `MAX_MODE` before codegen. Skip the question when the `MAX_MODE` env var was passed (show `(overridden by env)` in the inference list) or when this run is an upgrade-migrate of an existing integration (the existing code's structure wins). Also skip it when the AB Assignment package is present (Signal 6): the mode is `switchable`, shown as `(required by AB Assignment)`, and a `MAX_MODE=replace` input is rejected with that reason. When both skip conditions apply (an upgrade-migrate of a `replace`-mode integration in a project that has the package), the existing structure wins and the upgrade goes ahead: say in this plan that the package has no Baseline route until the original Max path is restored. When switchable is chosen, name the mode in the Tier 1 summary line.
 
 **Tier 3 — the full plan.** Below the summary + inferences, include the complete detail:
 
@@ -958,6 +972,7 @@ Run the loop on `status: FAIL`, **max 3 iterations**:
 | `retry_ownership` | surface | Auto-retry disabled with no client retry path — surface the `disable_auto_retries` site and the missing retry, and stop. |
 | `sdk_calls_on_main_thread` | surface | An ad call issued off the Unity main thread (e.g. from a CMP/consent callback) needs marshaling to the main thread — a control-flow fix, not a line edit. Surface the off-main call site and stop. The integrator's own codegen drives all ad calls from `MonoBehaviour` lifecycle / main-thread paths, so a FAIL is hand-rolled. |
 | `init_reentry_guarded` | autofix | The init/subscription path can re-run at runtime with no re-entry guard, double-subscribing every handler. Add the template's idempotency guard to the init method: declare a `private bool _initialized;` field and insert `if (_initialized) return; _initialized = true;` at the top of the method containing the `MeticaAdsCallbacks.* +=` subscriptions (anchor re-check as usual). |
+| `ab_assignment_*` | surface | An AB Assignment wiring rule (`references/ab-assignment.md`). The `ab-assignment` skill owns that wiring, so make no edit: list the rows in Step 7 under "AB Assignment" and tell the user to run the skill. These rows alone do not trigger the rollback hint, because the MeticaSDK integration this run produced is unaffected. |
 
 `*_show_ready_guard`, `*_show_after_init`, `*_load_after_init`, `load_dedup_flag_wedge`, `format_path_symmetry`, `holdout_matches_baseline`, `dead_code_signal`, `metica_deprecated_api`, and `revenue_callback_subscribed` are `ADVISORY`, and `compiles_cleanly` is `WARN` when the compile is skipped (no Unity located / `METICA_SKIP_COMPILE=1`) or could not complete — none of these are `FAIL`, so they take no action and never affect status.
 
@@ -1214,9 +1229,24 @@ When **MaxSDK was present**, the report must also include:
 4. **Cohort-gating recipe** (only when Step 2.5 detected a remote-config provider ≠ `none`) — see below.
 5. **Manual steps remaining** — set the real user identity in `MeticaInitConfig` (validator will keep failing until you do), choose the `SetHasUserConsent`/`SetDoNotSell` values per compliance posture.
 
+#### AB Assignment (when the package is present)
+
+The package is the gate between the two routes, so leave out the cohort-gating recipe below and print this instead:
+
+```
+AB Assignment (com.abassignment.unity <version>) is installed.
+This run kept your original Max path behind MeticaAdService.UseMetica, so both routes are in the build.
+The package is not wired yet. Run the ab-assignment skill next:
+    /metica-sdk-agents:ab-assignment
+It sets the route from ABAssignment.Current.RunMetica, gives MeticaSDK and MAX the same user id,
+and adds ReportRemoteConfig, ReportAdsInit and TagPlacement on both routes.
+```
+
+List any `ab_assignment_*` validator rows under it. With a legacy package id, tell the user to move to `com.abassignment.unity` first. When an earlier `replace`-mode integration already removed the Max path, replace the second line with: the package has no Baseline route until the original Max path is restored (the `pre-metica-integration` tag holds it), and the skill stops until then.
+
 #### Cohort-gating recipe (MaxSDK present + remote-config provider detected)
 
-Mature games with a remote-config provider often want to roll out Metica gradually rather than swap unconditionally. The integrator does **not** generate a router or rollout-binding — the user wires their own gate using the provider they already have. Include this section in the final report when `REMOTE_CONFIG_PROVIDER ≠ none`:
+Mature games with a remote-config provider often want to roll out Metica gradually rather than swap unconditionally. The integrator does **not** generate a router or rollout-binding — the user wires their own gate using the provider they already have. Include this section in the final report when `REMOTE_CONFIG_PROVIDER ≠ none` and the AB Assignment package is absent:
 
 ```
 Cohort-gating recipe (your project has <PROVIDER> remote-config):
@@ -1272,7 +1302,7 @@ Then append `RUN COMPLETE` to the checkpoint log and recommend (one line) adding
 ## Hard rules
 
 - Never modify any file under `Assets/MaxSdk/`. When MaxSDK is present, rewrite only the game's direct `MaxSdk.*` call sites (scene/game logic) — never a dedicated Max-wrapper file (see the wrapper-scoping rule in Step 5).
-- The generated design is the single standalone `MeticaAdService` MonoBehaviour (per-format `@fmt` regions) — the integrator does not generate a cohort/rollout router or rollout-binding code. The user-chosen `MAX_MODE=switchable` gate (`MeticaAdService.UseMetica` + gated call sites) is a supported mode, not a router. If the user wants gradual rollout, point them to the Step 7 cohort-gating recipe (under switchable the recipe drives the switch; otherwise they gate the rewritten call sites behind their own remote-config flag).
+- The generated design is the single standalone `MeticaAdService` MonoBehaviour (per-format `@fmt` regions) — the integrator does not generate a cohort/rollout router or rollout-binding code. The user-chosen `MAX_MODE=switchable` gate (`MeticaAdService.UseMetica` + gated call sites) is a supported mode, not a router. If the user wants gradual rollout, point them to the Step 7 cohort-gating recipe (under switchable the recipe drives the switch; otherwise they gate the rewritten call sites behind their own remote-config flag). When the AB Assignment package is installed, that package is the gate: the integrator keeps the Max path for it and the `ab-assignment` skill connects it to the switch.
 - Privacy calls (`SetHasUserConsent`, `SetDoNotSell`) **must** precede `MeticaSdk.Initialize` and live in the **same file** (the `MeticaAdService` orchestrator).
 - Reuse the existing Max ad unit IDs for MeticaSDK (per migration guide).
 - Sub-agent invocations (compat-checker, validator) **must** be in fresh subagent contexts — never share your reasoning context with them.
@@ -1285,4 +1315,5 @@ Then append `RUN COMPLETE` to the checkpoint log and recommend (one line) adding
 - `../../scripts/templates/standalone/MeticaAdService.cs.tmpl` — the single orchestrator template: one `MeticaAdService` MonoBehaviour with per-format `@fmt` regions (named callback handlers, exp-backoff retry on interstitial/rewarded load failure, focus pause/resume for banner/MRec).
 - [meticalabs/metica-unity@develop `Assets/Scripts/HomeScreen.cs`](https://github.com/meticalabs/metica-unity/blob/develop/Assets/Scripts/HomeScreen.cs) — the **canonical demo and primary API reference**. It compiles against the real SDK, so it wins when it diverges from the docs page (e.g. it qualifies the nested enum `MeticaMediationInfo.MeticaMediationType.MAX` and PascalCases `SmartFloors.IsForcedHoldout`).
 - [docs.metica.com Unity SDK Ad implementation](https://docs.metica.com/api/unity-sdk/unity-sdk-2#a-d-implementation) — **secondary** reference for callback set + lifecycle shape. The docs example has known transcription errors against the SDK (unqualified `MeticaMediationType.MAX`, camelCase `isForcedHoldout`); never transcribe it verbatim — the SDK source and canonical demo take precedence.
+- `../../references/ab-assignment.md` - the AB Assignment package: how to detect it and the rules the `ab-assignment` skill and the validator apply.
 - `../../agents/contracts.md` — sub-agent JSON schemas and extraction regex.
